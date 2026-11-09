@@ -4,7 +4,7 @@
  */
 export const projectModule = {
   id: "project",
-  requires: ["project-storage", "services", "shared"],
+  requires: ["project-storage", "services", "shared", "omnicode-workspace-governance"],
   provides: ["project"],
   publicEntrypoints: ["index.ts", "contract.ts"],
 } as const;
