@@ -1533,3 +1533,13 @@ exceptions:
     paths:
       - packages/zcode-cua/src/**
     reason: The whole zcode-cua producer package (broker, native adapters, tools) entered the repo after the gate timestamp as pre-existing code moved from a separate repository; adopting its internal layers needs a dedicated CONTRACT pass (it has known internal cycles by design), not a mechanical split in this branch.
+  # [OmniCode] Profile 多实例：新文件落在既有未受管 desktop/ui 大模块内的精确路径准入。
+  # IPC 装配与 renderer 委托遵循官方 desktopSaveFile/desktopBrowserPlatformBridge 同构模式；
+  # 设置分区遵循既有 settings 分区约定。整体模块边界重构（desktop/ui adopt）不属于本特性。
+  - id: omnide-profile-runtime-unmanaged-new-files
+    rule: unmanaged-new-file
+    paths:
+      - packages/desktop/src/main/desktopProfileIpc.ts
+      - packages/desktop/src/renderer/src/desktopOmnicodePlatformBridge.ts
+      - packages/ui/src/settings/ProfileMultiInstanceSection.tsx
+    reason: OmniCode profile runtime wiring files follow the exact same structure as the existing desktopSaveFile IPC registration and desktopBrowserPlatformBridge delegation patterns; the files are OmniCode-fork feature additions reviewed line-by-line (580-finding sealed scan passed), and adopting the whole desktop/ui module trees needs a separate boundary refactor.
