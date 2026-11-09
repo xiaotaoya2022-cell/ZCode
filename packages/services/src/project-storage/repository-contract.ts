@@ -38,6 +38,18 @@ export interface ProjectTree {
   tasks: ProjectTask[];
   /** 仅显式请求时返回删除事实；离线缺席不能替代这些引用。 */
   deletedTasks?: Array<ProjectTaskRef & { hostId: string }>;
+  /**
+   * [OmniCode] 跨实例工作区锁状态（灰显数据源，spec: docs/omnicode/profile-runtime.md）。
+   * 仅本地 Host 装配锁服务后返回；缺省 = 未装配/无锁。
+   */
+  omnicodeWorkspaceLocks?: ReadonlyArray<{
+    /** 规范化工作区绝对路径（与锁 hash 同一规范化语义） */
+    workspacePath: string;
+    /** 持有方实例身份（OMNICODE_PROFILE_ID，默认实例为 "default"） */
+    profileId: string;
+    /** 是否被当前实例持有（同实例多窗口不灰显） */
+    ownedBySelf: boolean;
+  }>;
 }
 
 export const LEGACY_SINGLE_ROOT_PROJECT_PREFIX = "legacy-single-root:";
