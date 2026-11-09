@@ -55,6 +55,9 @@ export const RUNTIME_ZCODE_DEBUG =
   typeof process !== "undefined" ? process.env.ZCODE_DEBUG : undefined;
 
 // ── 构建期可选能力（见 docs/desktop/build-time-optional-capabilities.md），未注入时一律关闭 ──
+// [OmniCode] 去遥测总开关（docs/omnicode/de-telemetry.md）：魔改版永不启用上报，
+// 即使构建期注入了端点也不生效（Safe ZCode 同款"无法开启"语义）。
+export const OMNICODE_TELEMETRY_DISABLED = true;
 /** ARMS RUM 上报地址；为空时 SDK 以 enable=false 初始化，不产生上报。 */
 export const ZCODE_ARMS_RUM_ENDPOINT: string =
   typeof __ZCODE_ARMS_RUM_ENDPOINT__ !== "undefined" ? __ZCODE_ARMS_RUM_ENDPOINT__ : "";

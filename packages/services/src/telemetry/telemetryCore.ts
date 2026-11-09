@@ -3,6 +3,7 @@ import {
   createUuid,
   ZCODE_VERSION,
   ZCODE_ENV,
+  OMNICODE_TELEMETRY_DISABLED,
   ZCODE_TELEMETRY_REPORT_ENDPOINT,
   buildZCodeSourceHeadersFromContext,
   rewriteZCodeEndpointUrl,
@@ -18,7 +19,10 @@ import { dirname, join } from "node:path";
 import { createServiceLogger } from "#src/logger/serviceLogger.js";
 import { getAppConfigDir } from "../paths.js";
 
-const REPORT_ENDPOINT = ZCODE_TELEMETRY_REPORT_ENDPOINT;
+// [OmniCode] 去遥测：数仓（事件上报）端点强制置空——sendReport 在 :419 的空端点闸门
+// 直接短路，整条 reportEvent 链静默（含 401 鉴权/重试都不会发生）。OMNICODE_TELEMETRY_DISABLED
+// 恒为 true（docs/omnicode/de-telemetry.md），保留表达式以便未来以 env 分级放行。
+const REPORT_ENDPOINT = OMNICODE_TELEMETRY_DISABLED ? "" : ZCODE_TELEMETRY_REPORT_ENDPOINT;
 
 function sessionCreateEventId(userId: string, sessionId: string): string {
   const bytes = createHash("sha256")

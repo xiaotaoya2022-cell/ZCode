@@ -7,6 +7,7 @@ import {
   ZCODE_ARMS_RUM_ENDPOINT,
   ZCODE_TELEMETRY_REPORT_ENDPOINT,
   ZCODE_VERSION,
+  OMNICODE_TELEMETRY_DISABLED,
   mapZCodeEnvToArmsRumEnv,
 } from "@zcode/shared";
 import { ARMS_BROWSER_COLLECTORS, parseArmsViewName } from "../shared/armsRumShared.js";
@@ -238,12 +239,14 @@ armsRum.client.useReporter = (reporter) => {
 };
 export const armsInitPromise = armsRum
   .init({
-    enable: ZCODE_ARMS_RUM_ENDPOINT !== "",
+    // [OmniCode] 去遥测：无论构建期是否注入端点，魔改版永不启用 ARMS RUM，
+    // 也不向任何 renderer 注入 Browser SDK（docs/omnicode/de-telemetry.md）。
+    enable: ZCODE_ARMS_RUM_ENDPOINT !== "" && !OMNICODE_TELEMETRY_DISABLED,
     version: ZCODE_VERSION,
     endpoint: ZCODE_ARMS_RUM_ENDPOINT,
     env: armsRumEnv,
     // Browser SDK 由 SDK 在 dom-ready 经 executeJavaScript 注入；勿再在 preload/renderer 手动 init，避免重复采集
-    autoInject: true,
+    autoInject: !OMNICODE_TELEMETRY_DISABLED,
     browserCollectors: { ...ARMS_BROWSER_COLLECTORS },
     app: {
       name: runtimeApplicationName,
