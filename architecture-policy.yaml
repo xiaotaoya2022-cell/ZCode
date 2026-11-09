@@ -1827,7 +1827,8 @@ modules:
     roots:
       - packages/desktop/src/main/omnicode
     managed: true
-    requires: []
+    requires:
+      - shared
     publicEntrypoints:
       - packages/desktop/src/main/omnicode/contract.ts
       - packages/desktop/src/main/omnicode/profileBootstrap.ts
