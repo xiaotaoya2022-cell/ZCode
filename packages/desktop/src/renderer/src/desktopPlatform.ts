@@ -7,6 +7,8 @@ import {
 } from "@zcode/shared";
 
 import { desktopBrowserPlatformBridge } from "./desktopBrowserPlatformBridge.js";
+// [OmniCode] Profile 多实例委托（spec: docs/omnicode/profile-runtime.md）
+import { desktopOmnicodePlatformBridge } from "./desktopOmnicodePlatformBridge.js";
 import { createDesktopPluginSandboxPlatform } from "./plugin-sandbox/desktopPluginSandboxPlatform.js";
 
 export function createDesktopPlatform(options: {
@@ -146,6 +148,8 @@ export function createDesktopPlatform(options: {
     browserViewScreenshotSurfaceReady: (payload) =>
       window.zcode.browserViewScreenshotSurfaceReady?.(payload),
     ...desktopBrowserPlatformBridge,
+    // [OmniCode] Profile 多实例（desktop-only 可选能力，spec: docs/omnicode/profile-runtime.md）
+    ...desktopOmnicodePlatformBridge,
     onNewTask: (handler) => window.zcode.onNewTask(handler),
     onOpenWorkspace: (handler) => {
       // 开发态或升级后的旧窗口可能仍运行未暴露 onOpenWorkspace 的 preload，

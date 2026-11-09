@@ -93,6 +93,8 @@ import { PersonalizationSection } from "@/settings/PersonalizationSection.js";
 import { BrowserSettingsSection } from "@/settings/BrowserSettingsSection.js";
 import { ComputerUseSection } from "@/settings/ComputerUseSection.js";
 import { ShortcutSettingsSection } from "@/settings/ShortcutSettingsSection.js";
+// [OmniCode] Profile 多实例管理分区（spec: docs/omnicode/profile-runtime.md）
+import { ProfileMultiInstanceSection } from "@/settings/ProfileMultiInstanceSection.js";
 import { MigrationSection } from "@/settings/MigrationSection.js";
 import { SETTINGS_FRAME_CONTENT_CLASSNAME } from "@/settings/SettingsPageParts.js";
 import {
@@ -2249,6 +2251,9 @@ export function SettingsPage({
                               remoteTarget={activeWorkspaceTab?.remoteTarget}
                               localWorkspacePath={activeWorkspaceTab?.localWorkspacePath}
                             />
+                          ) : activeSection === "omnicodeProfiles" ? (
+                            // [OmniCode] Profile 多实例管理（desktop-only）
+                            <ProfileMultiInstanceSection />
                           ) : null}
                         </div>
                       </div>

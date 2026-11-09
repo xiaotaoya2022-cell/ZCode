@@ -2467,6 +2467,9 @@ const enUS: Record<string, string> = {
   "remote.error.connectionClosed": "The remote connection was closed",
   "workspaceSidebar.unavailableLocalDirectory":
     "The workspace directory does not exist or cannot be accessed. You can only view history for now. Restore the directory and restart ZCode to continue.",
+  // [OmniCode] Workspace locked by another instance (mutual exclusion, spec: docs/omnicode/profile-runtime.md)
+  "workspaceSidebar.omnicodeLockedBy":
+    "This workspace is currently open in another instance ({profileId}). Close it there first.",
   "workspaceSidebar.toggleSidebar": "Toggle sidebar",
   "workspaceSidebar.resizeSidebar": "Resize sidebar",
   "workspaceSidebar.showFileTree": "Show files",
@@ -3621,6 +3624,32 @@ const enUS: Record<string, string> = {
   "settings.migration.reason.session_not_found_or_workspace_mismatch":
     "The source session was not found, or it no longer matches the current workspace filter.",
   "settings.usageTitle": "Usage stats",
+  // [OmniCode] Profile multi-instance
+  "settings.omnicodeProfiles.title": "Multi-instance",
+  "settings.omnicodeProfiles.description":
+    "Run isolated ZCode instances per account: credentials, sessions and browser storage stay separate, and logins survive restarts. Launched instances run alongside this window.",
+  "settings.omnicodeProfiles.namePlaceholder": "Instance name (e.g. Work)",
+  "settings.omnicodeProfiles.notesPlaceholder": "Notes (optional)",
+  "settings.omnicodeProfiles.create": "Create instance",
+  "settings.omnicodeProfiles.loading": "Loading instances…",
+  "settings.omnicodeProfiles.empty":
+    "No instances yet. Create the first one to run it alongside this window.",
+  "settings.omnicodeProfiles.launch": "Launch",
+  "settings.omnicodeProfiles.stop": "Stop",
+  "settings.omnicodeProfiles.clone": "Clone (without login state)",
+  "settings.omnicodeProfiles.delete": "Delete",
+  "settings.omnicodeProfiles.running": "Running · pid {pid}",
+  "settings.omnicodeProfiles.stopped": "Not running",
+  "settings.omnicodeProfiles.nameRequired": "Enter an instance name first",
+  "settings.omnicodeProfiles.deleteConfirmTitle": "Delete this instance?",
+  "settings.omnicodeProfiles.deleteConfirmDescription":
+    "All data of \"{name}\" (login state, sessions, browser data) will be permanently deleted. This cannot be undone.",
+  "settings.omnicodeProfiles.toastCreated": "Instance created",
+  "settings.omnicodeProfiles.toastRemoved": "Instance deleted",
+  "settings.omnicodeProfiles.toastCloned": "Instance cloned (login state not copied)",
+  "settings.omnicodeProfiles.toastLaunched": "Instance launched",
+  "settings.omnicodeProfiles.toastStopped": "Instance stopped",
+  "settings.omnicodeProfiles.actionFailed": "Action failed",
   "settings.usageDescription":
     "Review rough activity and model usage aggregated from local sessions.",
   "resourceManager.storage.summaryTotal": "Total used by ZCode",

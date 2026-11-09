@@ -139,6 +139,17 @@ declare global {
       ): Promise<import("@zcode/shared").SaveFileResult>;
       /** 将当前页面的 print 媒体版面导出为 PDF（Chromium 打印引擎，矢量文本） */
       printPageToPdf?(): Promise<import("@zcode/shared").PrintPageToPdfResult>;
+      // [OmniCode] Profile 多实例（spec: docs/omnicode/profile-runtime.md）
+      listOmnicodeProfiles?(): Promise<{ profiles: import("@zcode/shared").OmnicodeProfileSummaryInfo[] }>;
+      createOmnicodeProfile?(payload: import("@zcode/shared").OmnicodeProfileCreateInput): Promise<{
+        profile: import("@zcode/shared").OmnicodeProfileSummaryInfo;
+      }>;
+      removeOmnicodeProfile?(payload: import("@zcode/shared").OmnicodeProfileIdInput): Promise<{ ok: boolean }>;
+      cloneOmnicodeProfile?(payload: import("@zcode/shared").OmnicodeProfileCloneInput): Promise<{
+        profile: import("@zcode/shared").OmnicodeProfileSummaryInfo;
+      }>;
+      launchOmnicodeProfile?(payload: import("@zcode/shared").OmnicodeProfileIdInput): Promise<{ pid: number }>;
+      stopOmnicodeProfile?(payload: import("@zcode/shared").OmnicodeProfileIdInput): Promise<{ ok: boolean }>;
       /** 从系统拖拽/文件输入得到的 Web File 解析真实本地路径 */
       getPathForFile?(file: File): string | null;
       /** dwf 产物「作为文件打开」：把某一版的字节落成本机副本，返回其路径 */

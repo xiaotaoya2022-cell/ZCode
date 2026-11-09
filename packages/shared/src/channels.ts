@@ -68,6 +68,7 @@ import type {
   SaveFileRequest,
   SaveFileResult,
   PrintPageToPdfResult,
+  OmnicodeProfileSummaryInfo,
   OpenInEditorOptions,
   PostUpdateReleaseNotesPayload,
   RemoteSessionClosedEvent,
@@ -230,6 +231,13 @@ export const PlatformChannels = {
   MaterializeWorkflowArtifactFile: "zcode:materialize-workflow-artifact-file",
   /** Renderer → Main：通过原生另存为对话框保存文件 */
   SaveFile: "zcode:save-file",
+  // [OmniCode] Profile 多实例（spec: docs/omnicode/profile-runtime.md）
+  OmnicodeProfileList: "zcode:omnicode-profile-list",
+  OmnicodeProfileCreate: "zcode:omnicode-profile-create",
+  OmnicodeProfileRemove: "zcode:omnicode-profile-remove",
+  OmnicodeProfileClone: "zcode:omnicode-profile-clone",
+  OmnicodeProfileLaunch: "zcode:omnicode-profile-launch",
+  OmnicodeProfileStop: "zcode:omnicode-profile-stop",
   /** Renderer → Main：用 Chromium 打印引擎把当前页面 print 媒体版面导出为 PDF */
   PrintToPdf: "zcode:print-to-pdf",
   /** Main → Renderer：转发远程连接过程日志 */
@@ -823,6 +831,31 @@ export interface PlatformChannelMap {
   [PlatformChannels.SaveFile]: {
     request: SaveFileRequest;
     response: SaveFileResult;
+  };
+  // [OmniCode] Profile 多实例请求/响应映射
+  [PlatformChannels.OmnicodeProfileList]: {
+    request: void;
+    response: { profiles: OmnicodeProfileSummaryInfo[] };
+  };
+  [PlatformChannels.OmnicodeProfileCreate]: {
+    request: { name: string; notes?: string };
+    response: { profile: OmnicodeProfileSummaryInfo };
+  };
+  [PlatformChannels.OmnicodeProfileRemove]: {
+    request: { id: string };
+    response: { ok: boolean };
+  };
+  [PlatformChannels.OmnicodeProfileClone]: {
+    request: { id: string; name: string };
+    response: { profile: OmnicodeProfileSummaryInfo };
+  };
+  [PlatformChannels.OmnicodeProfileLaunch]: {
+    request: { id: string };
+    response: { pid: number };
+  };
+  [PlatformChannels.OmnicodeProfileStop]: {
+    request: { id: string };
+    response: { ok: boolean };
   };
   [PlatformChannels.PrintToPdf]: {
     request: void;

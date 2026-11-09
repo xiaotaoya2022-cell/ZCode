@@ -349,6 +349,32 @@ export interface PrintPageToPdfResult {
   error?: string;
 }
 
+// [OmniCode] Profile 多实例（spec: docs/omnicode/profile-runtime.md）
+export interface OmnicodeProfileSummaryInfo {
+  id: string;
+  name: string;
+  createdAt: string;
+  notes?: string;
+  /** 是否正在运行（控制台内存态，进程重启即重建） */
+  running: boolean;
+  /** 运行中实例的 pid */
+  pid?: number;
+}
+
+export interface OmnicodeProfileCreateInput {
+  name: string;
+  notes?: string;
+}
+
+export interface OmnicodeProfileCloneInput {
+  id: string;
+  name: string;
+}
+
+export interface OmnicodeProfileIdInput {
+  id: string;
+}
+
 export function createOpenInEditorRemoteTarget(
   target: RemoteTarget,
 ): OpenInEditorRemoteTarget | undefined {
@@ -836,6 +862,14 @@ export interface IPlatformService {
 
   /** Desktop-only：请求在线 Source 的无 workspace 配置 attachment。 */
   requestSourceSettingsAttachment?(sourceServerId: string): Promise<{ attachmentId: string }>;
+
+  // [OmniCode] Profile 多实例（spec: docs/omnicode/profile-runtime.md）。仅 Desktop 实现，缺席即无入口。
+  listOmnicodeProfiles?(): Promise<{ profiles: OmnicodeProfileSummaryInfo[] }>;
+  createOmnicodeProfile?(input: OmnicodeProfileCreateInput): Promise<{ profile: OmnicodeProfileSummaryInfo }>;
+  removeOmnicodeProfile?(input: OmnicodeProfileIdInput): Promise<{ ok: boolean }>;
+  cloneOmnicodeProfile?(input: OmnicodeProfileCloneInput): Promise<{ profile: OmnicodeProfileSummaryInfo }>;
+  launchOmnicodeProfile?(input: OmnicodeProfileIdInput): Promise<{ pid: number }>;
+  stopOmnicodeProfile?(input: OmnicodeProfileIdInput): Promise<{ ok: boolean }>;
 
   /** 取消当前窗口尚未建立完成的远程连接（可选：Web 平台可忽略） */
   cancelPendingRemoteConnection?(requestId?: string): Promise<void>;
