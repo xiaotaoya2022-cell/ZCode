@@ -14,7 +14,7 @@ import type {
 } from "#src/project/contract.js";
 import { createProjectDataCommands } from "#src/project/data/project-data.js";
 // [OmniCode] 工作区锁状态装饰（readTree 灰显数据源，spec: docs/omnicode/profile-runtime.md）
-import { listWorkspaceLockDecorations } from "#src/omnicode/workspaceLocks.js";
+import { listWorkspaceLockDecorations } from "#src/omnicode/contract.js";
 export {
   createProjectDataPort,
   type ProjectSessionDataAgent,
