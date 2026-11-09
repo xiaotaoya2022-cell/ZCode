@@ -25,6 +25,7 @@ import {
   FileSearch,
   RefreshCw,
   User,
+  Layers,
 } from "lucide-react";
 import { isSettingsSectionEnabled, type SettingsSectionId } from "@/lib/settingsNavigation.js";
 import type { Theme } from "@/useTheme.js";
@@ -211,6 +212,11 @@ const BASE_SETTINGS_SECTIONS: SettingsSectionDefinition[] = [
     id: "shares",
     icon: Share2,
     titleId: "conversationShare.manage.nav",
+  // [OmniCode] Profile 多实例（desktop-only，spec: docs/omnicode/profile-runtime.md）
+  {
+    id: "omnicodeProfiles",
+    icon: Layers,
+    titleId: "settings.omnicodeProfiles.title",
     groupId: "dataAndStats",
   },
   // 暂时隐藏设置页里的 Migration 入口，只保留页面实现，后续可以直接恢复这一项。
@@ -241,6 +247,8 @@ export function createSettingsPageConfig({
   const showComputerUse = isDesktop || isMacDesktop || isWindowsDesktop;
   const settingsSections = BASE_SETTINGS_SECTIONS.filter((section) => {
     if (section.id === "computerUse" && !showComputerUse) return false;
+    // [OmniCode] Profile 多实例仅桌面可用（依赖 Electron spawn 能力）
+    if (section.id === "omnicodeProfiles" && !isDesktop) return false;
     return isSettingsSectionEnabled(section.id);
   });
   const settingsSectionGroups = BASE_SETTINGS_SECTION_GROUPS.map((group) => ({
