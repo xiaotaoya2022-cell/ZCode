@@ -7,8 +7,11 @@ import type {
   OAuthUserProfile,
 } from "@zcode/shared";
 import { BIGMODEL_PROVIDER_ID, isCredentialDecryptError, ZAI_PROVIDER_ID } from "@zcode/shared";
+import { copyFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { ICredentialService } from "../../credential/credential.js";
 import { createServiceLogger } from "../../logger/serviceLogger.js";
+import { getAppConfigDir } from "../../paths.js";
 
 const ACTIVE_PROVIDER_KEY = "oauth:active_provider";
 const LOGIN_ATTRIBUTION_KEY = "oauth:login_attribution";
@@ -448,10 +451,33 @@ export class OAuthCredentialRepo {
     await this.saveActiveProvider(null);
   }
 
+  /**
+   * [OmniCode] 解密失败降级（spec: docs/omnicode/profile-runtime.md §产品规则 6）：
+   * 清理前先把密文原样备份，保留"换正确密钥/换环境后找回登录态"的机会。
+   * 历史行为是直接清空全部 OAuth key——多开/环境变量不一致导致解密失败时等于自毁登录态。
+   * 返回备份路径（文件不存在或备份失败返回 undefined，不阻断清理主流程）。
+   */
+  private async preserveCorruptCredentialsBackup(): Promise<string | undefined> {
+    try {
+      const source = join(getAppConfigDir(), "credentials.json");
+      const backup = `${source}.omnicode-preserved-${new Date()
+        .toISOString()
+        .replace(/[:.]/g, "-")}`;
+      await copyFile(source, backup);
+      log.warn(undefined, "corrupt credentials.json preserved before cleanup", { backup });
+      return backup;
+    } catch (error) {
+      log.warn(undefined, "preserve corrupt credentials backup failed", error);
+      return undefined;
+    }
+  }
+
   private async clearCorruptOAuthSession(): Promise<void> {
     // AES-GCM 解密失败说明当前运行时已经无法信任本地 OAuth 登录态。
     // 等价于强制登出已注册 OAuth provider：先清 provider 命名空间与共享 zcode JWT，
     // 再通知 service 层清理 Start/Coding Plan 这类派生模型凭据，同时避免误删 SSH 等其他独立凭据。
+    // [OmniCode] 清理前备份密文（解密失败降级：不静默自毁登录态）
+    await this.preserveCorruptCredentialsBackup();
     for (const provider of this.knownProviderIds) {
       await this.clearProvider(provider);
     }
