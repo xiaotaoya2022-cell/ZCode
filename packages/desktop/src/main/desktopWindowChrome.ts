@@ -633,8 +633,9 @@ export function createBrowserWindow(options: {
       // 永久 backgroundThrottling=false 会唤醒整窗 renderer、所有 webview guest
       // 和 GPU。窗口保持默认节流；截图期只临时唤醒 owner renderer 与当前目标 guest。
       zoomFactor: initialDesktopZoomFactor,
-      // [OmniCode] V8 字节码缓存：启动与脚本编译提速（官方从未配置该开关，审计 M3 优化点 5）
-      v8CacheOptions: "blinkCache",
+      // [OmniCode] V8 代码缓存：bypassHeatCheckAndEagerCompile 是 Electron 该开关的最强缓存档
+      // （官方从未配置；审计 M3 优化点 5）
+      v8CacheOptions: "bypassHeatCheckAndEagerCompile",
       // 将 deviceMid 透传给 preload，供 renderer 在 React 渲染前同步读取
       additionalArguments: [`--device-id=${options.deviceMid ?? ""}`],
     },
