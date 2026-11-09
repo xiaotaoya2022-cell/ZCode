@@ -40,8 +40,19 @@ function resolveProfileIdFromHandoff(): string | undefined {
     }
     const parsed = JSON.parse(readFileSync(handoffPath, "utf8")) as {
       profileId?: string;
+      bridgePort?: number;
+      bridgeToken?: string;
     };
     const profileId = parsed.profileId?.trim();
+    // [OmniCode] 桥接回连信息（M2）：端口/token 同样只经 handoff 文件传递
+    if (
+      typeof parsed.bridgePort === "number" &&
+      parsed.bridgePort > 0 &&
+      /^[0-9a-f]{32}$/.test(parsed.bridgeToken ?? "")
+    ) {
+      process.env.OMNICODE_BRIDGE_PORT = String(parsed.bridgePort);
+      process.env.OMNICODE_BRIDGE_TOKEN = parsed.bridgeToken;
+    }
     rmSync(handoffPath, { force: true });
     return profileId || undefined;
   } catch (error) {

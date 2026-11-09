@@ -2,6 +2,7 @@
 // 与 desktopBrowserPlatformBridge 同一模式：desktopPlatform.ts 展开合入，
 // IPlatformService 上这些方法为可选，缺席（Web/旧 preload）即无入口。
 import type {
+  OmnicodeInstanceEventPayload,
   OmnicodeProfileCloneInput,
   OmnicodeProfileCreateInput,
   OmnicodeProfileIdInput,
@@ -32,4 +33,10 @@ export const desktopOmnicodePlatformBridge = {
     requireBridge(window.zcode.launchOmnicodeProfile?.(payload)),
   stopOmnicodeProfile: (payload: OmnicodeProfileIdInput): Promise<{ ok: boolean }> =>
     requireBridge(window.zcode.stopOmnicodeProfile?.(payload)),
+  focusOmnicodeProfile: (payload: OmnicodeProfileIdInput): Promise<{ ok: boolean }> =>
+    requireBridge(window.zcode.focusOmnicodeProfile?.(payload)),
+  onOmnicodeInstanceEvent: (
+    handler: (payload: OmnicodeInstanceEventPayload) => void,
+  ): (() => void) =>
+    window.zcode.onOmnicodeInstanceEvent?.(handler) ?? (() => {}),
 };

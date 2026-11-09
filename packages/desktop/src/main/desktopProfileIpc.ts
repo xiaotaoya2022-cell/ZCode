@@ -6,16 +6,20 @@ import {
   cleanupStaleHandoff,
   cloneOmnicodeProfile,
   createOmnicodeProfile,
+  ensureOmnicodeInstanceBridgeServerStarted,
   launchOmnicodeProfile,
   listOmnicodeProfiles,
   listOmnicodeRunningInstances,
   removeOmnicodeProfile,
+  sendOmnicodeInstanceCommand,
   stopOmnicodeProfile,
 } from "./omnicode/contract.js";
 
 export function registerDesktopOmnicodeProfileIpcHandlers(): void {
   // 控制台启动：清理崩溃残留的 handoff（spec §接口 launch 附注）
   cleanupStaleHandoff();
+  // M2：桥接服务随 IPC 装配启动（doLaunch 前必须就绪）
+  void ensureOmnicodeInstanceBridgeServerStarted();
 
   ipcMain.handle(PlatformChannels.OmnicodeProfileList, async () => {
     const profiles = await listOmnicodeProfiles();
@@ -56,5 +60,11 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
   ipcMain.handle(PlatformChannels.OmnicodeProfileStop, async (_event, input: { id: string }) => {
     await stopOmnicodeProfile(input.id);
     return { ok: true };
+  });
+
+  ipcMain.handle(PlatformChannels.OmnicodeProfileFocus, async (_event, input: { id: string }) => {
+    // M2 放大编排 v0：桥接 focus 命令（实例 show+focus 主窗口）；未连接返回未生效
+    const delivered = sendOmnicodeInstanceCommand(input.id, { type: "focus" });
+    return { ok: delivered };
   });
 }

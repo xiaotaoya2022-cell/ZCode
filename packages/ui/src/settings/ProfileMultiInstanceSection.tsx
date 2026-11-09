@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Copy, Play, RefreshCw, Square, Trash2 } from "lucide-react";
+import { Copy, Maximize2, Play, RefreshCw, Square, Trash2 } from "lucide-react";
 import type { OmnicodeProfileSummaryInfo } from "@zcode/shared";
 import { Button } from "@/components/ui/button.js";
 import { Input } from "@/components/ui/input.js";
@@ -40,6 +40,26 @@ export function ProfileMultiInstanceSection() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // [OmniCode] 实例事件订阅：缩略图帧实时更新（1.4fps/实例，M2 视窗管线）
+  const [frames, setFrames] = useState<ReadonlyMap<string, string>>(new Map());
+  useEffect(() => {
+    const unsubscribe = platform.onOmnicodeInstanceEvent?.((payload) => {
+      if (payload.type === "thumbnail" && payload.frame) {
+        const profileId = payload.profileId;
+        const frame = payload.frame;
+        setFrames((previous) => {
+          const next = new Map(previous);
+          next.set(profileId, frame);
+          return next;
+        });
+      }
+      if (payload.type === "disconnected") {
+        void refresh();
+      }
+    });
+    return unsubscribe ?? (() => {});
+  }, [platform, refresh]);
 
   const runAction = useCallback(
     async (action: () => Promise<unknown>, successMessageId: string | null) => {
@@ -115,6 +135,14 @@ export function ProfileMultiInstanceSection() {
     [platform, runAction],
   );
 
+  const handleFocus = useCallback(
+    (profile: OmnicodeProfileSummaryInfo) => {
+      if (!profile.running) return;
+      void platform.focusOmnicodeProfile?.({ id: profile.id });
+    },
+    [platform],
+  );
+
   const handleRemove = useCallback(
     (profile: OmnicodeProfileSummaryInfo) => {
       void (async () => {
@@ -177,64 +205,86 @@ export function ProfileMultiInstanceSection() {
         ) : (
           <ul className="flex flex-col divide-y divide-border rounded-md border border-border">
             {profiles.map((profile) => (
-              <li key={profile.id} className="flex items-center gap-3 px-3 py-2">
-                <span
-                  className={`inline-block size-2 shrink-0 rounded-full ${profile.running ? "bg-emerald-500" : "bg-foreground-subtlest"}`}
-                />
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-ui-base text-foreground">{profile.name}</span>
-                  <span className="truncate text-ui-xs text-foreground-subtlest">
-                    {profile.running
-                      ? intl.formatMessage(
-                          { id: "settings.omnicodeProfiles.running" },
-                          { pid: String(profile.pid ?? "") },
-                        )
-                      : intl.formatMessage({ id: "settings.omnicodeProfiles.stopped" })}
-                    {profile.notes ? ` · ${profile.notes}` : ""}
-                  </span>
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  {profile.running ? (
+              <li key={profile.id} className="flex flex-col px-3 py-2">
+                {profile.running && frames.get(profile.id) ? (
+                  // [OmniCode] 实时缩略图（1.4fps JPEG；窗口隐藏时停留最后一帧）
+                  <img
+                    src={`data:image/jpeg;base64,${frames.get(profile.id)}`}
+                    alt=""
+                    className="mb-2 h-32 w-full rounded border border-border object-cover object-top"
+                  />
+                ) : null}
+                <div className="flex items-center gap-3">
+                  <span
+                    className={`inline-block size-2 shrink-0 rounded-full ${profile.running ? "bg-emerald-500" : "bg-foreground-subtlest"}`}
+                  />
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-ui-base text-foreground">{profile.name}</span>
+                    <span className="truncate text-ui-xs text-foreground-subtlest">
+                      {profile.running
+                        ? intl.formatMessage(
+                            { id: "settings.omnicodeProfiles.running" },
+                            { pid: String(profile.pid ?? "") },
+                          )
+                        : intl.formatMessage({ id: "settings.omnicodeProfiles.stopped" })}
+                      {profile.notes ? ` · ${profile.notes}` : ""}
+                    </span>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {profile.running ? (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleFocus(profile)}
+                          disabled={busy}
+                          title={intl.formatMessage({ id: "settings.omnicodeProfiles.focus" })}
+                        >
+                          <Maximize2 className="size-3.5" />
+                          {intl.formatMessage({ id: "settings.omnicodeProfiles.focus" })}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleStop(profile)}
+                          disabled={busy}
+                        >
+                          <Square className="size-3.5" />
+                          {intl.formatMessage({ id: "settings.omnicodeProfiles.stop" })}
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleLaunch(profile)}
+                        disabled={busy}
+                      >
+                        <Play className="size-3.5" />
+                        {intl.formatMessage({ id: "settings.omnicodeProfiles.launch" })}
+                      </Button>
+                    )}
                     <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleStop(profile)}
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleClone(profile)}
                       disabled={busy}
+                      aria-label={intl.formatMessage({ id: "settings.omnicodeProfiles.clone" })}
+                      title={intl.formatMessage({ id: "settings.omnicodeProfiles.clone" })}
                     >
-                      <Square className="size-3.5" />
-                      {intl.formatMessage({ id: "settings.omnicodeProfiles.stop" })}
+                      <Copy className="size-4" />
                     </Button>
-                  ) : (
                     <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleLaunch(profile)}
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleRemove(profile)}
                       disabled={busy}
+                      aria-label={intl.formatMessage({ id: "settings.omnicodeProfiles.delete" })}
+                      title={intl.formatMessage({ id: "settings.omnicodeProfiles.delete" })}
                     >
-                      <Play className="size-3.5" />
-                      {intl.formatMessage({ id: "settings.omnicodeProfiles.launch" })}
+                      <Trash2 className="size-4 text-destructive" />
                     </Button>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleClone(profile)}
-                    disabled={busy}
-                    aria-label={intl.formatMessage({ id: "settings.omnicodeProfiles.clone" })}
-                    title={intl.formatMessage({ id: "settings.omnicodeProfiles.clone" })}
-                  >
-                    <Copy className="size-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleRemove(profile)}
-                    disabled={busy}
-                    aria-label={intl.formatMessage({ id: "settings.omnicodeProfiles.delete" })}
-                    title={intl.formatMessage({ id: "settings.omnicodeProfiles.delete" })}
-                  >
-                    <Trash2 className="size-4 text-destructive" />
-                  </Button>
+                  </div>
                 </div>
               </li>
             ))}

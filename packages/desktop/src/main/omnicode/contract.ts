@@ -22,3 +22,14 @@ export {
   stopOmnicodeProfile,
 } from "./instanceManager.js";
 export type { OmnicodeRunningInstance } from "./instanceManager.js";
+export {
+  ensureOmnicodeInstanceBridgeServerStarted,
+  getOmnicodeInstanceBridgeInfo,
+  sendOmnicodeInstanceCommand,
+  setOmnicodeInstanceThumbnailSubscription,
+} from "./instanceBridgeServer.js";
+export type {
+  OmnicodeInstanceBridgeCommand,
+  OmnicodeInstanceBridgeListeners,
+} from "./instanceBridgeServer.js";
+export { startOmnicodeInstanceBridgeClient } from "./instanceBridgeClient.js";

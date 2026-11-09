@@ -155,6 +155,10 @@ declare global {
       }>;
       launchOmnicodeProfile?(payload: import("@zcode/shared").OmnicodeProfileIdInput): Promise<{ pid: number }>;
       stopOmnicodeProfile?(payload: import("@zcode/shared").OmnicodeProfileIdInput): Promise<{ ok: boolean }>;
+      focusOmnicodeProfile?(payload: import("@zcode/shared").OmnicodeProfileIdInput): Promise<{ ok: boolean }>;
+      onOmnicodeInstanceEvent?(
+        handler: (payload: import("@zcode/shared").OmnicodeInstanceEventPayload) => void,
+      ): () => void;
       /** 从系统拖拽/文件输入得到的 Web File 解析真实本地路径 */
       getPathForFile?(file: File): string | null;
       /** dwf 产物「作为文件打开」：把某一版的字节落成本机副本，返回其路径 */
