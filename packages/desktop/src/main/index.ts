@@ -2393,8 +2393,10 @@ app.whenReady().then(async () => {
   // Preview 身份无论连接哪个后端都不自动更新：stable feed 上只分发正式 ZCode 安装包，
   // 不向 Preview 渠道提供更新。构建期未启用自动更新时同样不更新
   // （见 docs/desktop/build-time-optional-capabilities.md）。
+  // [OmniCode] 去遥测：更新器整体禁用（Safe ZCode 同款——日常包永不自更，
+  // 发版只走 OmniCode 自己的 Releases，docs/omnicode/de-telemetry.md）
   void initAutoUpdater({
-    enabled: ZCODE_PRODUCT_FLAVOR === "production" && ZCODE_AUTO_UPDATE_ENABLED,
+    enabled: false,
     onBeforeQuitAndInstall: async () => {
       notifyStabilityLifecycle("update_install");
       await prepareAppQuit("auto-update quitAndInstall", "update-install");
