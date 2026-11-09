@@ -69,6 +69,7 @@ import type {
   SaveFileResult,
   PrintPageToPdfResult,
   OmnicodeProfileSummaryInfo,
+  OmnicodeInstanceEventPayload,
   OpenInEditorOptions,
   PostUpdateReleaseNotesPayload,
   RemoteSessionClosedEvent,
@@ -238,6 +239,10 @@ export const PlatformChannels = {
   OmnicodeProfileClone: "zcode:omnicode-profile-clone",
   OmnicodeProfileLaunch: "zcode:omnicode-profile-launch",
   OmnicodeProfileStop: "zcode:omnicode-profile-stop",
+  // [OmniCode] Main → Renderer：实例事件（缩略图帧/连接态）
+  OmnicodeInstanceEvent: "zcode:omnicode-instance-event",
+  // [OmniCode] Renderer → Main：聚焦实例窗口（桥接命令）
+  OmnicodeProfileFocus: "zcode:omnicode-profile-focus",
   /** Renderer → Main：用 Chromium 打印引擎把当前页面 print 媒体版面导出为 PDF */
   PrintToPdf: "zcode:print-to-pdf",
   /** Main → Renderer：转发远程连接过程日志 */
@@ -854,6 +859,14 @@ export interface PlatformChannelMap {
     response: { pid: number };
   };
   [PlatformChannels.OmnicodeProfileStop]: {
+    request: { id: string };
+    response: { ok: boolean };
+  };
+  [PlatformChannels.OmnicodeInstanceEvent]: {
+    request: OmnicodeInstanceEventPayload;
+    response: void;
+  };
+  [PlatformChannels.OmnicodeProfileFocus]: {
     request: { id: string };
     response: { ok: boolean };
   };
