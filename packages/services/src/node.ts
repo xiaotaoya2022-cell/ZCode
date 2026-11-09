@@ -481,7 +481,7 @@ import { createObservableSettingService } from "./setting/observableSettingServi
 import {
   attachWorkspaceLockCoordinator,
   type WorkspaceLockCoordinator,
-} from "./omnicode/workspaceLockCoordinator.js";
+} from "./omnicode/contract.js";
 import { createCredentialService } from "./credential/credentialService.js";
 import { createBroadcastService } from "./broadcast/broadcastService.js";
 import {
