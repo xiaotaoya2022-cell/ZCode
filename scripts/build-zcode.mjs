@@ -226,7 +226,13 @@ async function createTarball({ packageParent, releaseDir, tarballName }) {
   await rm(tarball, {
     force: true,
   });
-  run("tar", ["-czf", tarball, "-C", packageParent, packageDirName]);
+  // [OmniCode] Windows 固定用系统自带 bsdtar：GNU tar（Git Bash）把 -f 参数的盘符
+  // 冒号解析为远程主机名（host:path），导致打包失败；bsdtar 无此语义。
+  const tarCommand =
+    process.platform === "win32"
+      ? `${process.env.SystemRoot ?? "C:\\Windows"}\\System32\\tar.exe`
+      : "tar";
+  run(tarCommand, ["-czf", tarball, "-C", packageParent, packageDirName]);
   return tarball;
 }
 

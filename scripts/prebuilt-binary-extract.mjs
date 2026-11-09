@@ -55,8 +55,18 @@ export function extractPrebuiltArchive({ archivePath, archiveExt, extractDir, cw
   }
 
   const tarCwd = cwd ?? process.cwd();
+  // [OmniCode] Bugfix: Windows GNU tar（Git Bash）把 -f 参数里的盘符冒号解析为远程
+  // 主机名（"Cannot connect to F: resolve failed"）。上游相对化兜底在跨盘符场景
+  // （F: 缓存 → C: 临时目录）失效——path.relative 跨盘符不抛错而是返回绝对路径。
+  // Windows 固定改用系统自带 bsdtar（无远程主机语法，接受 F:/ 正斜杠路径），
+  // 不依赖 PATH 中 tar 的实现。修复依据：bootstrap prepare:agent-bundle 阶段
+  // stageBundledNpm 实测报错栈（npm-12.2.0.tgz 解包失败）。
+  const tarCommand =
+    process.platform === "win32"
+      ? `${process.env.SystemRoot ?? "C:\\Windows"}\\System32\\tar.exe`
+      : "tar";
   runCommand(
-    "tar",
+    tarCommand,
     ["-xzf", resolveTarArchiveArg(archivePath, tarCwd), "-C", toTarPosixPath(extractDir)],
     { cwd: tarCwd },
   );
