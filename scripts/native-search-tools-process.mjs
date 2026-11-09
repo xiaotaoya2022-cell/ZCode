@@ -76,7 +76,13 @@ export function downloadAndExtractSources({ sources, workDir, env, quiet }) {
 
     const sourcePath = join(sourcesDir, source.id);
     mkdirSync(sourcePath, { recursive: true });
-    run("tar", ["-xzf", archivePath, "-C", sourcePath, "--strip-components=1"], {
+    // [OmniCode] Windows 固定用系统自带 bsdtar：GNU tar（Git Bash）把 -f 参数的盘符
+    // 冒号解析为远程主机名（host:path），导致解包失败；bsdtar 无此语义。
+    const tarCommand =
+      process.platform === "win32"
+        ? `${process.env.SystemRoot ?? "C:\\Windows"}\\System32\\tar.exe`
+        : "tar";
+    run(tarCommand, ["-xzf", archivePath, "-C", sourcePath, "--strip-components=1"], {
       env,
       quiet,
     });
