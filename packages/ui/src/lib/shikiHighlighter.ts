@@ -59,8 +59,25 @@ const highlighterCache = new Map<
 >();
 const tokensCache = new Map<string, TokenizedCode>();
 const subscribers = new Map<string, Set<(result: TokenizedCode) => void>>();
-// 内存诊断计数器：tokensCache 目前无淘汰，是审计里
-// renderer 最可疑的增长点，先把条数落到日志里。
+// [OmniCode] LRU 上限：流式 Edit 预览每个 chunk 会生成新 key，旧 key 不会再命中却永久驻留
+// （官方审计 UI-H1，2026-09-03；v3.17.2 仍未修）。单条 tokens 是二维 ThemedToken 数组，
+// 体积数倍于源文本（上限 120k 字符），200 条 ≈ 数十 MB 封顶。命中时重新插入刷新“最新”端，
+// 淘汰最久未用条目并同步清理空订阅组（与 timelineRowHeightCache 同款策略）。
+const MAX_TOKENS_CACHE_ENTRIES = 200;
+
+function touchTokensCacheEntry(key: string, value: TokenizedCode): void {
+  tokensCache.delete(key);
+  tokensCache.set(key, value);
+  while (tokensCache.size > MAX_TOKENS_CACHE_ENTRIES) {
+    const oldest = tokensCache.keys().next().value;
+    if (oldest === undefined) break;
+    tokensCache.delete(oldest);
+    const subs = subscribers.get(oldest);
+    if (subs && subs.size === 0) {
+      subscribers.delete(oldest);
+    }
+  }
+}
 uiMemoryDiagnosticsRegistry.register("shiki", () => ({
   tokensCache: tokensCache.size,
   highlighters: highlighterCache.size,
@@ -142,6 +159,8 @@ export const highlightCode = (
 
   const cached = tokensCache.get(tokensCacheKey);
   if (cached) {
+    // [OmniCode] 命中即刷新 LRU 顺序（移到「最新」端）
+    touchTokensCacheEntry(tokensCacheKey, cached);
     // 缓存命中时也需要通知 effect，但不能同步触发 setState。
     // 历史消息恢复时大量代码块会在同一次提交后挂载；同步 callback 会把 cache-hit 变成嵌套更新，
     // 和 Streamdown 的重渲染叠在一起时容易触发 React #185。推迟到微任务后再交给幂等 setter。
@@ -177,7 +196,7 @@ export const highlightCode = (
         tokens: result.tokens,
       };
 
-      tokensCache.set(tokensCacheKey, tokenized);
+      touchTokensCacheEntry(tokensCacheKey, tokenized);
 
       const subs = subscribers.get(tokensCacheKey);
       if (subs) {
