@@ -479,7 +479,7 @@ export function registerDesktopResourceTelemetry(
 
   // 遥测定时器不得延长进程寿命。
   sampleTimer.unref?.();
-  reportTimer.unref?.();
+  reportTimer?.unref?.();
 
   logger.info(
     `[resource] sampling started interval=${omnicodeSamplingIntervalMs}ms report=${OMNICODE_TELEMETRY_DISABLED ? "disabled" : `${reportIntervalMs}ms`}`,
