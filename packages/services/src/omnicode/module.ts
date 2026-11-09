@@ -6,5 +6,5 @@ export const omnicodeWorkspaceGovernanceModule = {
   id: "omnicode-workspace-governance",
   requires: ["services"],
   provides: ["omnicode-workspace-governance"],
-  publicEntrypoints: ["index.ts", "contract.ts"],
+  publicEntrypoints: ["contract.ts"],
 } as const;
