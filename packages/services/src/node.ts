@@ -433,6 +433,11 @@ import {
 import { createOnboardingRecordService } from "./onboarding/onboardingRecordService.js";
 import { createLegacyTeamOrganizationResolver } from "./model-provider/legacyTeamOrganizationResolver.js";
 import { createObservableSettingService } from "./setting/observableSettingService.js";
+// [OmniCode] 工作区锁协调器 + 共享工作区注册表（spec: docs/omnicode/profile-runtime.md）
+import {
+  attachWorkspaceLockCoordinator,
+  type WorkspaceLockCoordinator,
+} from "./omnicode/workspaceLockCoordinator.js";
 import { createCredentialService } from "./credential/credentialService.js";
 import { createBroadcastService } from "./broadcast/broadcastService.js";
 import { createZCodeAgentService } from "./zcode-agent/zcodeAgentService.js";
@@ -2176,10 +2181,14 @@ export function createLocalServices(options: {
       throw error;
     }
   });
+  // [OmniCode] 协调器在 projectService 创建之后装配（见下）；此处前向引用供变更漏斗调用
+  let omnicodeWorkspaceLockCoordinator: WorkspaceLockCoordinator | undefined;
   const publishProjectChange = async () => {
     // SQLite 已提交；旧字段只能在设置 owner 的锁内从最新目录派生。
     if (setWorkspaceProjection) await settingService.update({});
     await broadcastService.send({ channel: "state:projects", payload: {} });
+    // [OmniCode] 双向同步：本地项目根 → 全实例共享工作区注册表（幂等合并，spec §工作区共享）
+    void omnicodeWorkspaceLockCoordinator?.syncSharedWorkspaces();
   };
   const remoteProjectService = createRemoteProjectService({
     ...options?.remoteProjectConnection,
@@ -2214,6 +2223,21 @@ export function createLocalServices(options: {
         checkpointDirectory: (workspacePath) => getWorkspaceCheckpointDirectory(workspacePath),
       }),
     },
+  });
+  // [OmniCode] 装配工作区锁协调器：lastActiveWorkspace 变更 → 锁切换 + 10s 心跳；
+  // 装配时把共享工作区表缺失项 saveProject 进本实例项目库（新实例开箱自带全部工作区）。
+  omnicodeWorkspaceLockCoordinator = attachWorkspaceLockCoordinator({
+    settingService,
+    projectService,
+    readLocalProjectPaths: async () => {
+      const repository = await taskIndexRepo.getProjectRepository();
+      return repository
+        .readTree({ includeTasks: false })
+        .projects.filter((project) => !project.deleted)
+        .flatMap((project) => project.roots.map((root) => root.rootPath));
+    },
+    profileId: process.env.OMNICODE_PROFILE_ID?.trim() || "default",
+    pid: process.pid,
   });
   const taskGroupService = createTaskGroupService({
     database: () => taskIndexRepo.getOrganizationDatabase(),
