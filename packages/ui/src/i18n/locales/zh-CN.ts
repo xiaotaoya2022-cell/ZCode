@@ -2690,6 +2690,8 @@ const zhCN: Record<string, string> = {
   "remote.error.connectionClosed": "远程连接已断开",
   "workspaceSidebar.unavailableLocalDirectory":
     "工作区目录不存在或无法访问，当前仅可查看历史记录。恢复该目录后重启 ZCode 即可继续使用。",
+  // [OmniCode] 工作区被其他实例锁定（互斥锁，spec: docs/omnicode/profile-runtime.md）
+  "workspaceSidebar.omnicodeLockedBy": "该工作区正被另一个实例占用（{profileId}），请先在那个实例里关闭它。",
   "workspaceSidebar.toggleSidebar": "切换侧边栏",
   "workspaceSidebar.resizeSidebar": "调整侧边栏宽度",
   "workspaceSidebar.showFileTree": "查看文件",
@@ -3806,6 +3808,31 @@ const zhCN: Record<string, string> = {
   "settings.migration.reason.session_not_found_or_workspace_mismatch":
     "源会话不存在，或已经不匹配当前 workspace 筛选。",
   "settings.usageTitle": "使用统计",
+  // [OmniCode] Profile 多实例
+  "settings.omnicodeProfiles.title": "多开实例",
+  "settings.omnicodeProfiles.description":
+    "为每个账号创建独立隔离的 ZCode 实例：凭据、会话、浏览器存储互不相通，重启不掉线。启动的实例与本窗口并行运行。",
+  "settings.omnicodeProfiles.namePlaceholder": "实例名称（如：工作号）",
+  "settings.omnicodeProfiles.notesPlaceholder": "备注（可选）",
+  "settings.omnicodeProfiles.create": "新建实例",
+  "settings.omnicodeProfiles.loading": "正在读取实例列表…",
+  "settings.omnicodeProfiles.empty": "还没有实例。创建第一个后即可与当前窗口并行运行。",
+  "settings.omnicodeProfiles.launch": "启动",
+  "settings.omnicodeProfiles.stop": "停止",
+  "settings.omnicodeProfiles.clone": "克隆（不带登录态）",
+  "settings.omnicodeProfiles.delete": "删除",
+  "settings.omnicodeProfiles.running": "运行中 · pid {pid}",
+  "settings.omnicodeProfiles.stopped": "未运行",
+  "settings.omnicodeProfiles.nameRequired": "请先填写实例名称",
+  "settings.omnicodeProfiles.deleteConfirmTitle": "删除这个实例？",
+  "settings.omnicodeProfiles.deleteConfirmDescription":
+    "「{name}」的全部数据（登录态、会话记录、浏览器数据）将被永久删除，无法恢复。",
+  "settings.omnicodeProfiles.toastCreated": "实例已创建",
+  "settings.omnicodeProfiles.toastRemoved": "实例已删除",
+  "settings.omnicodeProfiles.toastCloned": "实例已克隆（登录态不随克隆）",
+  "settings.omnicodeProfiles.toastLaunched": "实例已启动",
+  "settings.omnicodeProfiles.toastStopped": "实例已停止",
+  "settings.omnicodeProfiles.actionFailed": "操作失败",
   "settings.usageDescription": "查看会话活跃度与模型用量的粗略统计。",
   "resourceManager.storage.summaryTotal": "ZCode 总占用",
   "resourceManager.storage.scanning": "正在计算…",

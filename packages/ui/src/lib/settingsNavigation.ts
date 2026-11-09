@@ -26,7 +26,9 @@ export type SettingsSectionId =
   | "workspaceFileSearch"
   | "computerUse"
   | "automations"
-  | "shortcuts";
+  | "shortcuts"
+  // [OmniCode] Profile 多实例管理（desktop-only，spec: docs/omnicode/profile-runtime.md）
+  | "omnicodeProfiles";
 
 export type SettingsUsageTabTarget = "app" | "codingPlan";
 export type SettingsPluginTabTarget = "plugins" | "mcps" | "skills" | "commands";
@@ -94,7 +96,8 @@ function isSettingsSectionId(value: string): value is SettingsSectionId {
     value === "workspaceFileSearch" ||
     value === "computerUse" ||
     value === "automations" ||
-    value === "shortcuts"
+    value === "shortcuts" ||
+    value === "omnicodeProfiles"
   );
 }
 

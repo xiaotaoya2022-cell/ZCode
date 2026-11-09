@@ -104,6 +104,8 @@ import {
   type SettingsSearchId,
 } from "@/settings-search/index.js";
 import { resolveComputerUseAvailability } from "@/settings/computerUseAvailability.js";
+// [OmniCode] Profile 多实例管理分区（spec: docs/omnicode/profile-runtime.md）
+import { ProfileMultiInstanceSection } from "@/settings/ProfileMultiInstanceSection.js";
 import { MigrationSection } from "@/settings/MigrationSection.js";
 import { SETTINGS_FRAME_CONTENT_CLASSNAME } from "@/settings/SettingsPageParts.js";
 import {
@@ -2231,6 +2233,9 @@ export function SettingsPage({
                               remoteTarget={activeWorkspaceTab?.remoteTarget}
                               localWorkspacePath={activeWorkspaceTab?.localWorkspacePath}
                             />
+                          ) : activeSection === "omnicodeProfiles" ? (
+                            // [OmniCode] Profile 多实例管理（desktop-only）
+                            <ProfileMultiInstanceSection />
                           ) : null}
                         </div>
                       </div>

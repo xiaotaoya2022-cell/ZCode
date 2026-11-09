@@ -64,6 +64,8 @@ import { registerDesktopSaveFileIpcHandler } from "./desktopSaveFile.js";
 import { registerDesktopPrintToPdfIpcHandler } from "./desktopPrintToPdf.js";
 import { registerDesktopMicrophoneIpcHandlers } from "./microphone-access/index.js";
 import { registerDesktopCaptureBrowserGuestPageIpcHandler } from "./desktopCaptureBrowserGuestPage.js";
+// [OmniCode] Profile 多实例 IPC（spec: docs/omnicode/profile-runtime.md）
+import { registerDesktopOmnicodeProfileIpcHandlers } from "./desktopProfileIpc.js";
 import { registerDesktopCommandIpcHandler } from "./desktopCommandIpc.js";
 import { registerCuaPipActiveSessionIpc } from "./desktopCuaPipIpc.js";
 
@@ -159,6 +161,8 @@ export function registerPlatformIpcHandlers(options: {
   registerDesktopPrintToPdfIpcHandler(options.logger);
   registerDesktopMicrophoneIpcHandlers(options.logger);
   registerDesktopCaptureBrowserGuestPageIpcHandler(options.logger);
+  // [OmniCode] Profile 多实例 IPC 装配
+  registerDesktopOmnicodeProfileIpcHandlers();
 
   ipcMain.handle(
     PlatformChannels.CreateTempTextAttachment,

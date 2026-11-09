@@ -94,6 +94,10 @@ import type {
   MicrophoneSettingsTarget,
   CaptureBrowserGuestPageRequest,
   CaptureBrowserGuestPageResult,
+  OmnicodeProfileSummaryInfo,
+  OmnicodeProfileCreateInput,
+  OmnicodeProfileCloneInput,
+  OmnicodeProfileIdInput,
   SSHConfigAliasOption,
   WebRemoteControlContext,
   WebRemoteControlReconnectWorkspaceRequest,
@@ -366,6 +370,19 @@ contextBridge.exposeInMainWorld("zcode", {
     payload: CaptureBrowserGuestPageRequest,
   ): Promise<CaptureBrowserGuestPageResult> =>
     ipcRenderer.invoke(PlatformChannels.CaptureBrowserGuestPage, payload),
+  // [OmniCode] Profile 多实例（spec: docs/omnicode/profile-runtime.md）
+  listOmnicodeProfiles: (): Promise<{ profiles: OmnicodeProfileSummaryInfo[] }> =>
+    ipcRenderer.invoke(PlatformChannels.OmnicodeProfileList),
+  createOmnicodeProfile: (payload: OmnicodeProfileCreateInput): Promise<{ profile: OmnicodeProfileSummaryInfo }> =>
+    ipcRenderer.invoke(PlatformChannels.OmnicodeProfileCreate, payload),
+  removeOmnicodeProfile: (payload: OmnicodeProfileIdInput): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke(PlatformChannels.OmnicodeProfileRemove, payload),
+  cloneOmnicodeProfile: (payload: OmnicodeProfileCloneInput): Promise<{ profile: OmnicodeProfileSummaryInfo }> =>
+    ipcRenderer.invoke(PlatformChannels.OmnicodeProfileClone, payload),
+  launchOmnicodeProfile: (payload: OmnicodeProfileIdInput): Promise<{ pid: number }> =>
+    ipcRenderer.invoke(PlatformChannels.OmnicodeProfileLaunch, payload),
+  stopOmnicodeProfile: (payload: OmnicodeProfileIdInput): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke(PlatformChannels.OmnicodeProfileStop, payload),
   /** 从系统拖拽/文件输入得到的 Web File 解析真实本地路径 */
   getPathForFile: (file: File): string | null => {
     // Electron 32 起移除了非标准 File.path，renderer 不能再直接从拖拽 File 上取路径。
