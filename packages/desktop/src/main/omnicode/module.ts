@@ -6,5 +6,5 @@ export const omnicodeProfileRuntimeModule = {
   id: "omnicode-profile-runtime",
   requires: [],
   provides: ["omnicode-profile-runtime"],
-  publicEntrypoints: ["index.ts", "contract.ts"],
+  publicEntrypoints: ["contract.ts", "profileBootstrap.ts"],
 } as const;
