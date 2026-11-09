@@ -13,6 +13,8 @@ import type {
   VirtualProject,
 } from "#src/project/contract.js";
 import { createProjectDataCommands } from "#src/project/data/project-data.js";
+// [OmniCode] 工作区锁状态装饰（readTree 灰显数据源，spec: docs/omnicode/profile-runtime.md）
+import { listWorkspaceLockDecorations } from "#src/omnicode/workspaceLocks.js";
 export {
   createProjectDataPort,
   type ProjectSessionDataAgent,
@@ -191,7 +193,7 @@ export function createProjectService(options: {
         includeDeleted: params?.includeDeleted,
         includeDeletedTasks: params?.includeDeletedTasks,
       });
-      return { ...tree, projects: await projectPrimaryRootStatuses(tree.projects) };
+      return { ...tree, projects: await projectPrimaryRootStatuses(tree.projects), omnicodeWorkspaceLocks: listWorkspaceLockDecorations() };
     },
     async saveProject(input) {
       input = saveProjectSchema.parse(input);

@@ -136,7 +136,7 @@ export async function cloneOmnicodeProfile(sourceId: string, newName: string): P
     filter: (source) => {
       const relative = source.slice(sourceDir.length).replaceAll("\\", "/").replace(/^\/+/, "");
       if (!relative) return true;
-      const topLevel = relative.split("/")[0];
+      const topLevel = relative.split("/")[0] ?? "";
       if (excludedTopLevel.has(topLevel)) return false;
       if (relative === "profile.json") return false;
       if (relative === ".zcode/v2/credentials.json") return false;

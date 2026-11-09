@@ -189,3 +189,22 @@ export function listWorkspaceLocks(): Map<string, WorkspaceLockOwner> {
   }
   return result;
 }
+
+export interface WorkspaceLockDecoration {
+  workspacePath: string;
+  profileId: string;
+  ownedBySelf: boolean;
+}
+
+/**
+ * readTree 装饰用：全量锁的呈现视角。ownedBySelf = 锁被当前实例持有
+ * （同实例多窗口不灰显，保持官方单实例语义，spec §工作区互斥锁）。
+ */
+export function listWorkspaceLockDecorations(): WorkspaceLockDecoration[] {
+  const selfProfileId = process.env.OMNICODE_PROFILE_ID?.trim() || "default";
+  return [...listWorkspaceLocks().values()].map((owner) => ({
+    workspacePath: owner.workspacePath,
+    profileId: owner.profileId,
+    ownedBySelf: owner.profileId === selfProfileId,
+  }));
+}
