@@ -16,6 +16,8 @@ import { join } from "node:path";
 import process from "node:process";
 import { app } from "electron";
 import { assertValidProfileId, getOmnicodeProfileDir, getOmnicodeProfileRoot } from "./profileRuntime.js";
+// [OmniCode] 桥接服务直接从实现文件导入：经 contract.ts 会与本文件形成导出循环
+import { ensureOmnicodeInstanceBridgeServerStarted } from "./instanceBridgeServer.js";
 
 export interface OmnicodeRunningInstance {
   profileId: string;
@@ -69,13 +71,20 @@ async function doLaunch(profileId: string): Promise<number> {
   await mkdir(join(profileDir, "electron-userdata"), { recursive: true });
   await mkdir(join(profileDir, "electron-session"), { recursive: true });
 
+  // [OmniCode] M2：桥接服务就绪后再启动实例（handoff 携带回连端口/token）
+  const bridge = await ensureOmnicodeInstanceBridgeServerStarted();
   // 一次性 handoff：固定文件名（全字面量路径）；实例 bootstrap 凭
   // --omnicode-handoff 旗标消费（读取即删）
   const handoffPath = join(getOmnicodeProfileRoot(), ".handoff", "current.json");
   await mkdir(join(getOmnicodeProfileRoot(), ".handoff"), { recursive: true });
   await writeFile(
     handoffPath,
-    JSON.stringify({ profileId, issuedAt: new Date().toISOString() }),
+    JSON.stringify({
+      profileId,
+      bridgePort: bridge.port,
+      bridgeToken: bridge.token,
+      issuedAt: new Date().toISOString(),
+    }),
     "utf8",
   );
 

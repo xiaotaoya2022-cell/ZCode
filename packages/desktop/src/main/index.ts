@@ -5,6 +5,8 @@ import {
 import { createRemoteConversationTelemetryDispatcher } from "@zcode/shared/conversation-telemetry";
 import { installRequestSecurityDiagnostics } from "./request-security-edition/index.js";
 import { createLocalTtftExporter } from "./localTtftExporter.js";
+// [OmniCode] Profile 实例桥接客户端（spec: docs/omnicode/profile-runtime.md）
+import { startOmnicodeInstanceBridgeClient } from "./omnicode/instanceBridgeClient.js";
 /* eslint-disable max-lines */
 // [OmniCode] Profile 实例身份引导：必须先于一切早期 bootstrap（spec: docs/omnicode/profile-runtime.md）
 import "./omnicode/profileBootstrap.js";
@@ -2736,6 +2738,8 @@ app.whenReady().then(async () => {
 
   logger.info("[startup] 创建主窗口");
   await primaryWindowCoordinator.ensurePrimaryWindow("app-ready");
+  // [OmniCode] Profile 实例回连控制台桥接（仅实例身份启动时激活；控制台/官方身份为 no-op）
+  startOmnicodeInstanceBridgeClient();
 
   const primaryWindow = getApplicationWindowsExcludingCuaIndicator()[0];
   if (primaryWindow) {

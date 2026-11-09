@@ -4076,6 +4076,7 @@ const enUS: Record<string, string> = {
   "settings.omnicodeProfiles.loading": "Loading instances…",
   "settings.omnicodeProfiles.empty":
     "No instances yet. Create the first one to run it alongside this window.",
+  "settings.omnicodeProfiles.focus": "Focus",
   "settings.omnicodeProfiles.launch": "Launch",
   "settings.omnicodeProfiles.stop": "Stop",
   "settings.omnicodeProfiles.clone": "Clone (without login state)",

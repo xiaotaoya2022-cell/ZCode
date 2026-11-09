@@ -436,6 +436,14 @@ export interface OmnicodeProfileIdInput {
   id: string;
 }
 
+/** [OmniCode] 控制台 main → renderer 的实例事件（缩略图帧 / 连接态）。 */
+export interface OmnicodeInstanceEventPayload {
+  profileId: string;
+  type: "thumbnail" | "connected" | "disconnected";
+  /** type=thumbnail 时的 JPEG base64 */
+  frame?: string;
+}
+
 export function createOpenInEditorRemoteTarget(
   target: RemoteTarget,
 ): OpenInEditorRemoteTarget | undefined {
@@ -948,6 +956,11 @@ export interface IPlatformService {
   cloneOmnicodeProfile?(input: OmnicodeProfileCloneInput): Promise<{ profile: OmnicodeProfileSummaryInfo }>;
   launchOmnicodeProfile?(input: OmnicodeProfileIdInput): Promise<{ pid: number }>;
   stopOmnicodeProfile?(input: OmnicodeProfileIdInput): Promise<{ ok: boolean }>;
+  focusOmnicodeProfile?(input: OmnicodeProfileIdInput): Promise<{ ok: boolean }>;
+  /** 订阅控制台实例事件（缩略图/连接态），返回 disposer。仅 Desktop。 */
+  onOmnicodeInstanceEvent?(
+    handler: (payload: OmnicodeInstanceEventPayload) => void,
+  ): () => void;
 
   /** 取消当前窗口尚未建立完成的远程连接（可选：Web 平台可忽略） */
   cancelPendingRemoteConnection?(requestId?: string): Promise<void>;

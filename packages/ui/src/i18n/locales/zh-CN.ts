@@ -3817,6 +3817,7 @@ const zhCN: Record<string, string> = {
   "settings.omnicodeProfiles.create": "新建实例",
   "settings.omnicodeProfiles.loading": "正在读取实例列表…",
   "settings.omnicodeProfiles.empty": "还没有实例。创建第一个后即可与当前窗口并行运行。",
+  "settings.omnicodeProfiles.focus": "放大",
   "settings.omnicodeProfiles.launch": "启动",
   "settings.omnicodeProfiles.stop": "停止",
   "settings.omnicodeProfiles.clone": "克隆（不带登录态）",

@@ -255,6 +255,7 @@ export type {
   OmnicodeProfileCreateInput,
   OmnicodeProfileCloneInput,
   OmnicodeProfileIdInput,
+  OmnicodeInstanceEventPayload,
   DesktopCloseToTrayCapability,
   DesktopCommandId,
   CuaOsSupport,
