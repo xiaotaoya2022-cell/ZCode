@@ -3534,6 +3534,9 @@ export class BrowserGuestManager {
   private setupDownloadTracking(tab: ManagedTab, guest: GuestWebContents): void {
     tab.downloadCleanup?.();
     if (!guest.session) return;
+    // [OmniCode] 会话引用快照：guest 销毁后 session 对象仍然存活（纯 JS 侧 removeListener
+    // 依然可用），cleanup 不再依赖 guest 存活（官方审计 MAIN-H1 的残留缺口，2026-09-03）。
+    const guestSession = guest.session;
     const listener = (_event: unknown, item: GuestDownloadItem, contents: GuestWebContents) => {
       if (contents !== guest || tab.guest !== guest || tab.lifecycle === "closed") return;
       const downloadId = `iab-download:${randomUUID()}`;
@@ -3560,8 +3563,9 @@ export class BrowserGuestManager {
         this.queuedDownloads.set(tab.tabId, queued);
       }
     };
-    guest.session.on("will-download", listener);
-    tab.downloadCleanup = () => guest.session?.removeListener("will-download", listener);
+    guestSession.on("will-download", listener);
+    // [OmniCode] cleanup 用快照引用：guest 已销毁时 removeListener 仍是纯 JS 侧安全操作
+    tab.downloadCleanup = () => guestSession.removeListener("will-download", listener);
   }
 
   private waitForDownload(
@@ -4420,9 +4424,11 @@ export class BrowserGuestManager {
     }
     this.pendingDialogs.delete(tab.tabId);
     try {
-      // Electron 会在 renderer 卸载 <webview> 时先销毁 guest；此时 listener 已随对象释放，
-      // 再调用 session.removeListener 只会产生无意义的 "Object has been destroyed" 日志。
-      if (!guestDestroyed) tab.downloadCleanup?.();
+      // [OmniCode] 无条件清理：cleanup 内部用的是 setupDownloadTracking 时快照的 session
+      // 引用（纯 JS 侧 removeListener），guest 销毁与否都能安全移除监听。
+      // 历史缺口（官方审计 MAIN-H1）：guestDestroyed 时跳过清理会让监听永久留在
+      // defaultSession 上，每关一窗泄漏 N 个闭包（N = tab 数）。
+      tab.downloadCleanup?.();
     } catch (error) {
       // guest renderer 被 Chromium 杀死后，旧 session 的 removeListener 也会抛
       // "Object has been destroyed"；清理失败不能阻断替代 guest 的 CDP 重新绑定。
