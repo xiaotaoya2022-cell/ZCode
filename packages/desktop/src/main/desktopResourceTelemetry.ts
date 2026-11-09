@@ -10,6 +10,7 @@ import {
   type ProcessResourceRole,
   type ProcessResourceRuntimeSurface,
   PROCESS_RESOURCE_EVENT_NAMES,
+  OMNICODE_TELEMETRY_DISABLED,
   zcodeToolExecResourceSchema,
 } from "@zcode/shared";
 import { BrowserWindow } from "electron";
@@ -447,6 +448,13 @@ export function registerDesktopResourceTelemetry(
 
   const reportIntervalMs = options?.reportIntervalMs ?? RESOURCE_REPORT_INTERVAL_MS;
 
+  // [OmniCode] 去遥测降频（docs/omnicode/de-telemetry.md）：
+  // - 上报通道已死（数仓端点置空 + ARMS 禁用），reportTimer 不再启动；
+  // - 采样仅剩本地内存诊断一个消费者，10s → 60s（内存日志节奏 ~60s → ~6min，诊断用途可接受）。
+  const omnicodeSamplingIntervalMs = OMNICODE_TELEMETRY_DISABLED
+    ? 60_000
+    : RESOURCE_SAMPLE_INTERVAL_MS;
+
   sampleTimer = setInterval(() => {
     measureTelemetrySelfMs(() => {
       try {
@@ -455,24 +463,26 @@ export function registerDesktopResourceTelemetry(
         logger.warn("[resource] sample failed:", error);
       }
     });
-  }, RESOURCE_SAMPLE_INTERVAL_MS);
+  }, omnicodeSamplingIntervalMs);
 
-  reportTimer = setInterval(() => {
-    measureTelemetrySelfMs(() => {
-      try {
-        flushResourceReports(logger);
-      } catch (error) {
-        logger.warn("[resource] report failed:", error);
-      }
-    });
-  }, reportIntervalMs);
+  if (!OMNICODE_TELEMETRY_DISABLED) {
+    reportTimer = setInterval(() => {
+      measureTelemetrySelfMs(() => {
+        try {
+          flushResourceReports(logger);
+        } catch (error) {
+          logger.warn("[resource] report failed:", error);
+        }
+      });
+    }, reportIntervalMs);
+  }
 
   // 遥测定时器不得延长进程寿命。
   sampleTimer.unref?.();
   reportTimer.unref?.();
 
   logger.info(
-    `[resource] sampling started interval=${RESOURCE_SAMPLE_INTERVAL_MS}ms report=${reportIntervalMs}ms`,
+    `[resource] sampling started interval=${omnicodeSamplingIntervalMs}ms report=${OMNICODE_TELEMETRY_DISABLED ? "disabled" : `${reportIntervalMs}ms`}`,
   );
 }
 
