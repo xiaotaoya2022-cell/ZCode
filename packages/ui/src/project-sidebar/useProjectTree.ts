@@ -61,6 +61,11 @@ export function useProjectTree(isDesktop = false) {
   const [directory, setDirectory] = useState<RemoteProjectDirectory>({ hosts: [], entries: [] });
   // 按 Host 的最近一次项目读取失败；只作展示投影，不落盘，下一次成功读取即清除。
   const [hostReadErrors, setHostReadErrors] = useState<ReadonlyMap<string, string>>(new Map());
+  // [OmniCode] 跨实例工作区锁（readTree 装饰，spec: docs/omnicode/profile-runtime.md）；
+  // key = Host 规范化 workspacePath，value = { profileId, ownedBySelf }。
+  const [workspaceLocks, setWorkspaceLocks] = useState<
+    ReadonlyMap<string, { profileId: string; ownedBySelf: boolean }>
+  >(new Map());
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const serial = useRef(0);
@@ -167,6 +172,15 @@ export function useProjectTree(isDesktop = false) {
           );
           setHostReadErrors((previous) =>
             sameReadErrors(previous, result.errors) ? previous : result.errors,
+          );
+          // [OmniCode] 锁状态随 readTree 到达；锁可独立于项目写事件变化，由周期刷新兜底
+          setWorkspaceLocks(
+            new Map(
+              (result.tree.omnicodeWorkspaceLocks ?? []).map((lock) => [
+                lock.workspacePath,
+                { profileId: lock.profileId, ownedBySelf: lock.ownedBySelf },
+              ]),
+            ),
           );
           setError(null);
           for (const pending of ready) {
@@ -337,7 +351,12 @@ export function useProjectTree(isDesktop = false) {
     // Finder/终端移走或恢复目录不会产生项目写事件；回到窗口时重新检查并恢复观察。
     const onFocus = () => void refreshDirectory();
     window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+    // [OmniCode] 锁的获取/释放发生在其他实例，不产生本项目写事件；周期刷新兜底（spec §工作区互斥锁）
+    const lockRefreshTimer = setInterval(() => void refreshDirectory(), 15_000);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      clearInterval(lockRefreshTimer);
+    };
   }, [refreshDirectory]);
   useEffect(() => {
     const subscriptions = (registry ? [] : scopes).map((scope) =>
@@ -386,6 +405,7 @@ export function useProjectTree(isDesktop = false) {
       directory,
       availability,
       hostReadErrors,
+      workspaceLocks,
       service,
       remoteService,
       refresh: refreshDirectory,
@@ -399,6 +419,7 @@ export function useProjectTree(isDesktop = false) {
       directory,
       availability,
       hostReadErrors,
+      workspaceLocks,
       service,
       remoteService,
       refreshDirectory,

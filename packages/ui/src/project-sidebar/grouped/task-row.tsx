@@ -36,6 +36,7 @@ import { useTaskInteractionAutoResolutionSnooze } from "@/hooks/useTaskInteracti
 import { useOptionalTabStore } from "@/store/TabStoreProvider.js";
 import { isWorkspaceReadOnly } from "@/store/tabStore.js";
 import { TaskTitleOverflowText } from "@/components/TaskTitleOverflowText.js";
+import { useProjectDirectory } from "@/project-sidebar/ProjectDirectoryProvider.js";
 
 function GroupedTaskRowComponent({
   task,
@@ -82,6 +83,27 @@ function GroupedTaskRowComponent({
   const workspaceActionsDisabled = useOptionalTabStore((state) =>
     isWorkspaceReadOnly(state, task.workspacePath, task.workspaceIdentity),
   );
+  // [OmniCode] 工作区被其他实例锁定 → 灰显 + 拦截打开（spec: docs/omnicode/profile-runtime.md §工作区互斥锁）。
+  // 同实例（ownedBySelf）不灰显：官方单实例语义由本进程自行串行。
+  const directoryState = useProjectDirectory();
+  const workspaceLock = (() => {
+    const locks = directoryState.workspaceLocks;
+    if (!locks || locks.size === 0) return undefined;
+    const exact = locks.get(task.workspacePath);
+    if (exact) return exact;
+    const lowered = task.workspacePath.toLowerCase();
+    for (const [path, value] of locks) {
+      if (path.toLowerCase() === lowered) return value;
+    }
+    return undefined;
+  })();
+  const lockedByOther = workspaceLock && !workspaceLock.ownedBySelf ? workspaceLock : undefined;
+  const workspaceLockedReason = lockedByOther
+    ? intl.formatMessage(
+        { id: "workspaceSidebar.omnicodeLockedBy" },
+        { profileId: lockedByOther.profileId },
+      )
+    : undefined;
   const workspaceActionsDisabledReason = workspaceActionsDisabled
     ? intl.formatMessage({ id: "workspaceSidebar.unavailableLocalDirectory" })
     : undefined;
@@ -162,13 +184,15 @@ function GroupedTaskRowComponent({
           : "cursor-pointer",
         isActive ? "bg-selected" : canShowHoverActions && "hover:bg-surface-hover",
         dragging && "opacity-0",
+        // [OmniCode] 被其他实例占用的工作区灰显（D1：显示但不可进入）
+        lockedByOther && "opacity-45",
       )}
     >
       <span className={TASK_GROUP_ROW_LINE_CLASS}>
         <TaskTitleOverflowText
           as="span"
           className="text-foreground"
-          title={dragOverlay ? undefined : taskTitle}
+          title={dragOverlay ? undefined : workspaceLockedReason ?? taskTitle}
         >
           {/* Bugfix: grouped task 标题超出时不要显示省略号，右侧渐隐能保留标题连续性，避免和右侧状态元信息挤在一起。 */}
           {taskTitle}
@@ -256,6 +280,10 @@ function GroupedTaskRowComponent({
     loadProviderConfig: contextMenuOpen,
   });
   const handleSelect = () => {
+    if (lockedByOther) {
+      toast(workspaceLockedReason ?? "", { variant: "warning" });
+      return;
+    }
     onSelectTask(task.workspacePath, task.taskId, task.workspaceIdentity);
   };
   const handleCloseTask = (event: MouseEvent<HTMLButtonElement>) => {
