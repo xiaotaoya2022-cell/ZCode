@@ -19,10 +19,16 @@ import {
   OAUTH_LINKED_BIGMODEL_KEY,
   isZaiOAuthProvider,
   isBuiltinOAuthProvider,
+  BIGMODEL_PROVIDER_ID,
+  isCredentialDecryptError,
+  ZAI_PROVIDER_ID,
 } from "@zcode/shared";
+import { copyFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { ICredentialService } from "../../credential/credential.js";
 import type { LocalCredentialService } from "#src/credential/credentialService.js";
 import { createServiceLogger } from "../../logger/serviceLogger.js";
+import { getAppConfigDir } from "../../paths.js";
 
 const ACTIVE_PROVIDER_KEY = "oauth:active_provider";
 const LOGIN_ATTRIBUTION_KEY = "oauth:login_attribution";
@@ -686,10 +692,34 @@ export class OAuthCredentialRepo {
       throw new Error("OAuth session changed before logout");
   }
 
+  /**
+   * [OmniCode] 解密失败降级（spec: docs/omnicode/profile-runtime.md §产品规则 6）：
+   * 清理前先把密文原样备份，保留"换正确密钥/换环境后找回登录态"的机会。
+   * 历史行为是直接清空全部 OAuth key——多开/环境变量不一致导致解密失败时等于自毁登录态。
+   * 返回备份路径（文件不存在或备份失败返回 undefined，不阻断清理主流程）。
+   */
+  private async preserveCorruptCredentialsBackup(): Promise<string | undefined> {
+    try {
+      const source = join(getAppConfigDir(), "credentials.json");
+      const backup = `${source}.omnicode-preserved-${new Date()
+        .toISOString()
+        .replace(/[:.]/g, "-")}`;
+      await copyFile(source, backup);
+      log.warn(undefined, "corrupt credentials.json preserved before cleanup", { backup });
+      return backup;
+    } catch (error) {
+      log.warn(undefined, "preserve corrupt credentials backup failed", error);
+      return undefined;
+    }
+  }
+
   private async clearCorruptOAuthSession(
     keys: readonly string[],
     expected?: Readonly<Record<string, string | null>>,
   ): Promise<void> {
+    // [OmniCode] 任何损坏态清理前先备份密文（解密失败降级：不静默自毁登录态）；
+    // 清理主体沿用官方 v3.18.0 的 deleteUnreadable 键级语义（含会话修订重置）。
+    await this.preserveCorruptCredentialsBackup();
     const deleted = await this.localStore.deleteUnreadable(keys, {
       expected,
       removeKeys: this.sessionKeys(),
