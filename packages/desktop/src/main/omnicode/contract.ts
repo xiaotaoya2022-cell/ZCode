@@ -33,3 +33,8 @@ export type {
   OmnicodeInstanceBridgeListeners,
 } from "./instanceBridgeServer.js";
 export { startOmnicodeInstanceBridgeClient } from "./instanceBridgeClient.js";
+export { openOmnicodeInstanceAuthWindow } from "./instanceAuthWindow.js";
+export type {
+  OmnicodeInstanceAuthWindowLogger,
+  OpenOmnicodeInstanceAuthWindowInput,
+} from "./instanceAuthWindow.js";
