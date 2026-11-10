@@ -75,6 +75,7 @@ import {
   type ConversationTurnNavigatorVirtualItem,
 } from "@/v4/conversationTurnNavigatorHelpers.js";
 import {
+  acquireTimelineRowHeightCacheForSession,
   DEFAULT_ROW_HEIGHT_ESTIMATE_PX,
   TimelineRowHeightCache,
 } from "@/v4/timelineRowHeightCache.js";
@@ -1681,11 +1682,15 @@ function ConversationTimelineImpl({
   const pendingGuideKey = pendingGuides.map((item) => item.queueItemId).join(":");
 
   // V4 迁移删除旧 ChatView 滚动 hook 后，sessionKey effect 仍固定滚到底部，
-  // 导致残留的 renderer-local 记忆模块彻底断线。这里在清测高并重新 measure 后按 scope
+  // 导致残留的 renderer-local 记忆模块彻底断线。这里在换测高桶并重新 measure 后按 scope
   // 恢复；首个 layout 立即写入防闪动，下一帧再校正异步测高，但必须把滚动权让给用户。
   useLayoutEffect(() => {
     clearUserScrollIntent();
-    heightCacheRef.current?.clear();
+    // [OmniCode] 会话切换不再整体 clear 测高：换到该会话的模块级保留桶（LRU 上限
+    // MAX_SESSION_ROW_HEIGHT_CACHES 个会话），estimateSize 直接命中历史行高，
+    // 切换会话首屏不再回落 72px/一屏估计引发 measure 抖动。turnId 跨会话可能重复，
+    // 串号风险由按会话分桶隔离；同会话重复 acquire 幂等（effect 其余依赖变化时重入也安全）。
+    heightCacheRef.current = acquireTimelineRowHeightCacheForSession(sessionKey);
     // prepend 锚定基线一并重置：rowId 跨会话可重复，禁止拿旧会话首行比较。
     prependAnchorRef.current = { firstRowId: null, totalSize: 0 };
     pendingPrependVirtualAnchorRef.current = null;
