@@ -12,6 +12,8 @@ import {
   createZCodeAgentConnectionScope,
   type ServiceCollection,
 } from "@zcode/services";
+import { OMNICODE_BROWSER_RELAY_CHANNEL } from "@zcode/shared";
+import { createOmniCodeBrowserRelayChannel } from "./browserRelayChannel.js";
 
 /**
  * Wrap process.stdin/stdout as an ISocket for RPC communication.
@@ -82,6 +84,13 @@ export function createStdioServer(
     connectionScope
       ? new Map([[IZCodeAgentService.channelName, connectionScope.service]])
       : new Map(),
+  );
+  // [OmniCode] M4b Browser Relay：fork-only 频道注册。频道名字符串同时是
+  // FORK_SERVER_BUNDLE_MARKERS 的 bundle marker（部署探测据此判定远端是否 fork bundle）。
+  // 官方/上游 server 没有这段注册，fork 客户端即使误订阅也由 rpc 守卫静默收口。
+  channelServer.registerChannel(
+    OMNICODE_BROWSER_RELAY_CHANNEL,
+    createOmniCodeBrowserRelayChannel(),
   );
   let stopPromise: Promise<void> | undefined;
   const stop = (): Promise<void> => {

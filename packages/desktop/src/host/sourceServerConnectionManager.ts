@@ -5,7 +5,7 @@ import {
 } from "@zcode/shared";
 /* eslint-disable max-lines -- Source 连接状态机、重试、更新和单连接归并必须共享同一代际状态。 */
 import { SourceServerOperationLogs } from "./sourceServerOperationLogs.js";
-import { Emitter, type Event } from "@zcode/rpc";
+import { Emitter, type ChannelClient, type Event } from "@zcode/rpc";
 import type {
   ConnectionProfile,
   RemoteTarget,
@@ -57,6 +57,11 @@ export interface ManagedSourceServerConnection {
   profileId: string;
   serverInfo: ServerRemoteInfo;
   services: IServiceAccessor;
+  /**
+   * [OmniCode] M4b Browser Relay：底层 RPC 客户端，供 fork-only 频道
+   * （omnicode-browser-relay）的门控探测与订阅使用；与 services 同生命周期。
+   */
+  rpcClient: ChannelClient;
 }
 
 /** 会让远端主动断线的设备级生命周期操作。 */
@@ -474,6 +479,7 @@ export class SourceServerConnectionManager {
       profileId: connection.profileId,
       serverInfo: connection.serverInfo,
       services: connection.services,
+      rpcClient: connection.rpcClient,
       ...(target ? { reusedConnectionTarget: stripRemoteTargetSecrets(target) } : {}),
     };
   }
@@ -1577,6 +1583,7 @@ export class SourceServerConnectionManager {
         profileId: effectiveProfile.profileId,
         serverInfo: connection.serverInfo,
         services: connection.services,
+        rpcClient: connection.rpcClient,
         connection,
         profileIds: new Set([effectiveProfile.profileId]),
       };

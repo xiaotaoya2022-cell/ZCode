@@ -35,6 +35,11 @@ export interface ServerRemoteEndpoints {
 export interface ServerRemoteConnection {
   serverInfo: ServerRemoteInfo;
   services: IServiceAccessor;
+  /**
+   * [OmniCode] M4b Browser Relay：底层 RPC 客户端，供 fork-only 频道
+   * （omnicode-browser-relay）的门控探测与订阅使用；常规业务仍走 services。
+   */
+  rpcClient: ChannelClient;
   dispose(): void;
 }
 
@@ -184,7 +189,7 @@ function createNodeWebSocketServiceConnection(
   socket: WebSocket,
   onClose?: ServerRemoteConnectionOptions["onClose"],
   topicResourceChannel?: IServerChannel,
-): { services: IServiceAccessor; dispose(): void } {
+): { services: IServiceAccessor; rpcClient: ChannelClient; dispose(): void } {
   const protocol = new SocketProtocol(wrapNodeWebSocket(socket, onClose));
   const client = new ChannelClient(protocol);
   const reverseServer = topicResourceChannel
@@ -204,7 +209,7 @@ function createNodeWebSocketServiceConnection(
   };
   socket.once("close", dispose);
   socket.once("error", dispose);
-  return { services: new RemoteServiceAccess(client), dispose };
+  return { services: new RemoteServiceAccess(client), rpcClient: client, dispose };
 }
 
 async function fetchServerInfo(
@@ -343,6 +348,7 @@ export async function connectServerRemote(
     return {
       serverInfo,
       services: rpc.services,
+      rpcClient: rpc.rpcClient,
       dispose() {
         rpc.dispose();
         socket.close();
@@ -409,6 +415,7 @@ export async function connectServerRemoteOverDuplex(
     return {
       serverInfo: serverInfo.data,
       services: rpc.services,
+      rpcClient: rpc.rpcClient,
       dispose() {
         rpc?.dispose();
         socket.terminate();

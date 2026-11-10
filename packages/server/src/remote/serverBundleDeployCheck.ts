@@ -1,5 +1,6 @@
 import type { IRemoteBackend, StdioStream } from "@zcode/server/remote/backend.js";
 import { quotePosixPathArg, quotePosixShellArg } from "@zcode/server/remote/posixShell.js";
+import { FORK_SERVER_BUNDLE_MARKERS } from "@zcode/shared";
 
 const REQUIRED_SERVER_BUNDLE_MARKERS = [
   "skill-sync",
@@ -43,6 +44,40 @@ if (missing.length > 0) {
       shouldDeploy: true,
       reason: `remote server bundle missing required markers: ${String(error)}`,
     };
+  }
+}
+
+// [OmniCode] M4b Browser Relay：fork marker 探测（能力门控，非 deploy 决策）。
+// 写法沿用上方 REQUIRED_SERVER_BUNDLE_MARKERS 的 node -e 文本探测；marker 集合来自
+// @zcode/shared 的 FORK_SERVER_BUNDLE_MARKERS（"omnicode-browser-relay"）。
+// 注意：探测结果只用于桌面端是否订阅 onDynamicBrowserRelayRequest 的能力门控，
+// 不得参与 deploy 决策——CDN 下载的官方 bundle 永远不含 fork marker，参与决策会
+// 造成每次连接都触发永不收敛的重新部署（ZakiCode spec：marker probing only for
+// local-source deploys）。
+export async function checkServerBundleForkMarkers(
+  backend: IRemoteBackend,
+  nodePath: string,
+  serverPath: string,
+): Promise<boolean> {
+  const script = `
+const fs = require("fs");
+const content = fs.readFileSync(process.argv[1], "utf8");
+const missing = ${JSON.stringify(FORK_SERVER_BUNDLE_MARKERS)}.filter((marker) => !content.includes(marker));
+if (missing.length > 0) {
+  console.error("missing fork bundle markers: " + missing.join(","));
+  process.exit(2);
+}
+`;
+  const stream = await backend.exec(
+    `${quotePosixPathArg(nodePath)} -e ${quotePosixShellArg(script)} ${quotePosixPathArg(serverPath)}`,
+  );
+  try {
+    await waitForDeployCheckClose(stream);
+    return true;
+  } catch {
+    // 官方 bundle（缺 marker，exit 2）与探测失败（远端文件不可读等）都按"无 fork 能力"
+    // 收口；这是能力探测，失败方向必须是关闭 relay，不能抛错影响连接本身。
+    return false;
   }
 }
 

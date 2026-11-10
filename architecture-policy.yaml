@@ -2372,3 +2372,15 @@ exceptions:
       - packages/desktop/src/renderer/src/desktopOmnicodePlatformBridge.ts
       - packages/ui/src/settings/ProfileMultiInstanceSection.tsx
     reason: OmniCode profile runtime wiring files follow the exact same structure as the existing desktopSaveFile IPC registration and desktopBrowserPlatformBridge delegation patterns; the files are OmniCode-fork feature additions reviewed line-by-line (580-finding sealed scan passed), and adopting the whole desktop/ui module trees needs a separate boundary refactor.
+  # [OmniCode] M4b Browser Relay：新文件落在既有未受管 shared/server/desktop 大模块内的精确路径准入。
+  # shared/browserRelay.ts 为 fork-only 事件契约（沿用 browser-use 既有类型，不发明新形状）；
+  # server/browserRelayChannel.ts 仿照 stdio/http 既有 IServerChannel 模式实现 fork 频道；
+  # desktop/browserRelayRemoteSubscription.ts 仿照 browserControlMainBridge 注入式桥模式做门控订阅。
+  # 整体 adopt shared/server/desktop 模块树不属于本特性。
+  - id: browser-relay-unmanaged-new-files
+    rule: unmanaged-new-file
+    paths:
+      - packages/shared/src/browserRelay.ts
+      - packages/server/src/browserRelayChannel.ts
+      - packages/desktop/src/host/browserRelayRemoteSubscription.ts
+    reason: OmniCode browser relay adds three self-contained fork-only files following the surrounding modules' existing patterns (shared type contract reusing browser-use types, server IServerChannel implementation, desktop injected-bridge subscription); adopting the whole shared/server/desktop module trees needs a separate boundary refactor.
