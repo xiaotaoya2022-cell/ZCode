@@ -284,6 +284,8 @@ export function LoginPanel({ active, onComplete }: LoginPanelProps) {
   // [OmniCode] 失败态恢复入口（spec §定稿决策 4）：粘贴的完整回调 URL 经
   // platform.submitOmnicodeCallback 走 main 官方 handleDeepLink 路由。accepted=true
   // 后官方轮询/回调链路会自动收敛登录态，这里不改写登录状态本身。
+  // 桥缺席（Web/旧 preload）即无入口：IPlatformService 可选方法，据存在性渲染入口。
+  const canSubmitPastedCallback = typeof platform.submitOmnicodeCallback === "function";
   const submitPastedCallback = useCallback(async () => {
     const trimmed = callbackUrlInput.trim();
     if (trimmed === "" || submittingPastedCallback) {
@@ -526,51 +528,56 @@ export function LoginPanel({ active, onComplete }: LoginPanelProps) {
               {intl.formatMessage({ id: "login.oauth.cancel" })}
             </Button>
             {/* [OmniCode] 失败态恢复入口（spec §定稿决策 4）：仅授权流程失败/超时时提供，
-                常驻 UI 不出现。粘贴完整回调 URL 交回 main 的官方 handleDeepLink 路由。 */}
-            <div className="space-y-2 border-t border-border pt-3">
-              <button
-                type="button"
-                className="flex w-full items-center justify-center gap-1 text-ui-sm text-foreground-subtle transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                data-testid={TID_OAUTH_ADVANCED_RECOVERY_TOGGLE}
-                onClick={() => setShowAdvancedRecovery((visible) => !visible)}
-              >
-                {showAdvancedRecovery
-                  ? intl.formatMessage({ id: "login.oauth.recovery.collapse" })
-                  : intl.formatMessage({ id: "login.oauth.recovery.expand" })}
-                {showAdvancedRecovery ? (
-                  <ChevronUpIcon className="size-3.5" />
-                ) : (
-                  <ChevronDownIcon className="size-3.5" />
+                常驻 UI 不出现。粘贴完整回调 URL 交回 main 的官方 handleDeepLink 路由；
+                桥缺席（Web/旧 preload）即无入口，按 IPlatformService 可选方法存在性渲染。 */}
+            {canSubmitPastedCallback && (
+              <div className="space-y-2 border-t border-border pt-3">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-center gap-1 text-ui-sm text-foreground-subtle transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  data-testid={TID_OAUTH_ADVANCED_RECOVERY_TOGGLE}
+                  onClick={() => setShowAdvancedRecovery((visible) => !visible)}
+                >
+                  {showAdvancedRecovery
+                    ? intl.formatMessage({ id: "login.oauth.recovery.collapse" })
+                    : intl.formatMessage({ id: "login.oauth.recovery.expand" })}
+                  {showAdvancedRecovery ? (
+                    <ChevronUpIcon className="size-3.5" />
+                  ) : (
+                    <ChevronDownIcon className="size-3.5" />
+                  )}
+                </button>
+                {showAdvancedRecovery && (
+                  <div className="space-y-2">
+                    <p className="text-ui-xs/relaxed text-foreground-subtle">
+                      {intl.formatMessage({ id: "login.oauth.recovery.hint" })}
+                    </p>
+                    <Input
+                      value={callbackUrlInput}
+                      onChange={(event) => setCallbackUrlInput(event.target.value)}
+                      placeholder={intl.formatMessage({ id: "login.oauth.recovery.placeholder" })}
+                      size="sm"
+                      spellCheck={false}
+                      autoComplete="off"
+                      data-testid={TID_OAUTH_ADVANCED_RECOVERY_INPUT}
+                    />
+                    <Button
+                      variant="outline"
+                      className="h-10 w-full text-ui-base"
+                      size="lg"
+                      disabled={callbackUrlInput.trim() === "" || submittingPastedCallback}
+                      data-testid={TID_OAUTH_ADVANCED_RECOVERY_SUBMIT}
+                      onClick={() => void submitPastedCallback()}
+                    >
+                      {submittingPastedCallback ? (
+                        <Loader2Icon className="size-4 animate-spin" />
+                      ) : null}
+                      {intl.formatMessage({ id: "login.oauth.recovery.submit" })}
+                    </Button>
+                  </div>
                 )}
-              </button>
-              {showAdvancedRecovery && (
-                <div className="space-y-2">
-                  <p className="text-ui-xs/relaxed text-foreground-subtle">
-                    {intl.formatMessage({ id: "login.oauth.recovery.hint" })}
-                  </p>
-                  <Input
-                    value={callbackUrlInput}
-                    onChange={(event) => setCallbackUrlInput(event.target.value)}
-                    placeholder={intl.formatMessage({ id: "login.oauth.recovery.placeholder" })}
-                    size="sm"
-                    spellCheck={false}
-                    autoComplete="off"
-                    data-testid={TID_OAUTH_ADVANCED_RECOVERY_INPUT}
-                  />
-                  <Button
-                    variant="outline"
-                    className="h-10 w-full text-ui-base"
-                    size="lg"
-                    disabled={callbackUrlInput.trim() === "" || submittingPastedCallback}
-                    data-testid={TID_OAUTH_ADVANCED_RECOVERY_SUBMIT}
-                    onClick={() => void submitPastedCallback()}
-                  >
-                    {submittingPastedCallback ? <Loader2Icon className="size-4 animate-spin" /> : null}
-                    {intl.formatMessage({ id: "login.oauth.recovery.submit" })}
-                  </Button>
-                </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         )}
       </div>
