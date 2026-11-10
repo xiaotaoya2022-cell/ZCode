@@ -52,6 +52,13 @@ export type {
   LegacyPersistedLocalePreference,
   PersistedSettingsLocaleFields,
 } from "./locale.js";
+export { DEFAULT_LOCALE } from "./protocol.js";
+// [OmniCode] 实例专属登录浏览器：授权 URL 形状与实例身份判定（docs/omnicode/instance-login-browser.md）
+export {
+  isOmnicodeAuthorizeUrl,
+  isOmnicodeProfileId,
+  isOmnicodeProfileInstanceEnv,
+} from "./omnicodeAuth.js";
 export { ZCODE_VERSION, ZCODE_COMMIT, ZCODE_BUILD_TIME } from "./version.js";
 export type { HelloMessage, HelloAckMessage } from "./handshake.js";
 export type { ArmsRumEnv, ZCodeEnv, ZCodeProductFlavor } from "./env.js";
