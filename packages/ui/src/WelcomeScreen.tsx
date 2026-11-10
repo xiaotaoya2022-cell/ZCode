@@ -36,6 +36,7 @@ import { renderOAuthProviderIcon } from "./lib/oauthProviderIcon.js";
 import { ThemeHeroVisual } from "./openWorkspacePageThemeHero.js";
 import { useZCodeStore } from "./store/StoreProvider.js";
 import { DesktopOverlayWindowControls } from "@/DesktopOverlayWindowControls.js";
+import { ProfileMultiInstanceSection } from "@/settings/ProfileMultiInstanceSection.js";
 import { toast } from "@/components/ui/toast.js";
 
 interface WelcomeScreenProps {
@@ -45,14 +46,44 @@ interface WelcomeScreenProps {
 export type LoginCompleteReason = "oauth" | "apiKey" | "skip";
 
 export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
+  const { intl } = useZCodeIntl();
+  const [loginOpen, setLoginOpen] = useState(false);
   return (
-    <main className="relative flex h-full min-h-dvh items-center justify-center overflow-hidden bg-background px-4 py-6 text-foreground sm:px-6">
+    <main className="relative flex h-full min-h-dvh flex-col items-center overflow-y-auto overflow-x-hidden bg-background px-4 py-6 text-foreground sm:px-6">
       <ThemeHeroVisual className="absolute inset-0" />
       {/* 原生拖拽命中不受 pointer-events/z-index 约束；拖拽层必须避开窗控，且先于 no-drag 区声明。 */}
       <div className="pointer-events-none absolute left-0 top-0 right-0 z-10 flex h-12 items-center [app-region:drag] platform-windows-desktop:right-[134px] platform-linux-desktop:right-[134px]" />
       <DesktopOverlayWindowControls />
-      <section className="relative z-10 w-full flex flex-col gap-10 max-w-sm rounded-2xl border border-popover-border bg-background p-8 text-ui-base/relaxed shadow-md sm:p-10">
-        <LoginPanel active onComplete={onComplete} />
+      {/* [OmniCode] 首屏=实例管理优先（spec 产品定位）：未登录即可创建/启动/编排实例，
+          主实例自身登录次级化为折叠区——控制台的职能是管理实例，不是登录墙。 */}
+      <section className="relative z-10 mt-12 w-full max-w-2xl flex flex-col gap-3 rounded-2xl border border-popover-border bg-background p-6 shadow-md sm:p-8">
+        <h1 className="text-ui-lg text-foreground">
+          {intl.formatMessage({ id: "welcome.omnicodeInstancesTitle" })}
+        </h1>
+        <p className="text-ui-sm text-foreground-subtle">
+          {intl.formatMessage({ id: "welcome.omnicodeInstancesHint" })}
+        </p>
+        <ProfileMultiInstanceSection />
+      </section>
+      <section className="relative z-10 mt-6 w-full max-w-2xl flex flex-col rounded-2xl border border-popover-border bg-background shadow-md">
+        <button
+          type="button"
+          onClick={() => setLoginOpen((previous) => !previous)}
+          className="flex items-center justify-between px-6 py-4 text-ui-base text-foreground"
+          aria-expanded={loginOpen}
+        >
+          <span>{intl.formatMessage({ id: "welcome.loginToggle" })}</span>
+          {loginOpen ? (
+            <ChevronUpIcon className="size-4" />
+          ) : (
+            <ChevronDownIcon className="size-4" />
+          )}
+        </button>
+        {loginOpen ? (
+          <div className="border-t border-popover-border px-6 py-6 sm:px-8">
+            <LoginPanel active onComplete={onComplete} />
+          </div>
+        ) : null}
       </section>
     </main>
   );

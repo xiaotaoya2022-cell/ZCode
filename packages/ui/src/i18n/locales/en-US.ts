@@ -3635,6 +3635,11 @@ const enUS: Record<string, string> = {
     "The source session was not found, or it no longer matches the current workspace filter.",
   "settings.usageTitle": "Usage stats",
   // [OmniCode] Profile multi-instance
+  // [OmniCode] Welcome screen: instance management first, main-instance sign-in secondary
+  "welcome.omnicodeInstancesTitle": "Instances",
+  "welcome.omnicodeInstancesHint":
+    "Create isolated instances and run them in parallel; each has its own login state and data.",
+  "welcome.loginToggle": "Sign in to use the main instance (optional)",
   "settings.omnicodeProfiles.title": "Multi-instance",
   "settings.omnicodeProfiles.description":
     "Run isolated ZCode instances per account: credentials, sessions and browser storage stay separate, and logins survive restarts. Launched instances run alongside this window.",
