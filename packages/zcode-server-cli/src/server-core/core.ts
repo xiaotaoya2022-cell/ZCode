@@ -6,6 +6,10 @@ import {
   getAppConfigDir,
   ZCODE_BUILTIN_PROVIDER_CONFIG_FILE_ENV,
   createTopicResourcePeers,
+  // [OmniCode] M4c Browser Relay：Core 自建 relay 频道实例，同一实例注册到所有 WS 连接并
+  // 装配成 services 的 relay executor——远端 agent 的 browser 反向请求与桌面订阅状态共享事实源。
+  createBrowserRelayAgentExecutor,
+  createOmniCodeBrowserRelayChannel,
 } from "@zcode/services/node";
 import { IZCodeAgentService } from "@zcode/services";
 import { ZCODE_APP_VERSION_ENV, ZCODE_VERSION } from "@zcode/shared";
@@ -53,12 +57,19 @@ export async function runServerCore(generation: number): Promise<void> {
     );
   }
   const sourceServerId = (await resolveCoreServerId()) ?? hostname() ?? "zcode-server";
+  // [OmniCode] M4c Browser Relay：频道实例在 services 创建前自建——同一实例经 createCoreHttpServer
+  // 注册（listen 订阅计数反映桌面端 relay 能力），并经 relay executor 供 agent browser 后端解析。
+  const browserRelayChannel = createOmniCodeBrowserRelayChannel();
   const { services, workspaceIdentityMapper, migrationFailedPathCount } =
     await createServerHostServices({
       sourceServerId,
       zcodeBuiltinProviderConfigFilePath,
       providerProvisioningTargetEnabled: true,
     topicResourceRelayChannel: (request) => topicResourcePeers.getChannel(request),
+      // [OmniCode] M4c：agent 的 browser 反向请求在无本地桥时降级走 relay（订阅门控见
+      // zcodeAgentService.resolveBrowserControlExecutor：本地桥优先，未订阅按 backend_unavailable
+      // 快速失败，不挂起等超时）。
+      browserRelayExecutor: createBrowserRelayAgentExecutor(browserRelayChannel),
     });
   const taskActivityTracker = createTaskActivityTracker(services.getOptional(IZCodeAgentService));
   const ingressToken = await createIngressToken(layout);
@@ -68,6 +79,7 @@ export async function runServerCore(generation: number): Promise<void> {
     migrationFailedPathCount,
     workspaceIdentityMapper,
     topicResourcePeers,
+    browserRelayChannel,
   });
   const send = (message: unknown): Promise<void> => {
     if (typeof process.send !== "function" || process.connected === false) return Promise.resolve();
@@ -144,6 +156,8 @@ export async function runServerCore(generation: number): Promise<void> {
     activitySubscription.dispose();
     taskActivityTracker.dispose();
     await http.close().catch(() => undefined);
+    // [OmniCode] M4c：在途 relay 请求按失败结算、订阅计数清零（进程退出前的资源收口）。
+    browserRelayChannel.dispose();
     await disposeServiceResourcesAndWait(services).catch(() => undefined);
     await send({ type: "shutdown-ack" });
     await send({ type: "exit", reason });

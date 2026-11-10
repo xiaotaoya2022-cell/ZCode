@@ -1561,3 +1561,15 @@ exceptions:
     paths:
       - packages/shared/src/omnicodeAuth.ts
     reason: OmniCode instance login browser needs the authorize-URL shape check and profile-instance env guard in both main (window routing) and future renderer error-state recovery; a pure-function shared helper is the only shared home, and adopting the whole shared module is out of scope for this feature.
+  # [OmniCode] M4c Browser Relay：relay 频道实现自 packages/server 迁入 services（精确路径准入）。
+  # 远端 workspace 的 server 有两个形态——stdio bundle（@zcode/server entry-stdio/entry-http）
+  # 与 zcode-server-cli 的 Source Server Core；依赖边界禁止 zcode-server-cli 反向依赖
+  # @zcode/server（见 zcode-server-cli/src/server-core/hostCapability.ts 头注），两个形态必须
+  # 共享同一频道事实源，故实现落 services（services 已依赖 rpc/shared，executor 契约
+  # BrowserAmbientContextExecutor 亦在本包）；@zcode/server 旧路径保留 re-export shim 以稳住
+  # 既有导入与 browser-relay-unmanaged-new-files 登记。整体 adopt services 模块树不属于本特性。
+  - id: browser-relay-services-channel
+    rule: unmanaged-new-file
+    paths:
+      - packages/services/src/zcode-agent/browserRelayServerChannel.ts
+    reason: OmniCode browser relay moves the fork-only IServerChannel implementation into services so both server flavors (stdio bundle and zcode-server-cli Core) share one subscription-count fact source under the zcode-server-cli -> @zcode/server import boundary; the file sits next to the existing BrowserAmbientContextExecutor contract and the @zcode/server path keeps a re-export shim, so adopting the whole services module tree stays out of scope for this feature.
