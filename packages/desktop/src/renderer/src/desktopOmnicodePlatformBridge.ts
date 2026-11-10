@@ -35,9 +35,13 @@ export const desktopOmnicodePlatformBridge = {
     requireBridge(window.zcode.stopOmnicodeProfile?.(payload)),
   focusOmnicodeProfile: (payload: OmnicodeProfileIdInput): Promise<{ ok: boolean }> =>
     requireBridge(window.zcode.focusOmnicodeProfile?.(payload)),
-  // [OmniCode] 失败态恢复入口：手动粘贴完整 OAuth 回调 URL（spec: docs/omnicode/instance-login-browser.md）
-  submitOmnicodeCallback: (payload: { url: string }): Promise<{ ok: boolean; accepted: boolean }> =>
-    requireBridge(window.zcode.submitOmnicodeCallback?.(payload)),
+  // [OmniCode] 失败态恢复入口：手动粘贴完整 OAuth 回调 URL（spec: docs/omnicode/instance-login-browser.md）。
+  // 与 printPageToPdf 同模式：底层桥缺席（旧 preload）时保持 undefined——
+  // IPlatformService 上为可选方法，UI 侧据此隐藏“高级恢复”入口，而非提交时报错。
+  submitOmnicodeCallback: window.zcode.submitOmnicodeCallback
+    ? (payload: { url: string }): Promise<{ ok: boolean; accepted: boolean }> =>
+        requireBridge(window.zcode.submitOmnicodeCallback?.(payload))
+    : undefined,
   onOmnicodeInstanceEvent: (
     handler: (payload: OmnicodeInstanceEventPayload) => void,
   ): (() => void) =>
