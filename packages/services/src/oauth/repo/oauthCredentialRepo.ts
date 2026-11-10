@@ -54,6 +54,22 @@ function refreshTokenKey(provider: OAuthProviderId): string {
   return `oauth:${provider}:refresh_token`;
 }
 
+// [OmniCode] 过期时间戳（epoch ms）落盘：启动恢复可精确判断"即将过期"并触发
+// 静默重授权/提示，不再依赖解析 JWT exp（业务 token 可能不是标准 JWT）。
+function expiresAtKey(provider: OAuthProviderId): string {
+  return `oauth:${provider}:expires_at`;
+}
+
+/** [OmniCode] 从会话快照解析 expiresAt（epoch ms，非法/缺失返回 undefined）。 */
+function readSnapshotExpiresAt(
+  snapshot: Readonly<Record<string, string | null>>,
+  provider: OAuthProviderId,
+): { expiresAt: number } | Record<string, never> {
+  const raw = snapshot[expiresAtKey(provider)];
+  const expiresAt = Number.parseInt(raw ?? "", 10);
+  return Number.isFinite(expiresAt) && expiresAt > 0 ? { expiresAt } : {};
+}
+
 function userInfoKey(provider: OAuthProviderId): string {
   return `oauth:${provider}:user_info`;
 }
@@ -307,6 +323,9 @@ export class OAuthCredentialRepo {
       ...(linkedBigModel ? { linkedBigModel } : {}),
       ...(refreshToken ? { refreshToken } : {}),
       ...(zcodeJwtToken ? { zcodeJwtToken } : {}),
+      // [OmniCode] expiresAt 融入快照机制（批次1 重放合流）：ZAI adapter 解析的
+      // expires_in（epoch ms）随会话快照持久化，启动恢复可精确判断"即将过期"。
+      ...readSnapshotExpiresAt(snapshot, provider),
     };
   }
 
@@ -559,6 +578,8 @@ export class OAuthCredentialRepo {
   }
 
   async loadTokenSet(provider: OAuthProviderId): Promise<OAuthTokenSet | null> {
+    // 批次1 重放合流：官方 v3.18.0 会话快照机制为主体；expiresAt 已融入
+    // tokenSetFromSnapshot（readSnapshotExpiresAt），不再需要旧结构的逐键读取。
     return this.tokenSetFromSnapshot(await this.loadSessionSnapshot(), provider);
   }
 
@@ -578,11 +599,14 @@ export class OAuthCredentialRepo {
     tokenSet: OAuthTokenSet,
     expected?: Readonly<Record<string, string | null>>,
   ): Promise<boolean> {
+    // [OmniCode] expiresAt 融入官方 updateMany 原子批量写（ZAI adapter 解析 expires_in，
+    // 此前凭据层丢弃该字段；有值存无值清，语义与旧结构一致）。
     return this.localStore.updateMany(
       {
         [accessTokenKey(provider)]: tokenSet.accessToken,
         [refreshTokenKey(provider)]: tokenSet.refreshToken ?? null,
         [ZCODE_JWT_TOKEN_KEY]: tokenSet.zcodeJwtToken ?? null,
+        [expiresAtKey(provider)]: tokenSet.expiresAt ? String(tokenSet.expiresAt) : null,
         [SESSION_REVISION_KEY]: randomUUID(),
       },
       { expected: expected ?? (await this.loadSessionSnapshot()) },
