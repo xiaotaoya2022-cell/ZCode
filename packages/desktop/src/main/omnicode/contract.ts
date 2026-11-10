@@ -20,6 +20,8 @@ export {
   listOmnicodeRunningInstances,
   launchOmnicodeProfile,
   stopOmnicodeProfile,
+  arrangeOmnicodeInstances,
+  restoreOmnicodeInstances,
 } from "./instanceManager.js";
 export type { OmnicodeRunningInstance } from "./instanceManager.js";
 export {

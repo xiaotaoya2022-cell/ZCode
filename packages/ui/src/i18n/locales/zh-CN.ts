@@ -3843,6 +3843,12 @@ const zhCN: Record<string, string> = {
   "settings.omnicodeProfiles.toastCloned": "实例已克隆（登录态不随克隆）",
   "settings.omnicodeProfiles.toastLaunched": "实例已启动",
   "settings.omnicodeProfiles.toastStopped": "实例已停止",
+  // [OmniCode] M2 v1 平铺编排（spec §实时视窗）
+  "settings.omnicodeProfiles.arrange": "平铺编排",
+  "settings.omnicodeProfiles.restore": "还原窗口",
+  "settings.omnicodeProfiles.toastArranged": "已平铺 {count} 个实例窗口",
+  "settings.omnicodeProfiles.toastRestored": "已还原 {count} 个实例窗口",
+  "settings.omnicodeProfiles.toastArrangeNone": "没有可编排的运行中实例（实例未连接时无法投递）",
   "settings.omnicodeProfiles.actionFailed": "操作失败",
   "settings.usageDescription": "查看会话活跃度与模型用量的粗略统计。",
   "resourceManager.storage.summaryTotal": "ZCode 总占用",

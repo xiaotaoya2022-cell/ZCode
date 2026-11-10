@@ -19,7 +19,12 @@ export interface OmnicodeInstanceBridgeCommand {
     | "quit"
     | "subscribeThumbnails"
     | "unsubscribeThumbnails"
-    | "restore";
+    | "restore"
+    // M2 v1 平铺编排（spec §实时视窗）：arrange 带目标矩形，restoreBounds 按实例侧基线回位
+    | "arrange"
+    | "restoreBounds";
+  /** arrange 命令的目标矩形（父进程由 workArea 计算后下发）。 */
+  bounds?: { x: number; y: number; width: number; height: number };
 }
 
 export interface OmnicodeInstanceBridgeListeners {
