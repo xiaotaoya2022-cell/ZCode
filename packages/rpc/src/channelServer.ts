@@ -225,17 +225,18 @@ export class ChannelServer<TContext = string> implements IChannelServer<TContext
       });
       this.activeRequests.set(request.id, disposable);
     } catch (error) {
-      // 已结束的终端等资源会拒绝迟到订阅；该拒绝属于本次请求，不能逃逸并退出整个 Host。
-      // 独立失败帧不会被旧客户端当作业务事件，也不会建立无法释放的活动订阅。
-      this.sendResponse({
-        id: request.id,
-        type: ResponseType.EventError,
-        data: {
-          name: error instanceof Error ? error.name : "Error",
-          message: error instanceof Error ? error.message : String(error),
-          ...(error instanceof Error && error.stack ? { stack: error.stack.split("\n") } : {}),
-        },
-      });
+      // [OmniCode] fork 客户端订阅未知事件（如 onDynamicBrowserRelayRequest 碰上官方 server）时，
+      // channel.listen 会抛 "Event not found" 等错误。守卫要求：catch + 带上下文日志 + 静默，
+      // 不回任何 wire 响应帧、不进 activeRequests、连接保持存活。设计依据：
+      // ZakiCode docs/specs/remote-server-event-compat.md 与《ZCode 原生魔改版架构与实现方案报告》§5.1。
+      // 静默（而非回 EventError 帧）的原因：Event 请求 id 与 Promise 请求 id 共用同一计数命名空间，
+      // 客户端事件处理器可能对同 id 的任意响应帧类型不设防，错误帧可能被误读成事件数据；
+      // 且静默与本文件 collectPendingRequest 对未知 channel 事件订阅的既有语义一致（记日志、不应答）。
+      // 客户端侧的失效订阅与官方上游一致：等待 EventDispose 由监听器退订收口，不会泄漏连接。
+      console.error(
+        `[rpc] event listen failed (connection stays alive): channel=${request.channelName} event=${request.name}`,
+        error instanceof Error ? error : new Error(String(error)),
+      );
     }
   }
 

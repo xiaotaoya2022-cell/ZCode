@@ -152,6 +152,8 @@ import {
   createServerRemoteWorkspaceServiceCollection,
   resolveServerProjectService,
 } from "./remoteWorkspaceServiceCollection.js";
+// [OmniCode] M4b Browser Relay：远程 workspace 连接的 fork-only relay 订阅桥（门控订阅）。
+import { subscribeOmniCodeBrowserRelay } from "./browserRelayRemoteSubscription.js";
 import { getRemoteProviderProvisioningExecutor } from "./remoteProviderProvisioningService.js";
 import {
   createSourceSettingsServiceCollection,
@@ -1935,6 +1937,22 @@ async function createWindowRemoteConnectionHandle(params: {
   let disposed = false;
   let sourceClosed = false;
   let projectSubscription: { dispose(): void } | undefined;
+  // [OmniCode] M4b Browser Relay：随远程连接建立/换代重建，连接关闭时统一释放。
+  let browserRelaySubscription: IDisposable | undefined;
+  const ensureBrowserRelaySubscription = (rpcClient: HostRemoteConnection["rpcClient"]) => {
+    browserRelaySubscription?.dispose();
+    browserRelaySubscription = undefined;
+    if (!rpcClient) {
+      return;
+    }
+    browserRelaySubscription = subscribeOmniCodeBrowserRelay({
+      client: rpcClient,
+      // relay 把远端 agent 的浏览器命令路由进 host→main 桥（WebContentsView+CDP，30s 预算），
+      // 截图/结果经 browserRelayRespond 回传远端。
+      browserBridge: browserControlMainBridge,
+      logger,
+    });
+  };
   const detachOwnSourceSettings = () => {
     const sourceId = connection?.serverInfo.serverId;
     if (!sourceId || params.target.kind !== "server") return;
@@ -2045,6 +2063,7 @@ async function createWindowRemoteConnectionHandle(params: {
     connection = {
       serverInfo: managed.serverInfo,
       services: managed.services,
+      rpcClient: managed.rpcClient,
       dispose() {
         // Bug 原因：Window registry handle 是 logical/attachment lease，不是 Source connection owner。
         // 旧 entry 取消或迟到恢复时若调用 manager.disconnect，会拆掉新 entry 正在共享的
@@ -2068,6 +2087,7 @@ async function createWindowRemoteConnectionHandle(params: {
       connection = {
         serverInfo: reconnected.serverInfo,
         services: reconnected.services,
+        rpcClient: reconnected.rpcClient,
         dispose() {
           // 同上：只释放当前 wrapper 的订阅，不跨 lease 关闭共享 Source。
         },
@@ -2081,6 +2101,9 @@ async function createWindowRemoteConnectionHandle(params: {
         targetKind: params.target.kind,
       });
       refreshResourceTelemetry();
+      // [OmniCode] M4b Browser Relay：Source 重连换代后旧订阅挂在已释放的 client 上，
+      // 必须用新代 rpcClient 重建门控订阅。
+      ensureBrowserRelaySubscription(reconnected.rpcClient);
       lastNotifiedRecoveryAttempt = 0;
       for (const listener of reconnectListeners) listener();
     });
@@ -2105,6 +2128,9 @@ async function createWindowRemoteConnectionHandle(params: {
       if (!disposed && !sourceClosed && event.channel === "state:projects") notifyProjectChange();
     });
   }
+  // [OmniCode] M4b Browser Relay：对远程 workspace 连接做 fork 门控探测并订阅
+  // onDynamicBrowserRelayRequest；官方/上游远端探测失败 → log warn + 跳过订阅。
+  ensureBrowserRelaySubscription(connection.rpcClient);
   refreshResourceTelemetry();
   // 桌面 attachment 对远端媒体走 Host loopback Range 数据面；services 会随 Source 重连换代，
   // 工厂在调用时再取当前 file service。server 直连保持 renderer inline 读取。
@@ -2204,6 +2230,8 @@ async function createWindowRemoteConnectionHandle(params: {
       }
       disposed = true;
       detachOwnSourceSettings();
+      browserRelaySubscription?.dispose();
+      browserRelaySubscription = undefined;
       topicResourceRelay?.dispose();
       closeListeners.clear();
       reconnectListeners.clear();
