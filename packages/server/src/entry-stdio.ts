@@ -14,6 +14,9 @@ import { createStdioServer } from "./stdio.js";
 import { registerStdioProcessLifecycle } from "./stdio-lifecycle.js";
 import { createStdioServices } from "./stdioServices.js";
 import { ensureRemoteServerDeviceMid } from "./stdioDeviceMid.js";
+// [OmniCode] M4c Browser Relay：entry 侧持有频道实例，同一实例注册到 RPC 并装配成
+// services 的 relay executor，让远端 agent 的 browser 命令与桌面订阅状态共享同一事实源。
+import { createBrowserRelayAgentExecutor, createOmniCodeBrowserRelayChannel } from "./browserRelayChannel.js";
 import {
   materializeBundledZCodeBuiltinProviderConfig,
   readBundledZCodeBuiltinProviderConfig,
@@ -66,6 +69,9 @@ async function main() {
     content: readBundledZCodeBuiltinProviderConfig(),
   });
   await migrateApplicationStorage(await createSettingService().get());
+  // [OmniCode] M4c Browser Relay：频道实例在 services 创建前自建——同一实例经 createStdioServer
+  // 注册（listen 订阅计数反映桌面端 relay 能力），并经 relay executor 供 agent browser 后端解析。
+  const browserRelayChannel = createOmniCodeBrowserRelayChannel();
   const { authorityModeParseResult, services } = createStdioServices({
     env: process.env,
     zcodeBuiltinProviderConfigFilePath,
@@ -73,6 +79,7 @@ async function main() {
       if (!topicResourceChannel) throw new Error("Desktop topic resource channel is unavailable");
       return topicResourceChannel;
     },
+    browserRelayExecutor: createBrowserRelayAgentExecutor(browserRelayChannel),
   });
   if (authorityModeParseResult.invalidRawValue) {
     log(
@@ -86,6 +93,7 @@ async function main() {
           topicResourceChannel = client.getChannel(TOPIC_RESOURCE_RELAY_CHANNEL);
         }
       : undefined,
+    browserRelayChannel,
   );
   registerStdioProcessLifecycle({
     stdin: process.stdin,

@@ -141,6 +141,9 @@ export {
 export { createCredentialService } from "./credential/credentialService.js";
 export { createBroadcastService } from "./broadcast/broadcastService.js";
 export { createZCodeAgentService } from "./zcode-agent/zcodeAgentService.js";
+// [OmniCode] M4c Browser Relay：relay executor 契约类型（server bundle entry 装配注入）。
+export type { BrowserRelayAgentExecutor } from "./zcode-agent/zcodeAgentBrowserAmbientContext.js";
+import type { BrowserRelayAgentExecutor } from "./zcode-agent/zcodeAgentBrowserAmbientContext.js";
 export { createZCodeTaskServiceAdapter } from "./zcode-agent/zcodeTaskServiceAdapter.js";
 export { createZCodeSessionService } from "./zcode-session/zcodeSessionService.js";
 export {
@@ -1306,6 +1309,14 @@ export function createLocalServices(options: {
       command: BrowserCommand;
     }): Promise<{ ok: boolean; [k: string]: unknown }>;
   };
+  /**
+   * [OmniCode] M4c Browser Relay：remote workspace Host（SSH/WSL/Docker/Server bundle）注入的
+   * relay 降级执行器。本地 browserControlExecutor 缺席时，agent 的 interaction/browser*
+   * 反向请求经远端 fork server 的 relay 频道转发到桌面可见浏览器 pane 执行。
+   * hasRelaySubscriber 由注入方按频道订阅计数实现——桌面端是否订阅随连接增减动态变化，
+   * 必须每次调用时重查，未订阅时按"无浏览器后端"短路而不是挂起等超时。
+   */
+  browserRelayExecutor?: BrowserRelayAgentExecutor;
   /** Windows desktop-local Host 的 CUA turn 状态投影；其它 authority 会在装配层拒绝。 */
   cuaOperationStateReporter?: CuaOperationStateReporter;
 }): ServiceCollection {
@@ -2326,6 +2337,8 @@ export function createLocalServices(options: {
     spawnFallbackCwd: options?.zcodeAgentSpawnFallbackCwd,
     // browser-use：host→main 执行桥透传给 agent service 的 onRequest browserExecute 路由。
     browserControlExecutor: options?.browserControlExecutor,
+    // [OmniCode] M4c Browser Relay：remote workspace Host 的 relay 降级执行器（本地桥缺席时生效）。
+    browserRelayExecutor: options?.browserRelayExecutor,
     // 机器人凭据只归属于授权 Host；远端独立服务不能借用本机配置扩大读取范围。
     // 渠道工具等待插件入口接入，仅停用默认发送接线，保留完整实现。
     // channelReplyExecutor: async (value) => {
@@ -3303,6 +3316,8 @@ export async function createServerHostServices(options: {
   sourceServerId: string;
   zcodeBuiltinProviderConfigFilePath: string;
   providerProvisioningTargetEnabled?: boolean;
+  /** [OmniCode] M4c：relay executor（entry-http 从共享频道实例装配）。 */
+  browserRelayExecutor?: BrowserRelayAgentExecutor;
 }) {
   const projectStorageHostId = remoteHostIdFromWorkspaceIdentity(
     buildServerRemoteWorkspaceIdentity({ serverId: options.sourceServerId, workspacePath: "/" }),
@@ -3343,6 +3358,8 @@ export async function createServerHostServices(options: {
     topicResourceRelayChannel: options.topicResourceRelayChannel,
     projectStorageHostId,
     sourceServerWorkspaceService,
+    // [OmniCode] M4c Browser Relay：远端 agent 的 browser 反向请求在无本地桥时降级走 relay。
+    browserRelayExecutor: options.browserRelayExecutor,
   });
   return { services, workspaceIdentityMapper, migrationFailedPathCount };
 }

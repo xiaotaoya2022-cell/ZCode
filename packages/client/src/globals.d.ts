@@ -154,6 +154,11 @@ declare global {
       onOmnicodeInstanceEvent?(
         handler: (payload: import("@zcode/shared").OmnicodeInstanceEventPayload) => void,
       ): () => void;
+      /** [OmniCode] 失败态恢复入口：手动粘贴完整 OAuth 回调 URL，main 复用 handleDeepLink 路由 */
+      submitOmnicodeCallback?(payload: { url: string }): Promise<{
+        ok: boolean;
+        accepted: boolean;
+      }>;
       /** 从系统拖拽/文件输入得到的 Web File 解析真实本地路径 */
       getPathForFile?(file: File): string | null;
       /** dwf 产物「作为文件打开」：把某一版的字节落成本机副本，返回其路径 */

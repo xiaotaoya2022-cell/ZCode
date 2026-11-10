@@ -12,6 +12,8 @@ export interface CreateStdioServicesOptions {
   env?: Record<string, string | undefined>;
   zcodeBuiltinProviderConfigFilePath: string;
   zcodeAgentCommandResolver?: ZCodeAgentCommandResolver;
+  /** [OmniCode] M4c：relay executor（entry 侧从共享频道实例装配）；缺省则远程 browser 命令维持 backend_unavailable。 */
+  browserRelayExecutor?: Parameters<typeof createLocalServices>[0]["browserRelayExecutor"];
 }
 
 export interface RemoteAgentNetworkOptions {
@@ -43,6 +45,8 @@ export function createStdioServices(options: CreateStdioServicesOptions) {
     serviceAuthorityMode: authorityModeParseResult.mode,
     zcodeAgentCommandResolver: options.zcodeAgentCommandResolver,
     remoteAgentNetwork,
+    // [OmniCode] M4c Browser Relay：agent 的 browser 反向请求在无本地桥时降级走 relay。
+    browserRelayExecutor: options.browserRelayExecutor,
   });
 
   return {

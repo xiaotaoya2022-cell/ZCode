@@ -1369,6 +1369,16 @@ const zhCN: Record<string, string> = {
   "login.oauth.loginFailure": "登录失败，请重试",
   "login.oauth.cancel": "取消",
   "login.oauth.retry": "重新登录",
+  // [OmniCode] 实例专属登录浏览器：失败态恢复入口（手动粘贴回调 URL，spec: docs/omnicode/instance-login-browser.md）
+  "login.oauth.recovery.expand": "高级恢复",
+  "login.oauth.recovery.collapse": "收起恢复入口",
+  "login.oauth.recovery.hint":
+    "授权流程失败或超时（300 秒）时，可把浏览器地址栏里的完整回调 URL 粘贴到此处，由本实例重新接收。",
+  "login.oauth.recovery.placeholder":
+    "粘贴完整回调 URL（zcode://oauth/callback?… 或 http://localhost:1455/auth/callback?…）",
+  "login.oauth.recovery.submit": "提交回调",
+  "login.oauth.recovery.accepted": "回调已接收，正在完成登录…",
+  "login.oauth.recovery.rejected": "回调未被接收：state 不匹配或已过期",
   "login.expired.title": "登录已过期",
   "login.expired.description": "为了保障账号安全，请重新登录。",
   "login.expired.action": "重新登录",

@@ -409,6 +409,7 @@ import { getDataBaseDir } from "../paths.js";
 import {
   collectBrowserAmbientContext,
   type BrowserAmbientContextExecutor,
+  type BrowserRelayAgentExecutor,
 } from "./zcodeAgentBrowserAmbientContext.js";
 import {
   createCuaOperationTurnTracker,
@@ -1160,6 +1161,14 @@ interface CreateZCodeAgentServiceBaseOptions extends Omit<
    * browser 命令返回 backend_unavailable，不影响其它功能。
    */
   browserControlExecutor?: BrowserAmbientContextExecutor;
+  /**
+   * [OmniCode] M4c Browser Relay：remote workspace Host（SSH/WSL/Docker/Server bundle）注入的
+   * relay 降级执行器。本地 browserControlExecutor 缺席时，agent 的 interaction/browserList /
+   * interaction/browserExecute 经远端 fork server 的 relay 频道转发到桌面可见浏览器 pane 执行，
+   * 结果形状与本地完全一致（BrowserBackendDescriptor[] / BrowserCommandResult）。
+   * 本地桥存在时本字段绝不参与（本地 workspace 行为零变化）。
+   */
+  browserRelayExecutor?: BrowserRelayAgentExecutor;
   channelReplyExecutor?: (request: ChannelReplyHostRequest) => Promise<ChannelReplyResult>;
   topicResourceExecutor?: (
     request: ZCodeTopicResourceReadParams &
@@ -1327,6 +1336,43 @@ export function resolveOffPeakToolSelection(
     ? selection
     : { ...selection, options: { reasoningLevel: thoughtLevel } };
 }
+
+// [OmniCode] M4c Browser Relay：browser 后端解析的统一入口。
+// 优先级：本地 browserControlExecutor（desktop host / 本机 server）> relay 降级执行器
+// （remote workspace Host 注入，经 fork server 频道转发到桌面可见浏览器 pane）。
+// 桌面端是否订阅 relay 事件随远程连接增减动态变化，所以门控必须在每次调用时重查
+// hasRelaySubscriber()：未订阅时行为与"executor 缺席"完全一致（list 空列表、execute
+// backend_unavailable，openScope 相应 scope rejected），绝不挂起等待 relay 超时。
+function resolveBrowserControlExecutor(
+  options: CreateZCodeAgentServiceOptions | undefined,
+): BrowserAmbientContextExecutor | undefined {
+  const local = options?.browserControlExecutor;
+  if (local) return local;
+  const relay = options?.browserRelayExecutor;
+  if (!relay) return undefined;
+  return {
+    async list(input) {
+      if (!relay.hasRelaySubscriber()) return [];
+      return relay.list(input);
+    },
+    async execute(input) {
+      if (!relay.hasRelaySubscriber()) {
+        // 与 executor 缺席路径同形：本地无浏览器后端的既有语义（含 openScope 拒绝，
+        // 让 broker 的 rememberConnection 幂等撤销已登记连接）。
+        return {
+          ...(input.command.method === "openScope" && input.controlScopeId
+            ? { scope: { id: input.controlScopeId, state: "rejected" as const } }
+            : {}),
+          ok: false,
+          error: { code: "backend_unavailable", message: "browser control not available" },
+          elapsedMs: 0,
+        };
+      }
+      return relay.execute(input);
+    },
+  };
+}
+
 export function createZCodeAgentService(
   options?: CreateZCodeAgentServiceOptions,
 ): IZCodeAgentService & { disposeAllAndWait(): Promise<void> } {
@@ -3187,7 +3233,8 @@ export function createZCodeAgentService(
             });
             return;
           }
-          const executor = options?.browserControlExecutor;
+          // [OmniCode] M4c：本地桥优先，remote workspace Host 降级走 relay（订阅门控见 resolver）。
+          const executor = resolveBrowserControlExecutor(options);
           if (!executor) {
             void client.respond(request.id, { browsers: [] });
             return;
@@ -3217,7 +3264,8 @@ export function createZCodeAgentService(
             });
             return;
           }
-          const executor = options?.browserControlExecutor;
+          // [OmniCode] M4c：本地桥优先，remote workspace Host 降级走 relay（订阅门控见 resolver）。
+          const executor = resolveBrowserControlExecutor(options);
           if (!executor) {
             void client.respond(request.id, {
               ...(parsed.data.command.method === "openScope" && parsed.data.controlScopeId
@@ -5875,7 +5923,8 @@ export function createZCodeAgentService(
       const logTraceId = sessionTraceId ?? params.inputId;
       const browserAmbientContext =
         params.browserAmbientContext ??
-        (await collectBrowserAmbientContext(options?.browserControlExecutor, {
+        // [OmniCode] M4c：remote workspace 经 relay 采集桌面浏览器 ambient（订阅门控内零开销短路）。
+        (await collectBrowserAmbientContext(resolveBrowserControlExecutor(options), {
           sessionId: params.sessionId,
           workspacePath: params.workspacePath,
           ...(params.workspaceIdentity ? { workspaceIdentity: params.workspaceIdentity } : {}),
@@ -6766,7 +6815,8 @@ export function createZCodeAgentService(
         };
         envelope = { ...envelope, payload };
         const browserAmbientContext = await measure("host.browser_context", () =>
-          collectBrowserAmbientContext(options?.browserControlExecutor, {
+          // [OmniCode] M4c：remote workspace 经 relay 采集桌面浏览器 ambient（订阅门控内零开销短路）。
+          collectBrowserAmbientContext(resolveBrowserControlExecutor(options), {
             sessionId,
             workspacePath: params.workspacePath,
             ...(params.workspaceIdentity ? { workspaceIdentity: params.workspaceIdentity } : {}),

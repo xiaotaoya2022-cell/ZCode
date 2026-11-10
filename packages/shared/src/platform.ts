@@ -884,6 +884,14 @@ export interface IPlatformService {
     handler: (payload: OmnicodeInstanceEventPayload) => void,
   ): () => void;
 
+  // [OmniCode] 实例专属登录浏览器：失败态恢复入口（手动粘贴完整 OAuth 回调 URL，spec:
+  // docs/omnicode/instance-login-browser.md）。accepted=false 表示回调未被接收
+  // （state 不匹配或已过期）；Web 平台缺席即无入口。
+  submitOmnicodeCallback?(payload: { url: string }): Promise<{
+    ok: boolean;
+    accepted: boolean;
+  }>;
+
   /** 取消当前窗口尚未建立完成的远程连接（可选：Web 平台可忽略） */
   cancelPendingRemoteConnection?(requestId?: string): Promise<void>;
 
