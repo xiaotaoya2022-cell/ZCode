@@ -156,6 +156,9 @@ declare global {
       launchOmnicodeProfile?(payload: import("@zcode/shared").OmnicodeProfileIdInput): Promise<{ pid: number }>;
       stopOmnicodeProfile?(payload: import("@zcode/shared").OmnicodeProfileIdInput): Promise<{ ok: boolean }>;
       focusOmnicodeProfile?(payload: import("@zcode/shared").OmnicodeProfileIdInput): Promise<{ ok: boolean }>;
+      /** [OmniCode] M2 v1 平铺编排/还原（spec §实时视窗） */
+      arrangeOmnicodeInstances?(): Promise<{ delivered: string[] }>;
+      restoreOmnicodeInstances?(): Promise<{ delivered: string[] }>;
       onOmnicodeInstanceEvent?(
         handler: (payload: import("@zcode/shared").OmnicodeInstanceEventPayload) => void,
       ): () => void;

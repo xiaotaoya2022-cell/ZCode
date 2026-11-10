@@ -14,10 +14,10 @@ import { existsSync, rmSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
-import { app } from "electron";
+import { app, screen } from "electron";
 import { assertValidProfileId, getOmnicodeProfileDir, getOmnicodeProfileRoot } from "./profileRuntime.js";
 // [OmniCode] 桥接服务直接从实现文件导入：经 contract.ts 会与本文件形成导出循环
-import { ensureOmnicodeInstanceBridgeServerStarted } from "./instanceBridgeServer.js";
+import { ensureOmnicodeInstanceBridgeServerStarted, sendOmnicodeInstanceCommand } from "./instanceBridgeServer.js";
 
 export interface OmnicodeRunningInstance {
   profileId: string;
@@ -126,6 +126,58 @@ export async function stopOmnicodeProfile(profileId: string): Promise<void> {
   // 控制通道，随 M2 视窗编排落地（spec §产品规则 4）。
   child.kill();
   await waitForExit(child, 5_000);
+}
+
+/** 平铺编排格间间距（spec §实时视窗 v1）。 */
+const ARRANGE_GAP_PX = 8;
+
+/**
+ * M2 v1 平铺编排：全部运行中实例窗口 setBounds 到主屏 workArea 网格
+ * （spec §实时视窗：cols=ceil(√n)，启动时间升序排位，控制台主窗口不动）。
+ * 未连接实例不投递（与 focus 同形）；fire-and-forget，结果以缩略图画面为准。
+ */
+export function arrangeOmnicodeInstances(): { delivered: string[] } {
+  const running = [...runningByProfileId.values()].sort((a, b) =>
+    a.startedAt.localeCompare(b.startedAt),
+  );
+  if (running.length === 0) return { delivered: [] };
+  const { workArea } = screen.getPrimaryDisplay();
+  const count = running.length;
+  const cols = Math.ceil(Math.sqrt(count));
+  const rows = Math.ceil(count / cols);
+  const cellWidth = Math.floor((workArea.width - ARRANGE_GAP_PX * (cols + 1)) / cols);
+  const cellHeight = Math.floor((workArea.height - ARRANGE_GAP_PX * (rows + 1)) / rows);
+  // 屏幕过小排不出实例侧最低规格（200×150）的格子：整批放弃而非投递注定被拒的命令
+  if (cellWidth < 200 || cellHeight < 150) {
+    console.warn("[omnicode] 编排放弃：workArea 过小，格子规格低于 200x150");
+    return { delivered: [] };
+  }
+  const delivered: string[] = [];
+  running.forEach((entry, index) => {
+    const col = index % cols;
+    const row = Math.floor(index / cols);
+    const bounds = {
+      x: workArea.x + ARRANGE_GAP_PX + col * (cellWidth + ARRANGE_GAP_PX),
+      y: workArea.y + ARRANGE_GAP_PX + row * (cellHeight + ARRANGE_GAP_PX),
+      width: cellWidth,
+      height: cellHeight,
+    };
+    if (sendOmnicodeInstanceCommand(entry.profileId, { type: "arrange", bounds })) {
+      delivered.push(entry.profileId);
+    }
+  });
+  return { delivered };
+}
+
+/** M2 v1 还原：向全部运行中实例发 restoreBounds（实例按自身基线回位，未编排实例为 no-op）。 */
+export function restoreOmnicodeInstances(): { delivered: string[] } {
+  const delivered: string[] = [];
+  for (const entry of runningByProfileId.values()) {
+    if (sendOmnicodeInstanceCommand(entry.profileId, { type: "restoreBounds" })) {
+      delivered.push(entry.profileId);
+    }
+  }
+  return { delivered };
 }
 
 /** 控制台启动时清理崩溃残留的 handoff 文件（下次 launch 会覆盖，仅为整洁）。 */

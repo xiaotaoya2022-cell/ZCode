@@ -3,6 +3,7 @@
 import { ipcMain } from "electron";
 import { PlatformChannels, type OmnicodeProfileSummaryInfo } from "@zcode/shared";
 import {
+  arrangeOmnicodeInstances,
   cleanupStaleHandoff,
   cloneOmnicodeProfile,
   createOmnicodeProfile,
@@ -11,6 +12,7 @@ import {
   listOmnicodeProfiles,
   listOmnicodeRunningInstances,
   removeOmnicodeProfile,
+  restoreOmnicodeInstances,
   sendOmnicodeInstanceCommand,
   stopOmnicodeProfile,
 } from "./omnicode/contract.js";
@@ -66,5 +68,15 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
     // M2 放大编排 v0：桥接 focus 命令（实例 show+focus 主窗口）；未连接返回未生效
     const delivered = sendOmnicodeInstanceCommand(input.id, { type: "focus" });
     return { ok: delivered };
+  });
+
+  // M2 v1 平铺编排：全部运行中实例窗口 setBounds 到主屏网格（spec §实时视窗）
+  ipcMain.handle(PlatformChannels.OmnicodeProfileArrange, async () => {
+    return arrangeOmnicodeInstances();
+  });
+
+  // M2 v1 还原：实例按自身编排前基线回位
+  ipcMain.handle(PlatformChannels.OmnicodeProfileRestore, async () => {
+    return restoreOmnicodeInstances();
   });
 }

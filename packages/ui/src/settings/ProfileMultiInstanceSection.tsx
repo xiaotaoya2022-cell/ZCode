@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Copy, Maximize2, Play, RefreshCw, Square, Trash2 } from "lucide-react";
+import { Copy, LayoutGrid, Maximize2, Play, RefreshCw, Square, Trash2, Undo2 } from "lucide-react";
 import type { OmnicodeProfileSummaryInfo } from "@zcode/shared";
 import { Button } from "@/components/ui/button.js";
 import { Input } from "@/components/ui/input.js";
@@ -143,6 +143,60 @@ export function ProfileMultiInstanceSection() {
     [platform],
   );
 
+  // [OmniCode] M2 v1 平铺编排/还原（spec: docs/omnicode/profile-runtime.md §实时视窗）。
+  // delivered=0 通常是运行中实例尚未回连桥（如刚启动或崩溃），如实提示而非谎报成功。
+  const handleArrange = useCallback(() => {
+    void (async () => {
+      try {
+        const result = await platform.arrangeOmnicodeInstances?.();
+        const count = result?.delivered.length ?? 0;
+        if (count === 0) {
+          toast(intl.formatMessage({ id: "settings.omnicodeProfiles.toastArrangeNone" }), {
+            variant: "warning",
+          });
+          return;
+        }
+        toast(
+          intl.formatMessage({ id: "settings.omnicodeProfiles.toastArranged" }, { count: String(count) }),
+          { variant: "success" },
+        );
+      } catch (error) {
+        logger.warn("[omnicode] 平铺编排失败", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        toast(intl.formatMessage({ id: "settings.omnicodeProfiles.actionFailed" }), {
+          variant: "warning",
+        });
+      }
+    })();
+  }, [intl, platform]);
+
+  const handleRestore = useCallback(() => {
+    void (async () => {
+      try {
+        const result = await platform.restoreOmnicodeInstances?.();
+        const count = result?.delivered.length ?? 0;
+        if (count === 0) {
+          toast(intl.formatMessage({ id: "settings.omnicodeProfiles.toastArrangeNone" }), {
+            variant: "warning",
+          });
+          return;
+        }
+        toast(
+          intl.formatMessage({ id: "settings.omnicodeProfiles.toastRestored" }, { count: String(count) }),
+          { variant: "success" },
+        );
+      } catch (error) {
+        logger.warn("[omnicode] 还原窗口失败", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        toast(intl.formatMessage({ id: "settings.omnicodeProfiles.actionFailed" }), {
+          variant: "warning",
+        });
+      }
+    })();
+  }, [intl, platform]);
+
   const handleRemove = useCallback(
     (profile: OmnicodeProfileSummaryInfo) => {
       void (async () => {
@@ -164,11 +218,37 @@ export function ProfileMultiInstanceSection() {
     [intl, platform, requestConfirmation, runAction],
   );
 
+  const runningCount = profiles.filter((profile) => profile.running).length;
+
   return (
     <div className="flex flex-col gap-4">
       <p className="text-ui-base text-foreground-subtle">
         {intl.formatMessage({ id: "settings.omnicodeProfiles.description" })}
       </p>
+
+      {/* [OmniCode] M2 v1 平铺编排/还原（仅运行中实例可用；控制台主窗口不参与编排） */}
+      <div className="flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleArrange}
+          disabled={busy || runningCount === 0}
+          title={intl.formatMessage({ id: "settings.omnicodeProfiles.arrange" })}
+        >
+          <LayoutGrid className="size-3.5" />
+          {intl.formatMessage({ id: "settings.omnicodeProfiles.arrange" })}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleRestore}
+          disabled={busy || runningCount === 0}
+          title={intl.formatMessage({ id: "settings.omnicodeProfiles.restore" })}
+        >
+          <Undo2 className="size-3.5" />
+          {intl.formatMessage({ id: "settings.omnicodeProfiles.restore" })}
+        </Button>
+      </div>
 
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
