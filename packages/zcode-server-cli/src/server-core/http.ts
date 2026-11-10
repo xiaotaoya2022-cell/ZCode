@@ -31,10 +31,14 @@ import {
   type TopicResourcePeers,
   SourceServerWorkspaceIdentityChannelServer,
   type SourceServerWorkspaceIdentityMapper,
+  // [OmniCode] M4c Browser Relay：频道实例由 runServerCore 创建并注入 services（relay executor），
+  // 所有 WS 连接共享同一实例——订阅计数反映"任一已连接桌面的 relay 能力"。
+  type OmniCodeBrowserRelayServerChannel,
 } from "@zcode/services/node";
 import {
   SERVER_REMOTE_PROTOCOL_VERSION,
   TOPIC_RESOURCE_RELAY_CHANNEL,
+  OMNICODE_BROWSER_RELAY_CHANNEL,
   serverRemoteInfoOutputSchema,
   ZCODE_COMPATIBILITY_MANIFEST,
   ZCODE_RPC_HOST_CAPABILITY_HEADER,
@@ -105,6 +109,9 @@ function exposeWebSocket(
   ws: WebSocket,
   services: ServiceCollection,
   clientMode: "desktop-continuous" | "web-remote-replayable",
+  // [OmniCode] M4c Browser Relay：与 services 共用的 relay 频道实例（必传——Core 只此一条
+  // 装配路径，缺失即"注册了频道却无 executor"的死状态，宁可编译期强制）。
+  browserRelayChannel: OmniCodeBrowserRelayServerChannel,
   workspaceIdentityMapper?: SourceServerWorkspaceIdentityMapper,
   resourcePeers?: TopicResourcePeers,
 ): void {
@@ -187,6 +194,13 @@ function exposeWebSocket(
     });
   }
   services.exposeOnChannelServer(server, overrides);
+  // [OmniCode] M4c Browser Relay：fork-only 频道注册（频道名同时是
+  // FORK_SERVER_BUNDLE_MARKERS 的 bundle marker）。官方/上游 Core 没有这段注册，fork 客户端
+  // 即使误订阅也由 rpc 守卫静默收口。对 web-remote-replayable 客户端同样可达但通常无订阅方；
+  // 桌面 fork 客户端经连接后 ping 探测命中才订阅（M4b 桌面侧门控）。
+  // 断连时 rawServer.dispose() 会 dispose 全部 activeRequests（含 listen 句柄），
+  // 频道的订阅计数随之回落，共享实例在连接间保持一致。
+  server.registerChannel(OMNICODE_BROWSER_RELAY_CHANNEL, browserRelayChannel);
   socket.onClose(() => {
     peer?.dispose();
     reverseClient?.dispose();
@@ -197,6 +211,8 @@ function exposeWebSocket(
 
 export async function createCoreHttpServer(
   services: ServiceCollection,
+  // [OmniCode] M4c：browserRelayChannel 必传（runServerCore 创建的共享实例），options 不再整
+  // 体缺省，避免"注册了频道却无 executor"的半接线状态静默通过编译。
   options: {
     host?: string;
     port?: number;
@@ -206,7 +222,9 @@ export async function createCoreHttpServer(
     hostCapabilityStore?: HostCapabilityStore;
     workspaceIdentityMapper?: SourceServerWorkspaceIdentityMapper;
     topicResourcePeers?: TopicResourcePeers;
-  } = {},
+    /** [OmniCode] M4c：与 services 共用的 relay 频道实例（runServerCore 创建）。 */
+    browserRelayChannel: OmniCodeBrowserRelayServerChannel;
+  },
 ): Promise<CoreHttpServer> {
   const app = new Hono();
   const { injectWebSocket, upgradeWebSocket, wss } = createNodeWebSocket({ app });
@@ -279,6 +297,7 @@ export async function createCoreHttpServer(
           socket.raw as WebSocket,
           services,
           "web-remote-replayable",
+          options.browserRelayChannel,
           options.workspaceIdentityMapper,
         );
       },
@@ -299,6 +318,7 @@ export async function createCoreHttpServer(
           socket.raw as WebSocket,
           services,
           "desktop-continuous",
+          options.browserRelayChannel,
           options.workspaceIdentityMapper,
           options.topicResourcePeers,
         );

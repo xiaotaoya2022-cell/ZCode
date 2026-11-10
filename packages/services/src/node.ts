@@ -96,10 +96,19 @@ import { IVoiceInputService } from "#src/voice-input/contract.js";
 import { createVoiceInputService } from "#src/voice-input/voiceInputService.js";
 import { createMarketingAssetRegistry } from "#src/marketing-touch/marketingAssetRegistry.js";
 import type { IChannel } from "@zcode/rpc";
+// [OmniCode] M4c Browser Relay：relay executor 契约类型（server bundle entry 装配注入）。
+import type { BrowserRelayAgentExecutor } from "./zcode-agent/zcodeAgentBrowserAmbientContext.js";
 import {
   readTopicResourceFromRelay,
   validateTopicResourceFromRelay,
 } from "./zcode-agent/topicResourceRelayClient.js";
+// [OmniCode] M4c Browser Relay：fork-only relay 频道实现（stdio bundle 与 zcode-server-cli
+// Source Server Core 两个 server 形态共享同一事实源；server 侧路径保留 re-export）。
+export {
+  createBrowserRelayAgentExecutor,
+  createOmniCodeBrowserRelayChannel,
+  type OmniCodeBrowserRelayServerChannel,
+} from "./zcode-agent/browserRelayServerChannel.js";
 export {
   createTopicResourcePeers,
   type TopicResourcePeers,
@@ -178,6 +187,7 @@ export {
 export { createCredentialService } from "./credential/credentialService.js";
 export { createBroadcastService } from "./broadcast/broadcastService.js";
 export { createZCodeAgentService } from "./zcode-agent/zcodeAgentService.js";
+<<<<<<< HEAD
 export type {
   PluginUserOptionsReader,
   ZCodeAgentPluginUserOptionsResult,
@@ -186,6 +196,8 @@ export type {
 // [OmniCode] M4c Browser Relay：relay executor 契约类型（server bundle entry 装配注入）。
 export type { BrowserRelayAgentExecutor } from "./zcode-agent/zcodeAgentBrowserAmbientContext.js";
 import type { BrowserRelayAgentExecutor } from "./zcode-agent/zcodeAgentBrowserAmbientContext.js";
+=======
+>>>>>>> dee653fb (feat(browser-relay): M4c 续作收口——relay 降级路由接通远端 server 两形态（含 Source Server Core）)
 export { createZCodeTaskServiceAdapter } from "./zcode-agent/zcodeTaskServiceAdapter.js";
 export { createZCodeSessionService } from "./zcode-session/zcodeSessionService.js";
 export {
