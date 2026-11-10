@@ -98,6 +98,20 @@ function commandText(command, args) {
   return [command, ...args].join(" ");
 }
 
+// [OmniCode] Windows spawnSync 兼容（与 aaf3ab4e tar 修复同性质：官方脚本 Windows 兼容 bug）。
+// 无 shell 的 spawnSync('pnpm') 走 CreateProcess，只补 .exe——本机 pnpm 是 .cmd shim
+// （winget/npm 安装形态），解析不到报 ENOENT；.cmd 直接 spawn 又被 Node 拒绝（EINVAL）。
+// 统一经 cmd.exe /d /s /c 包装，由 cmd 做 PATHEXT 解析；参数为本仓库字面量命令，无注入面。
+function runPnpm(args) {
+  if (process.platform !== "win32") {
+    run("pnpm", args);
+    return;
+  }
+  const comspec = process.env.ComSpec ?? "cmd.exe";
+  const joined = ["pnpm", ...args].join(" ");
+  run(comspec, ["/d", "/s", "/c", joined]);
+}
+
 function run(command, args, options = {}) {
   console.log(`[zcode] ${commandText(command, args)}`);
   const result = spawnSync(command, args, {
@@ -145,13 +159,13 @@ async function buildOutputs(skipBuild) {
     return;
   }
 
-  run("pnpm", ["--filter", "@zcode/cli...", "build"]);
+  runPnpm(["--filter", "@zcode/cli...", "build"]);
   await rm(resolve(root, "packages", "server", "dist"), {
     force: true,
     recursive: true,
   });
-  run("pnpm", ["--filter", "@zcode/server", "build"]);
-  run("pnpm", ["--filter", "@zcode/web", "build"]);
+  runPnpm(["--filter", "@zcode/server", "build"]);
+  runPnpm(["--filter", "@zcode/web", "build"]);
 }
 
 async function stageZCodePackage({ packageRoot, version }) {
