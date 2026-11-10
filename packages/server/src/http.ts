@@ -45,7 +45,10 @@ import {
   type SourceServerWorkspaceIdentityMapper,
 } from "@zcode/services/node";
 import { createHostCapabilityStore } from "./hostCapability.js";
-import { createOmniCodeBrowserRelayChannel } from "./browserRelayChannel.js";
+import {
+  createOmniCodeBrowserRelayChannel,
+  type OmniCodeBrowserRelayServerChannel,
+} from "./browserRelayChannel.js";
 
 function wrapWebSocket(ws: WebSocket): ISocket {
   const onData = new Emitter<VSBuffer>();
@@ -95,6 +98,7 @@ function setupChannelServer(
   clientMode: "desktop-continuous" | "web-remote-replayable",
   workspaceIdentityMapper?: SourceServerWorkspaceIdentityMapper,
   resourcePeers?: TopicResourcePeers,
+  browserRelayChannel?: OmniCodeBrowserRelayServerChannel,
 ) {
   const socket = wrapWebSocket(ws);
   const protocol = new SocketProtocol(socket);
@@ -137,7 +141,13 @@ function setupChannelServer(
   // [OmniCode] M4b Browser Relay：fork-only 频道注册（频道名同时是
   // FORK_SERVER_BUNDLE_MARKERS 的 bundle marker）。对 web-remote-replayable 客户端同样
   // 可达但无订阅方；fork 客户端经连接后 ping 探测命中才订阅，官方 server 无此频道。
-  server.registerChannel(OMNICODE_BROWSER_RELAY_CHANNEL, createOmniCodeBrowserRelayChannel());
+  // M4c：entry-http 在创建 services 前自建同一实例注入 services（relay executor），
+  // 所有 WS 连接共享该实例——订阅计数反映"任一已连接桌面的 relay 能力"，多订阅方时
+  // fireRelayRequest 快速失败（v0 无会话归属路由，避免多桌面重复执行同一命令）。
+  server.registerChannel(
+    OMNICODE_BROWSER_RELAY_CHANNEL,
+    browserRelayChannel ?? createOmniCodeBrowserRelayChannel(),
+  );
   socket.onClose(() => {
     peer?.dispose();
     reverseClient?.dispose();
@@ -159,6 +169,8 @@ export interface HttpServerOptions {
   spaFallback?: boolean;
   staticRoot?: string;
   workspaces?: ServerRemoteWorkspaceInfo[];
+  /** [OmniCode] M4c：与 services 共用的 relay 频道实例；缺省时每连接自建（仅注册，无调用方）。 */
+  browserRelayChannel?: OmniCodeBrowserRelayServerChannel;
 }
 
 function readTrimmedEnv(name: string): string | undefined {
@@ -383,6 +395,8 @@ export function createHttpServer(
           services,
           "web-remote-replayable",
           options.workspaceIdentityMapper,
+          undefined,
+          options.browserRelayChannel,
         );
       },
     })),
@@ -396,6 +410,7 @@ export function createHttpServer(
         "desktop-continuous",
         options.workspaceIdentityMapper,
         options.topicResourcePeers,
+        options.browserRelayChannel,
       );
     },
   }));

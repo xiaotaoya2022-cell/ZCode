@@ -5,14 +5,16 @@ import type {
   BrowserCommandResult,
 } from "./browser-use/index.js";
 
-// [OmniCode] M4b Browser Relay（fork-only 事件契约）。
+// [OmniCode] M4b/M4c Browser Relay（fork-only 事件契约）。
 // 设计依据：《ZCode 原生魔改版架构与实现方案报告》§5.1 与
 // ZakiCode docs/specs/remote-server-event-compat.md。
 //
 // 机制：远程 workspace（SSH/VM/Docker/Source Server）里的 Agent 执行浏览器命令时找不到浏览器
-// 后端，远端 fork server 通过 `onDynamicBrowserRelayRequest` 事件把请求路由回桌面端可见的浏览器
-// pane 执行（复用 host→main 的 BrowserExecuteRequest 桥，30s 预算语义照旧），结果经同频道
-// browserRelayRespond 命令回传。
+// 后端（远端 server 的 zcodeAgentService 无本地 browserControlExecutor），M4c 起由
+// zcodeAgentService 的 relay 降级路由把请求经 server 侧 `fireRelayRequest` 通过
+// `onDynamicBrowserRelayRequest` 事件路由回桌面端可见的浏览器 pane 执行（复用 host→main 的
+// BrowserExecuteRequest 桥，30s 预算语义照旧），结果经同频道 browserRelayRespond 命令回传。
+// 本地 workspace 的 browserControlExecutor 直连路径完全不参与 relay，行为零变化。
 //
 // 形状沿用现有类型：execute 载荷与 desktop/src/host/browserControlMainBridge.ts 的
 // BrowserControlMainBridge.execute 入参逐字段一致（结构化赋值可编译校验，漂移即编译失败）；
@@ -20,7 +22,10 @@ import type {
 //
 // 能力门控：`omnicode-browser-relay` 频道名同时充当远端 server bundle 的 fork marker
 // （FORK_SERVER_BUNDLE_MARKERS 文本探测命中才订阅）；官方/上游 server 没有该频道，fork 客户端
-// 即使误订阅也由 rpc 层 onEventListen 守卫静默收口，不会崩掉远端进程。
+// 即使误订阅也由 rpc 层 onEventListen 守卫静默收口，不会崩掉远端进程。server 进程侧以频道
+// listen 订阅计数为能力事实源：无订阅方时 fireRelayRequest 快速失败（保持现状的
+// backend_unavailable 语义），多订阅方（≥2 桌面同连一 server）同样快速失败——v0 无会话归属
+// 路由，广播会造成多桌面重复执行同一命令。
 
 /** fork-only RPC 频道名；字符串同时作为远端 server bundle 的 fork marker。 */
 export const OMNICODE_BROWSER_RELAY_CHANNEL = "omnicode-browser-relay";

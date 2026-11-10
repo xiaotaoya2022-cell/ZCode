@@ -7,6 +7,9 @@ import {
   materializeBundledZCodeBuiltinProviderConfig,
   readBundledZCodeBuiltinProviderConfig,
 } from "./bundledZCodeBuiltinProviderConfig.js";
+// [OmniCode] M4c Browser Relay：entry 侧持有频道实例，同一实例注册到所有 WS 连接并装配成
+// services 的 relay executor，让远端 agent 的 browser 命令与桌面订阅状态共享同一事实源。
+import { createBrowserRelayAgentExecutor, createOmniCodeBrowserRelayChannel } from "./browserRelayChannel.js";
 import { createHttpServer, resolveHttpServerId } from "./http.js";
 
 async function main(): Promise<void> {
@@ -20,12 +23,14 @@ async function main(): Promise<void> {
   const authToken = process.env["ZCODE_SERVER_AUTH_TOKEN"]?.trim() || undefined;
   const topicResourcePeers = createTopicResourcePeers();
   const serverId = resolveHttpServerId();
+  const browserRelayChannel = createOmniCodeBrowserRelayChannel();
   const { services, workspaceIdentityMapper, migrationFailedPathCount } =
     await createServerHostServices({
       topicResourceRelayChannel: (request) => topicResourcePeers.getChannel(request),
       sourceServerId: serverId,
       zcodeBuiltinProviderConfigFilePath,
       providerProvisioningTargetEnabled: Boolean(authToken),
+      browserRelayExecutor: createBrowserRelayAgentExecutor(browserRelayChannel),
     });
 
   createHttpServer(services, port, {
@@ -37,6 +42,8 @@ async function main(): Promise<void> {
     ...(host ? { host } : {}),
     ...(staticRoot ? { staticRoot, spaFallback: true } : {}),
     ...(authToken ? { authToken, authRequired: true } : {}),
+    // M4c：所有连接共用同一频道实例，订阅计数才能与 services 侧 executor 一致。
+    browserRelayChannel,
   });
 }
 

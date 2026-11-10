@@ -1835,6 +1835,16 @@ const enUS: Record<string, string> = {
   "login.oauth.loginFailure": "Login failed, please try again",
   "login.oauth.cancel": "Cancel",
   "login.oauth.retry": "Retry login",
+  // [OmniCode] Instance-scoped login browser: manual callback paste recovery entry (spec: docs/omnicode/instance-login-browser.md)
+  "login.oauth.recovery.expand": "Advanced recovery",
+  "login.oauth.recovery.collapse": "Hide recovery options",
+  "login.oauth.recovery.hint":
+    "If authorization failed or timed out (300s), paste the full callback URL from the browser address bar so this instance can receive it again.",
+  "login.oauth.recovery.placeholder":
+    "Paste the full callback URL (zcode://oauth/callback?… or http://localhost:1455/auth/callback?…)",
+  "login.oauth.recovery.submit": "Submit callback",
+  "login.oauth.recovery.accepted": "Callback accepted; completing sign-in…",
+  "login.oauth.recovery.rejected": "Callback not accepted: state mismatch or expired",
   "login.expired.title": "Your session has expired",
   "login.expired.description": "To keep your account secure, please sign in again.",
   "login.expired.action": "Sign in again",

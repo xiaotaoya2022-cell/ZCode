@@ -28,8 +28,10 @@ import {
   clearOAuthRoutesForWindow,
   deliverPendingDeepLink,
   handleDeepLink,
+  normalizePastedOmnicodeCallbackUrl,
   parseOAuthStateRegistration,
   registerOAuthState,
+  startOmnicodeOAuthCallbackRelayConsumer,
 } from "./desktopOAuthDeepLink.js";
 // [OmniCode] 实例专属登录浏览器（spec: docs/omnicode/instance-login-browser.md）
 import {
@@ -348,7 +350,34 @@ export function registerRemoteIpcHandlers(options: {
       return;
     }
 
+    // [OmniCode] 发起登录即拉起跨实例投递消费 tick（1s，与官方轮询同节奏；
+    // 目录空且无本地 OAuth flow 时自动停表）。spec: docs/omnicode/instance-login-browser.md
+    startOmnicodeOAuthCallbackRelayConsumer(options.logger);
     registerOAuthState(event.sender.id, registration);
+  });
+
+  // [OmniCode] 失败态恢复入口：登录失败/超时后，renderer 把用户手动粘贴的完整
+  // 回调 URL 交回 main，归一化（http://localhost:1455 形状 → zcode://oauth/callback）
+  // 后复用官方 handleDeepLink 路由。accepted=false 表示未被接收（state 不匹配或已过期）。
+  ipcMain.handle(PlatformChannels.OmnicodeSubmitCallback, (_event, payload: unknown) => {
+    const url =
+      payload && typeof payload === "object" && typeof (payload as { url?: unknown }).url === "string"
+        ? normalizePastedOmnicodeCallbackUrl((payload as { url: string }).url)
+        : null;
+    if (!url) {
+      options.logger.warn("[omnicode-submit-callback] invalid callback url", payload);
+      return { ok: false, accepted: false };
+    }
+    try {
+      const accepted = handleDeepLink(url, options.logger);
+      options.logger.info("[omnicode-submit-callback] 手动回调处理完成", { accepted });
+      return { ok: true, accepted };
+    } catch (error) {
+      options.logger.warn("[omnicode-submit-callback] handleDeepLink 异常", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { ok: false, accepted: false };
+    }
   });
 
   ipcMain.on(PlatformChannels.OpenExternal, (event, payload: unknown) => {

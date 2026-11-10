@@ -35,6 +35,9 @@ export const desktopOmnicodePlatformBridge = {
     requireBridge(window.zcode.stopOmnicodeProfile?.(payload)),
   focusOmnicodeProfile: (payload: OmnicodeProfileIdInput): Promise<{ ok: boolean }> =>
     requireBridge(window.zcode.focusOmnicodeProfile?.(payload)),
+  // [OmniCode] 失败态恢复入口：手动粘贴完整 OAuth 回调 URL（spec: docs/omnicode/instance-login-browser.md）
+  submitOmnicodeCallback: (payload: { url: string }): Promise<{ ok: boolean; accepted: boolean }> =>
+    requireBridge(window.zcode.submitOmnicodeCallback?.(payload)),
   onOmnicodeInstanceEvent: (
     handler: (payload: OmnicodeInstanceEventPayload) => void,
   ): (() => void) =>

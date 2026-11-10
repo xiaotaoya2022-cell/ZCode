@@ -13,7 +13,10 @@ import {
   type ServiceCollection,
 } from "@zcode/services";
 import { OMNICODE_BROWSER_RELAY_CHANNEL } from "@zcode/shared";
-import { createOmniCodeBrowserRelayChannel } from "./browserRelayChannel.js";
+import {
+  createOmniCodeBrowserRelayChannel,
+  type OmniCodeBrowserRelayServerChannel,
+} from "./browserRelayChannel.js";
 
 /**
  * Wrap process.stdin/stdout as an ISocket for RPC communication.
@@ -65,6 +68,8 @@ export function wrapStdio(): ISocket {
 export function createStdioServer(
   services: ServiceCollection,
   onReverseClientReady?: (client: ChannelClient) => void,
+  // [OmniCode] M4c：entry 侧与 services 共用的 relay 频道实例；缺省时自建（仅注册，无调用方）。
+  browserRelayChannel?: OmniCodeBrowserRelayServerChannel,
 ) {
   const socket = wrapStdio();
   const protocol = new SocketProtocol(socket);
@@ -88,9 +93,11 @@ export function createStdioServer(
   // [OmniCode] M4b Browser Relay：fork-only 频道注册。频道名字符串同时是
   // FORK_SERVER_BUNDLE_MARKERS 的 bundle marker（部署探测据此判定远端是否 fork bundle）。
   // 官方/上游 server 没有这段注册，fork 客户端即使误订阅也由 rpc 守卫静默收口。
+  // M4c：entry-stdio 在创建 services 前自建同一实例注入 services（relay executor），
+  // 这里注册的必须是同一实例，订阅计数（hasRelaySubscriber）才能反映桌面侧真实能力。
   channelServer.registerChannel(
     OMNICODE_BROWSER_RELAY_CHANNEL,
-    createOmniCodeBrowserRelayChannel(),
+    browserRelayChannel ?? createOmniCodeBrowserRelayChannel(),
   );
   let stopPromise: Promise<void> | undefined;
   const stop = (): Promise<void> => {
