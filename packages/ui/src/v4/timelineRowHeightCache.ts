@@ -6,6 +6,9 @@
 // estimateSize 的固定值，导致滚动条跳动与底部锚定抖动。这里以 render unit 的稳定
 // key（turnId）为键做一层组件实例内持久缓存，保证「行卸载重挂保测高缓存」。
 //
+// 会话维度再补一层模块级 LRU 桶（见文末 acquireTimelineRowHeightCacheForSession）：
+// 切换会话不再整体 clear，而是换到该会话的保留桶，首屏 estimate 直接命中历史行高。
+//
 
 /** 未测量行的兜底估计高度（与旧 ConversationTimeline 的 ROW_ESTIMATE_PX 一致）。 */
 export const DEFAULT_ROW_HEIGHT_ESTIMATE_PX = 72;
@@ -18,9 +21,7 @@ export type TimelineRowHeightCacheKey = string | number;
 export class TimelineRowHeightCache {
   private readonly sizes = new Map<TimelineRowHeightCacheKey, number>();
 
-  constructor(
-    private readonly maxEntries: number = MAX_ROW_HEIGHT_CACHE_ENTRIES,
-  ) {}
+  constructor(private readonly maxEntries: number = MAX_ROW_HEIGHT_CACHE_ENTRIES) {}
 
   get size(): number {
     return this.sizes.size;
@@ -54,8 +55,42 @@ export class TimelineRowHeightCache {
     return this.sizes.get(key) ?? fallbackPx;
   }
 
-  /** 会话切换时整体重置（turnId 在不同 session 间也不能假设全局唯一）。 */
+  /** 整体重置（接口语义保留：仍按单桶全部清空；会话切换走下方换桶而不是调用这里）。 */
   clear(): void {
     this.sizes.clear();
   }
+}
+
+/** 会话桶上限：LRU 保留最近 8 个会话的测高缓存；8 × 4000 条数字键值 ≈ MB 级，内存有界。 */
+export const MAX_SESSION_ROW_HEIGHT_CACHES = 8;
+
+// [OmniCode] 模块级会话桶注册表：key 为 sessionKey（sessionId ?? "draft"）。
+// 会话切换从「整体 clear」改为「换桶」：turnId 跨会话可能重复，串号风险由按会话分桶隔离；
+// 同会话跨组件挂载/虚拟器重建复用历史测高，estimateSize 不再回落 72px 固定估计造成首屏抖动。
+const sessionRowHeightCaches = new Map<string, TimelineRowHeightCache>();
+
+/**
+ * 取会话专属测高缓存桶（不存在则创建），并把该桶移到 LRU 最新端；
+ * 超过 {@link MAX_SESSION_ROW_HEIGHT_CACHES} 时淘汰最久未访问会话的桶。
+ * 返回值仍是普通 TimelineRowHeightCache，estimate/measure 接口语义不变，
+ * ConversationTimeline 只需在 sessionKey effect 里把 clear() 换成本函数。
+ */
+export function acquireTimelineRowHeightCacheForSession(
+  sessionKey: string,
+): TimelineRowHeightCache {
+  const existing = sessionRowHeightCaches.get(sessionKey);
+  if (existing) {
+    // Map 迭代序 = 插入序；先删再插把该会话移到「最新」端（LRU touch），与桶内条目同款策略。
+    sessionRowHeightCaches.delete(sessionKey);
+    sessionRowHeightCaches.set(sessionKey, existing);
+    return existing;
+  }
+  const created = new TimelineRowHeightCache();
+  sessionRowHeightCaches.set(sessionKey, created);
+  while (sessionRowHeightCaches.size > MAX_SESSION_ROW_HEIGHT_CACHES) {
+    const oldest = sessionRowHeightCaches.keys().next();
+    if (oldest.done) break;
+    sessionRowHeightCaches.delete(oldest.value);
+  }
+  return created;
 }
