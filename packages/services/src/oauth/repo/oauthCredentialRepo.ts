@@ -32,6 +32,12 @@ function refreshTokenKey(provider: OAuthProviderId): string {
   return `oauth:${provider}:refresh_token`;
 }
 
+// [OmniCode] 过期时间戳（epoch ms）落盘：启动恢复可精确判断"即将过期"并触发
+// 静默重授权/提示，不再依赖解析 JWT exp（业务 token 可能不是标准 JWT）。
+function expiresAtKey(provider: OAuthProviderId): string {
+  return `oauth:${provider}:expires_at`;
+}
+
 function userInfoKey(provider: OAuthProviderId): string {
   return `oauth:${provider}:user_info`;
 }
@@ -306,9 +312,14 @@ export class OAuthCredentialRepo {
           ? await this.credentialService.load(ZCODE_JWT_TOKEN_KEY)
           : null;
 
+      const expiresAtRaw = await this.credentialService.load(expiresAtKey(provider));
+      const expiresAt = Number.parseInt(expiresAtRaw ?? "", 10);
+      const validExpiresAt = Number.isFinite(expiresAt) && expiresAt > 0 ? expiresAt : undefined;
+
       return {
         accessToken,
         ...(refreshToken ? { refreshToken } : {}),
+        ...(validExpiresAt ? { expiresAt: validExpiresAt } : {}),
         ...(zcodeJwtToken ? { zcodeJwtToken } : {}),
       };
     } catch (error) {
@@ -347,6 +358,13 @@ export class OAuthCredentialRepo {
       await this.credentialService.save(refreshTokenKey(provider), tokenSet.refreshToken);
     } else {
       await this.credentialService.delete(refreshTokenKey(provider));
+    }
+
+    // [OmniCode] expiresAt 落盘（ZAI adapter 已解析 expires_in，此前凭据层丢弃该字段）
+    if (tokenSet.expiresAt) {
+      await this.credentialService.save(expiresAtKey(provider), String(tokenSet.expiresAt));
+    } else {
+      await this.credentialService.delete(expiresAtKey(provider));
     }
 
     if (provider === ZAI_PROVIDER_ID || provider === BIGMODEL_PROVIDER_ID) {
