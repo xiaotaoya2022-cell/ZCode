@@ -879,6 +879,10 @@ export interface IPlatformService {
   launchOmnicodeProfile?(input: OmnicodeProfileIdInput): Promise<{ pid: number }>;
   stopOmnicodeProfile?(input: OmnicodeProfileIdInput): Promise<{ ok: boolean }>;
   focusOmnicodeProfile?(input: OmnicodeProfileIdInput): Promise<{ ok: boolean }>;
+  /** M2 v1 平铺编排：全部运行中实例窗口 setBounds 到主屏网格（spec §实时视窗）。仅 Desktop。 */
+  arrangeOmnicodeInstances?(): Promise<{ delivered: string[] }>;
+  /** M2 v1 还原：已编排实例窗口回到编排前位置。仅 Desktop。 */
+  restoreOmnicodeInstances?(): Promise<{ delivered: string[] }>;
   /** 订阅控制台实例事件（缩略图/连接态），返回 disposer。仅 Desktop。 */
   onOmnicodeInstanceEvent?(
     handler: (payload: OmnicodeInstanceEventPayload) => void,

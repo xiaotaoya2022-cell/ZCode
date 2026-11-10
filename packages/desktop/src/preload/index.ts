@@ -359,6 +359,11 @@ contextBridge.exposeInMainWorld("zcode", {
     ipcRenderer.invoke(PlatformChannels.OmnicodeProfileStop, payload),
   focusOmnicodeProfile: (payload: OmnicodeProfileIdInput): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke(PlatformChannels.OmnicodeProfileFocus, payload),
+  // [OmniCode] M2 v1 平铺编排/还原（spec §实时视窗）
+  arrangeOmnicodeInstances: (): Promise<{ delivered: string[] }> =>
+    ipcRenderer.invoke(PlatformChannels.OmnicodeProfileArrange),
+  restoreOmnicodeInstances: (): Promise<{ delivered: string[] }> =>
+    ipcRenderer.invoke(PlatformChannels.OmnicodeProfileRestore),
   // [OmniCode] 失败态恢复入口：手动粘贴完整 OAuth 回调 URL，main 复用 handleDeepLink 路由
   submitOmnicodeCallback: (payload: { url: string }): Promise<{ ok: boolean; accepted: boolean }> =>
     ipcRenderer.invoke(PlatformChannels.OmnicodeSubmitCallback, payload),

@@ -3660,6 +3660,12 @@ const enUS: Record<string, string> = {
   "settings.omnicodeProfiles.toastCloned": "Instance cloned (login state not copied)",
   "settings.omnicodeProfiles.toastLaunched": "Instance launched",
   "settings.omnicodeProfiles.toastStopped": "Instance stopped",
+  // [OmniCode] M2 v1 tile arrangement (spec §实时视窗)
+  "settings.omnicodeProfiles.arrange": "Tile windows",
+  "settings.omnicodeProfiles.restore": "Restore windows",
+  "settings.omnicodeProfiles.toastArranged": "Tiled {count} instance windows",
+  "settings.omnicodeProfiles.toastRestored": "Restored {count} instance windows",
+  "settings.omnicodeProfiles.toastArrangeNone": "No connected instances to arrange",
   "settings.omnicodeProfiles.actionFailed": "Action failed",
   "settings.usageDescription":
     "Review rough activity and model usage aggregated from local sessions.",

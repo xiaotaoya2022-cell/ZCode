@@ -243,6 +243,10 @@ export const PlatformChannels = {
   OmnicodeInstanceEvent: "zcode:omnicode-instance-event",
   // [OmniCode] Renderer → Main：聚焦实例窗口（桥接命令）
   OmnicodeProfileFocus: "zcode:omnicode-profile-focus",
+  // [OmniCode] Renderer → Main：平铺编排全部运行中实例窗口到主屏网格（M2 v1，spec §实时视窗）
+  OmnicodeProfileArrange: "zcode:omnicode-profile-arrange",
+  // [OmniCode] Renderer → Main：还原全部已编排实例窗口到编排前位置（M2 v1）
+  OmnicodeProfileRestore: "zcode:omnicode-profile-restore",
   // [OmniCode] Renderer → Main：失败态恢复入口——手动粘贴完整 OAuth 回调 URL，
   // main 侧复用官方 handleDeepLink 路由（spec: docs/omnicode/instance-login-browser.md）
   OmnicodeSubmitCallback: "zcode:omnicode-submit-callback",
@@ -872,6 +876,15 @@ export interface PlatformChannelMap {
   [PlatformChannels.OmnicodeProfileFocus]: {
     request: { id: string };
     response: { ok: boolean };
+  };
+  // [OmniCode] M2 v1 平铺编排：delivered=实际投递到桥命令的实例 profileId 列表
+  [PlatformChannels.OmnicodeProfileArrange]: {
+    request: void;
+    response: { delivered: string[] };
+  };
+  [PlatformChannels.OmnicodeProfileRestore]: {
+    request: void;
+    response: { delivered: string[] };
   };
   // [OmniCode] 失败态恢复入口：ok=IPC 调用本身成功；accepted=handleDeepLink 已接收该回调
   // （false 通常是 state 不匹配或已过期，UI 层据此提示用户）。
