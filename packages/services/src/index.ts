@@ -192,6 +192,13 @@ export type {
 } from "./zcode-agent/zcodeAgent.js";
 // [OmniCode] M4c Browser Relay：relay executor 的装配契约类型（server bundle entry 注入）。
 export type { BrowserAmbientContextExecutor } from "./zcode-agent/zcodeAgentBrowserAmbientContext.js";
+// [OmniCode] M4c Browser Relay：fork-only relay 频道实现（stdio bundle 与 zcode-server-cli
+// Source Server Core 两个 server 形态共享同一事实源；server 侧路径保留 re-export）。
+export {
+  createBrowserRelayAgentExecutor,
+  createOmniCodeBrowserRelayChannel,
+  type OmniCodeBrowserRelayServerChannel,
+} from "./zcode-agent/browserRelayServerChannel.js";
 
 // ZCode session service — app-facing session facade without ZCode Agent naming.
 export { IZCodeSessionService } from "./zcode-session/zcodeSession.js";

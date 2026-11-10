@@ -7,7 +7,12 @@ import {
   IZCodeAgentService,
   ISourceServerWorkspaceService,
 } from "@zcode/services";
-import { createServerHostServices, disposeServiceResourcesAndWait } from "@zcode/services/node";
+import {
+  createBrowserRelayAgentExecutor,
+  createOmniCodeBrowserRelayChannel,
+  createServerHostServices,
+  disposeServiceResourcesAndWait,
+} from "@zcode/services/node";
 import {
   buildServerRemoteWorkspaceIdentity,
   remoteHostIdFromWorkspaceIdentity,
@@ -21,11 +26,15 @@ const serverId = "e2e-virtual-url-server";
 const hostId = remoteHostIdFromWorkspaceIdentity(
   buildServerRemoteWorkspaceIdentity({ serverId, workspacePath: "/" }),
 )!;
+// [OmniCode] M4c Browser Relay：与 createCoreHttpServer 共用同一频道实例（services 的 relay
+// executor 与 HTTP 侧注册必须指向同一事实源）；测试夹具与生产 Core 同形装配。
+const browserRelayChannel = createOmniCodeBrowserRelayChannel();
 const { services, workspaceIdentityMapper, migrationFailedPathCount } =
   await createServerHostServices({
     sourceServerId: serverId,
     providerProvisioningTargetEnabled: true,
     zcodeBuiltinProviderConfigFilePath: resolve("../../config/provider/zcode-builtin.json"),
+    browserRelayExecutor: createBrowserRelayAgentExecutor(browserRelayChannel),
   });
 // 仅观测真实服务入参，继续调用原实现，避免将模型回复成功误当作项目绑定成功。
 const provisioning = services.get(IProviderProvisioningTargetService);
@@ -79,6 +88,7 @@ const server = await createCoreHttpServer(services, {
   serverId,
   workspaceIdentityMapper,
   migrationFailedPathCount,
+  browserRelayChannel,
 });
 process.stdout.write(
   `E2E_VP_SERVER_READY ${JSON.stringify({ port: server.port, serverId, hostId, projectId: project.id })}\n`,
