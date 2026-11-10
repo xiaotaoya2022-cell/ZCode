@@ -5,6 +5,13 @@
  */
 export const ZCODE_PREVIEW_IDENTITY_ENV = "ZCODE_PREVIEW_IDENTITY";
 
+/**
+ * [OmniCode] 构建期开关：为真时安装包使用 OmniCode 独立品牌身份（与 Preview 同机制）。
+ * 典型用法是 `ZCODE_ENV=production ZCODE_OMNICODE_IDENTITY=1`——连接生产后端，但
+ * appId/productName/数据目录/安装目录全部独立于官方 ZCode，两版可并排安装互不覆盖。
+ */
+export const ZCODE_OMNICODE_IDENTITY_ENV = "ZCODE_OMNICODE_IDENTITY";
+
 const PRODUCTION_IDENTITY = Object.freeze({
   flavor: "production",
   appId: "dev.zcode.app",
@@ -23,9 +30,20 @@ const PREVIEW_IDENTITY = Object.freeze({
   cuaHelperInstallVariant: "preview",
 });
 
+// [OmniCode] 独立品牌身份：helper 变体沿用 preview 子目录语义（独立于正式版，避免互相覆盖）。
+const OMNICODE_IDENTITY = Object.freeze({
+  flavor: "omnicode",
+  appId: "io.github.xiaotaoya2022-cell.omnicode",
+  productName: "OmniCode",
+  linuxExecutableName: "omnicode",
+  linuxPackageName: "omnicode",
+  cuaHelperInstallVariant: "preview",
+});
+
 export const desktopProductIdentities = Object.freeze({
   production: PRODUCTION_IDENTITY,
   preview: PREVIEW_IDENTITY,
+  omnicode: OMNICODE_IDENTITY,
 });
 
 function normalizeDesktopZCodeEnv(env) {
@@ -37,26 +55,37 @@ function normalizeDesktopZCodeEnv(env) {
  * `$ZCODE_PREVIEW_IDENTITY == "1"` 精确比较保持同一套语义。其它拼写在构建期直接失败，
  * 避免 `true` 之类在 YAML 路由层漏匹配、却在脚本层被当成开启，把 Preview 包打进生产验收目录。
  */
-export function isPreviewIdentityRequested(env = process.env) {
-  const value = env[ZCODE_PREVIEW_IDENTITY_ENV]?.trim() ?? "";
+function isIdentitySwitchRequested(name, env = process.env) {
+  const value = env[name]?.trim() ?? "";
   if (value === "1") {
     return true;
   }
   if (value === "" || value === "0") {
     return false;
   }
-  throw new Error(
-    `invalid ${ZCODE_PREVIEW_IDENTITY_ENV}=${env[ZCODE_PREVIEW_IDENTITY_ENV]}; expected 1 or 0`,
-  );
+  throw new Error(`invalid ${name}=${env[name]}; expected 1 or 0`);
+}
+
+export function isPreviewIdentityRequested(env = process.env) {
+  return isIdentitySwitchRequested(ZCODE_PREVIEW_IDENTITY_ENV, env);
+}
+
+/** [OmniCode] OmniCode 身份开关；与 Preview 开关同语法（仅 `1` 视为开启）。 */
+export function isOmnicodeIdentityRequested(env = process.env) {
+  return isIdentitySwitchRequested(ZCODE_OMNICODE_IDENTITY_ENV, env);
 }
 
 /**
  * 产品身份（flavor）与后端环境（`ZCODE_ENV`）是两个轴：
  * - `ZCODE_ENV=test` 一律是 Preview，测试后端不能顶着正式 `ZCode` 身份覆盖用户的正式安装；
- * - `ZCODE_ENV=production` 默认是正式身份，显式 `ZCODE_PREVIEW_IDENTITY=1` 时改用 Preview 身份。
+ * - `ZCODE_ENV=production` 默认是正式身份，显式 `ZCODE_PREVIEW_IDENTITY=1` 时改用 Preview 身份，
+ *   显式 `ZCODE_OMNICODE_IDENTITY=1` 时改用 OmniCode 身份（OmniCode 开关优先级更高）。
  * 未知 `ZCODE_ENV` 继续按 test 处理，和共享层 normalizeZCodeEnv 的 fail-safe 默认值一致。
  */
 export function resolveDesktopProductFlavor(env = process.env) {
+  if (isOmnicodeIdentityRequested(env)) {
+    return "omnicode";
+  }
   if (isPreviewIdentityRequested(env)) {
     return "preview";
   }
@@ -69,7 +98,8 @@ export function resolveDesktopProductIdentity(env = process.env) {
 
 /**
  * 产物文件名后缀标记的是后端环境而不是身份：`_TEST` 只出现在测试后端的安装包上。
- * 生产后端的 Preview 包靠 productName（`ZCode Preview-<version>-...`）与正式包区分。
+ * 生产后端的 Preview/OmniCode 包靠 productName（`ZCode Preview-<version>-...` /
+ * `OmniCode-<version>-...`）与正式包区分。
  */
 export function resolveDesktopArtifactSuffix(env = process.env) {
   return normalizeDesktopZCodeEnv(env) === "test" ? "_TEST" : "";
@@ -86,7 +116,7 @@ export function resolveWindowsAppUserModelIdForFlavor(flavor, runtime = { isPack
   if (runtime.isPackaged === false) {
     return "cn.aminer.zcode";
   }
-  return desktopProductIdentities[flavor === "preview" ? "preview" : "production"].appId;
+  return desktopProductIdentities[desktopProductIdentities[flavor] ? flavor : "production"].appId;
 }
 
 export function resolveWindowsAppUserModelId(env = process.env, runtime = { isPackaged: true }) {
