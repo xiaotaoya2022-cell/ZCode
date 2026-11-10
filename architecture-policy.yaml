@@ -2384,3 +2384,8 @@ exceptions:
       - packages/server/src/browserRelayChannel.ts
       - packages/desktop/src/host/browserRelayRemoteSubscription.ts
     reason: OmniCode browser relay adds three self-contained fork-only files following the surrounding modules' existing patterns (shared type contract reusing browser-use types, server IServerChannel implementation, desktop injected-bridge subscription); adopting the whole shared/server/desktop module trees needs a separate boundary refactor.
+  - id: omnicode-login-browser-shared-shape
+    rule: unmanaged-new-file
+    paths:
+      - packages/shared/src/omnicodeAuth.ts
+    reason: OmniCode instance login browser needs the authorize-URL shape check and profile-instance env guard in both main (window routing) and future renderer error-state recovery; a pure-function shared helper is the only shared home, and adopting the whole shared module is out of scope for this feature.
