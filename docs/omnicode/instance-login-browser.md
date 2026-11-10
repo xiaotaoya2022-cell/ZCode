@@ -46,5 +46,37 @@
 ## 已知限制与延后
 
 - `setWindowOpenHandler` 全拒：若 Z.ai/BigModel 登录强依赖弹窗式第三方登录，v0 下该入口不可用（重定向式正常）；真机验证后决定是否放行同域弹窗。
-- 手动粘贴恢复入口做在实例 renderer 登录错误态（本仓库官方已有 OAuthCallback 通道，粘贴 URL 经同一 IPC 复用 `handleDeepLink`；v0 先落地窗口与拦截，粘贴 UI 随错误态改造一并做）。
 - SSO 静默重授权的真机验证项见决策 2。
+
+## 手动粘贴回调恢复入口（决策 4 落地，2026-11-10）
+
+常驻 UI 不出现；仅当登录失败态（`WelcomeScreen.tsx` 的 `status === "error" || oauthError` 分支，
+覆盖启动失败、轮询失败与 300s 超时后的收口错误）出现时，在错误面板底部提供可折叠的"高级恢复"区：
+
+1. 折叠开关 `oauth-advanced-recovery-toggle` → 展开 `oauth-advanced-recovery-input`（单行输入，粘贴完整回调 URL）
+   与 `oauth-advanced-recovery-submit`。
+2. 提交走 `platform.submitOmnicodeCallback({ url })`（`IPlatformService` 可选方法，Web/旧 preload 缺席即无入口）
+   → shared channel `OmnicodeSubmitCallback: "zcode:omnicode-submit-callback"`（request `{url}`，response `{ok, accepted}`）
+   → main `desktopMainIpcRemote.ts` 的 ipcMain.handle：先经 `normalizePastedOmnicodeCallbackUrl` 归一化
+   （`http(s)://localhost|127.0.0.1:1455/auth/callback?…` 重写为 `zcode://oauth/callback?…`，仅保留 query；
+   其余形状原样），再复用官方 `handleDeepLink` 路由（state 校验 + 路由到发起窗口，与内置窗口拦截零差异）。
+3. `accepted=true` → toast「回调已接收」并折叠恢复区；官方 1s 轮询 / OAuthCallback 链路自动收敛登录态。
+   `accepted=false` → toast「回调未被接收：state 不匹配或已过期」（不区分 URL 格式错误与过期，避免暴露内部细节）。
+
+## zcode:// 跨实例投递（最后兜底，2026-11-10）
+
+背景：`zcode://` OS 级注册是全局单点（`registerDeepLinkProtocol` 不带实例标识），OS 回调只会拉起注册时的
+默认实例；用户在外部浏览器完成授权的边缘场景下，回调可能落到未发起登录的实例。内置窗口拦截 + 同实例
+`oauthStateToWindow` 路由的主路径不受本机制影响。
+
+- **写入端**（`desktopOAuthDeepLink.ts` `handleDeepLink` OAuth 回调分支）：本进程是 Profile 实例
+  （`isOmnicodeProfileInstanceEnv`）且 `oauthStateToWindow` 无该 state → 把回调 URL 写入
+  `~/.omnicode/shared/oauth-callbacks/<state>.json`（`{url, receivedAt}`）并 log 转投说明，向调用方返回 true。
+  state 文件名强制 `/^[0-9a-f]{16,64}$/`（hex 白名单防路径穿越）+ resolve 前缀围栏；目录根与
+  `services workspaceLocks.getOmnicodeSharedRoot` 语义一致（`OMNICODE_SHARED_ROOT` 优先，否则
+  `~/.omnicode/shared`），desktop 内独立实现、不 import services。
+- **消费端**（同文件 `startOmnicodeOAuthCallbackRelayConsumer`）：`OAuthRegisterState` IPC 处理时拉起
+  1s 消费 tick（与官方 renderer 轮询同节奏；`oauthStateToWindow` 为空且投递目录已空时自动停表，不常驻）。
+  每轮读取投递目录：文件 state 命中本进程 `oauthStateToWindow` → 调官方 `handleDeepLink(url)` 路由后删除文件
+  （未就绪时保留重试）；不匹配的文件超 60s 懒删除（读到但不匹配的文件由读取方清理）。
+- `handleDeepLink` 返回 true = 已接收（转投成功或正常路由都算）；false 仅保留给窗口未就绪等暂态。

@@ -1,12 +1,14 @@
 /* oxlint-disable eslint(max-lines) -- Deep Link 路由必须在同一模块内保持协议校验和投递原子性。 */
-import { statSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
+import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { isAbsolute, join, resolve } from "node:path";
+import { homedir } from "node:os";
 import { app, BrowserWindow, dialog } from "electron";
 import type { WebContents } from "electron";
 import {
   type Locale,
   type OAuthProviderId,
   type OAuthStateRegistration,
+  isOmnicodeProfileInstanceEnv,
   PlatformChannels,
 } from "@zcode/shared";
 import {
@@ -18,6 +20,11 @@ import {
   isShareImportUrl,
 } from "./desktopDeepLinkUrl.js";
 import { registerLinuxDeepLinkProtocol } from "./desktopLinuxDeepLinkRegistration.js";
+
+interface DeepLinkLogger {
+  info: (...args: unknown[]) => void;
+  warn: (...args: unknown[]) => void;
+}
 
 interface DeepLinkWorkspaceGateOptions {
   canOpenWorkspace?: (workspacePath: string) => boolean;
@@ -115,6 +122,217 @@ function focusDeepLinkTargetWindow(targetWindow: BrowserWindow): void {
 
 function hasOAuthAuthorizationCode(parsedUrl: URL): boolean {
   return parsedUrl.searchParams.has("code") || parsedUrl.searchParams.has("authCode");
+}
+
+// ============================================================================
+// [OmniCode] zcode:// 跨实例投递（spec: docs/omnicode/instance-login-browser.md §任务2）
+//
+// 背景：zcode:// 的 OS 级注册是全局单点（registerDeepLinkProtocol 不带实例标识），
+// OS 回调只会拉起"注册时的默认实例"。正常路径（内置授权窗口拦截 + 同实例
+// oauthStateToWindow 路由）完全不受本段影响；这里只是"回调落到错误实例"这一
+// 边缘场景的最后兜底：错误实例把回调 URL 落盘到跨实例共享目录，发起登录的
+// 实例在自己 1s 轮询节奏里读取并按官方 handleDeepLink 路由。
+// ============================================================================
+
+/** [OmniCode] 与 services omnicode/workspaceLocks.ts getOmnicodeSharedRoot 语义一致：
+ * OMNICODE_SHARED_ROOT 优先，否则 ~/.omnicode/shared。desktop 包不 import services
+ * 实现，保持同一环境变量合同即可（两处独立实现、语义对齐）。 */
+function resolveOmnicodeOAuthRelayDir(): string {
+  const override = process.env.OMNICODE_SHARED_ROOT?.trim();
+  const sharedRoot = override ? override : join(homedir(), ".omnicode", "shared");
+  return join(sharedRoot, "oauth-callbacks");
+}
+
+/** OAuth state 由 oauthService randomBytes(32).toString("hex") 生成（64 位 hex）。
+ * 文件名直接用 state，必须收紧为 hex 白名单防路径穿越。 */
+function isSafeOmnicodeRelayState(state: string): boolean {
+  return /^[0-9a-f]{16,64}$/u.test(state);
+}
+
+/** 把回调 URL 写入跨实例投递文件 `<state>.json`（{url, receivedAt}）。
+ * 写入失败只降级为"未转投"，不阻断 handleDeepLink 其余分支。 */
+function writeOmnicodeOAuthCallbackRelay(
+  state: string,
+  url: string,
+  logger: DeepLinkLogger,
+): boolean {
+  if (!isSafeOmnicodeRelayState(state)) {
+    logger.warn("[deep-link] OAuth 回调 state 非 hex 形状，跳过跨实例投递", { state });
+    return false;
+  }
+  try {
+    const relayDir = resolve(resolveOmnicodeOAuthRelayDir());
+    mkdirSync(relayDir, { recursive: true });
+    // resolve 后必须仍落在 relayDir 内，杜绝 state 携带 ../ 的路径越界。
+    const relayPath = resolve(join(relayDir, `${state}.json`));
+    if (!relayPath.startsWith(relayDir + "\\") && !relayPath.startsWith(relayDir + "/")) {
+      logger.warn("[deep-link] OAuth 回调投递路径越界，已拒绝", { state });
+      return false;
+    }
+    writeFileSync(relayPath, JSON.stringify({ url, receivedAt: Date.now() }), "utf8");
+    logger.info("[deep-link] OAuth 回调不属于本实例，已写入跨实例投递文件等待发起方消费", {
+      state,
+      relayPath,
+    });
+    return true;
+  } catch (error) {
+    logger.warn("[deep-link] OAuth 回调跨实例投递写入失败", {
+      state,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
+/** 读取投递目录并消费：state 与本进程 oauthStateToWindow 匹配 → 官方 handleDeepLink
+ * 路由后删除文件；不匹配的文件超 60s 懒删除（最后兜底，正常路径不产生这些文件）。
+ * @returns 目录里是否仍有未清理文件（供消费定时器决定是否继续运行）。 */
+function consumeOmnicodeOAuthCallbackRelayFiles(logger: DeepLinkLogger): boolean {
+  const relayDir = resolveOmnicodeOAuthRelayDir();
+  let entries: string[];
+  try {
+    entries = readdirSync(relayDir);
+  } catch {
+    // 目录不存在 = 没有任何投递，最常见路径。
+    return false;
+  }
+
+  let hasRemainingFiles = false;
+  const now = Date.now();
+  for (const entry of entries) {
+    if (!entry.endsWith(".json")) {
+      continue;
+    }
+    const state = entry.slice(0, -".json".length);
+    if (!isSafeOmnicodeRelayState(state)) {
+      continue;
+    }
+    const relayPath = resolve(join(relayDir, entry));
+    if (oauthStateToWindow.has(state)) {
+      let relayedUrl: string | null = null;
+      try {
+        const parsed = JSON.parse(readFileSync(relayPath, "utf8")) as { url?: unknown };
+        if (typeof parsed?.url === "string" && parsed.url.trim() !== "") {
+          relayedUrl = parsed.url;
+        }
+      } catch (error) {
+        logger.warn("[deep-link] OAuth 投递文件解析失败，已删除", {
+          state,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      if (relayedUrl) {
+        // 走官方 handleDeepLink：state 校验 + 路由到发起窗口，与窗口拦截路径零差异。
+        const accepted = handleDeepLink(relayedUrl, logger);
+        if (accepted) {
+          try {
+            rmSync(relayPath, { force: true });
+          } catch (error) {
+            logger.warn("[deep-link] OAuth 投递文件删除失败（下轮重试）", { state, error });
+            hasRemainingFiles = true;
+          }
+          continue;
+        }
+        // 目标窗口尚未就绪：保留文件，下一轮 tick 重试（handleDeepLink 已缓存 pending）。
+        hasRemainingFiles = true;
+        continue;
+      }
+      try {
+        rmSync(relayPath, { force: true });
+      } catch {
+        // 清理失败留给下一轮。
+        hasRemainingFiles = true;
+      }
+      continue;
+    }
+
+    // 非本进程的 state：懒清理（>60s 删除），不主动消费。
+    try {
+      const stats = statSync(relayPath);
+      if (now - stats.mtimeMs > 60_000) {
+        rmSync(relayPath, { force: true });
+        logger.info("[deep-link] 清理过期 OAuth 跨实例投递文件", { state });
+      } else {
+        hasRemainingFiles = true;
+      }
+    } catch {
+      // 文件已被其他实例消费/清理，忽略。
+    }
+  }
+  return hasRemainingFiles;
+}
+
+let omnicodeRelayConsumerTimer: ReturnType<typeof setInterval> | null = null;
+let omnicodeRelayConsumerLogger: DeepLinkLogger | null = null;
+
+/** 发起登录（registerOAuthState）时拉起 1s 消费 tick，与 renderer 官方 1s 轮询同节奏；
+ * 本进程没有进行中的 OAuth flow 且投递目录已空时自动停表，不常驻。 */
+export function startOmnicodeOAuthCallbackRelayConsumer(logger: DeepLinkLogger): void {
+  omnicodeRelayConsumerLogger = logger;
+  if (omnicodeRelayConsumerTimer) {
+    return;
+  }
+  omnicodeRelayConsumerTimer = setInterval(() => {
+    const consumerLogger = omnicodeRelayConsumerLogger;
+    if (!consumerLogger) {
+      return;
+    }
+    let hasRemainingFiles = false;
+    try {
+      hasRemainingFiles = consumeOmnicodeOAuthCallbackRelayFiles(consumerLogger);
+    } catch (error) {
+      consumerLogger.warn("[deep-link] OAuth 跨实例投递消费 tick 异常", { error });
+    }
+    if (oauthStateToWindow.size === 0 && !hasRemainingFiles) {
+      const timer = omnicodeRelayConsumerTimer;
+      omnicodeRelayConsumerTimer = null;
+      if (timer) {
+        clearInterval(timer);
+      }
+    }
+  }, 1_000);
+  omnicodeRelayConsumerTimer.unref?.();
+}
+
+/**
+ * 失败态恢复入口的粘贴 URL 归一化（spec §任务1）：官方 handleDeepLink 只识别
+ * zcode://oauth/callback 形状；外部浏览器回调可能落在本地回环端口的 http 形状。
+ * 这里把 http://localhost:1455/auth/callback?… 重写为 zcode://oauth/callback?…
+ * （仅保留 query），其余形状原样返回交给 handleDeepLink 自行校验。
+ */
+export function normalizePastedOmnicodeCallbackUrl(rawUrl: string): string | null {
+  const trimmed = rawUrl.trim();
+  if (trimmed === "") {
+    return null;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return null;
+  }
+  if (isOAuthCallbackUrl(parsed)) {
+    return trimmed;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return null;
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (host !== "localhost" && host !== "127.0.0.1") {
+    return null;
+  }
+  if (parsed.port !== "1455") {
+    return null;
+  }
+  const path = parsed.pathname.replace(/\/+$/u, "");
+  if (path !== "/auth/callback") {
+    return null;
+  }
+  const normalized = new URL("zcode://oauth/callback");
+  for (const [key, value] of parsed.searchParams) {
+    normalized.searchParams.append(key, value);
+  }
+  return normalized.toString();
 }
 
 export function isValidLocalWorkspaceDirectory(path: string): boolean {
@@ -385,6 +603,17 @@ export function handleDeepLink(
       completed: shouldCompleteOAuthRoute,
     });
     return true;
+  }
+
+  // [OmniCode] 跨实例改道（spec §任务2，最后兜底）：OS 级 zcode:// 注册是全局单点，
+  // 回调可能落到未发起本次登录的 Profile 实例。state 不在 oauthStateToWindow 说明
+  // 发起方是另一实例/控制台——写入跨实例投递文件，由发起方实例在自己 1s 消费
+  // tick（startOmnicodeOAuthCallbackRelayConsumer）里走官方 handleDeepLink 路由。
+  // 正常路径（内置窗口拦截 + 同实例路由）不进入此分支。
+  if (!routeTarget && isOmnicodeProfileInstanceEnv()) {
+    if (writeOmnicodeOAuthCallbackRelay(state, url, logger)) {
+      return true;
+    }
   }
 
   pendingDeepLinkUrl = url;

@@ -35,6 +35,13 @@ export const TID_OAUTH_CANCEL = "oauth-cancel";
 export const TID_OAUTH_COPY_LOGIN_LINK = "oauth-copy-login-link";
 /** OAuth 错误提示文本 */
 export const TID_OAUTH_ERROR = "oauth-error";
+// [OmniCode] 实例专属登录浏览器：失败态恢复入口（手动粘贴回调 URL）
+/** OAuth 错误态"高级恢复"折叠开关 */
+export const TID_OAUTH_ADVANCED_RECOVERY_TOGGLE = "oauth-advanced-recovery-toggle";
+/** OAuth 高级恢复回调 URL 输入框 */
+export const TID_OAUTH_ADVANCED_RECOVERY_INPUT = "oauth-advanced-recovery-input";
+/** OAuth 高级恢复提交按钮 */
+export const TID_OAUTH_ADVANCED_RECOVERY_SUBMIT = "oauth-advanced-recovery-submit";
 
 // App
 /** 顶部导航栏 */

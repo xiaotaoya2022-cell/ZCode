@@ -36,6 +36,16 @@ export interface BrowserAmbientContextExecutor {
   }): Promise<{ ok: boolean; [key: string]: unknown }>;
 }
 
+/**
+ * [OmniCode] M4c Browser Relay：remote workspace Host 注入的 relay 降级执行器。
+ * 命令形状与 BrowserAmbientContextExecutor 完全一致（结果即桌面桥返回值），
+ * 额外暴露 hasRelaySubscriber 门控——桌面端是否订阅 relay 事件随连接增减动态变化，
+ * browser 后端解析必须在每次调用时重查，未订阅时按"无浏览器后端"短路而非挂起。
+ */
+export type BrowserRelayAgentExecutor = BrowserAmbientContextExecutor & {
+  hasRelaySubscriber(): boolean;
+};
+
 interface BrowserAmbientContextTarget {
   sessionId: string;
   workspacePath: string;
