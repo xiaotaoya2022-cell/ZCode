@@ -46,6 +46,7 @@ export async function connectDesktopSourceServer(
     return {
       serverInfo: connected.serverInfo,
       services: connected.services,
+      rpcClient: connected.rpcClient,
       dispose() {
         relay.dispose();
         connected.dispose();

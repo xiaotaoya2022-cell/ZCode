@@ -17,6 +17,8 @@ import { wrapStdioStream } from "./stdio-socket.js";
 import { performHandshake } from "./handshake.js";
 import { deployServer } from "./deploy.js";
 import type { DeployOptions } from "./deploy.js";
+import { REMOTE_BASE } from "./deployShared.js";
+import { checkServerBundleForkMarkers } from "./serverBundleDeployCheck.js";
 import { assertSupportedRemoteEnvironment } from "@zcode/server/remote/remotePlatformSupport.js";
 import { quotePosixShellArg } from "./posixShell.js";
 import { formatWslProxyForLog } from "./wslProxy.js";
@@ -52,6 +54,12 @@ export interface RemoteRuntimeNetworkOptions {
 export interface RemoteConnection {
   services: IServiceAccessor;
   client: ChannelClient;
+  /**
+   * [OmniCode] M4b Browser Relay：远端 server bundle 是否含 fork marker
+   * （omnicode-browser-relay）。仅 stdio 直连路径在连接后做一次 node -e 文本探测得出；
+   * 探测失败一律按 false 收口。桌面端据此门控 onDynamicBrowserRelayRequest 订阅。
+   */
+  browserRelayAvailable: boolean;
   dispose(): void;
   disposeAndWait(options?: { timeoutMs?: number }): Promise<void>;
 }
@@ -218,6 +226,21 @@ async function connectRemoteUnchecked(
   throwIfRemoteConnectAborted(options?.signal);
   log("handshake done, server version:", hello.version);
 
+  // [OmniCode] M4b Browser Relay：连接后对已部署 bundle 做一次 fork marker 文本探测。
+  // 结果只作能力门控（browserRelayAvailable），不参与 deploy 决策；探测失败按 false
+  // 收口，不影响连接本身。CDN 下载的官方 bundle 不含 marker → relay 保持关闭。
+  let browserRelayAvailable = false;
+  try {
+    browserRelayAvailable = await checkServerBundleForkMarkers(
+      backend,
+      `${REMOTE_BASE}/node`,
+      `${REMOTE_BASE}/zcode-server.cjs`,
+    );
+    log("fork bundle marker probe:", browserRelayAvailable ? "fork bundle" : "official bundle");
+  } catch (error) {
+    log("fork bundle marker probe failed (treated as official):", String(error));
+  }
+
   // 5. Wrap into RPC channel
   // If there's remaining data from handshake, push it back to the stream
   // so it gets picked up by wrapStdioStream's data listener
@@ -304,6 +327,7 @@ async function connectRemoteUnchecked(
   return {
     services,
     client,
+    browserRelayAvailable,
     dispose() {
       beginDisposal();
       disposeBackend();

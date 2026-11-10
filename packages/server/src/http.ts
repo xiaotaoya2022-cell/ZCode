@@ -35,6 +35,7 @@ import {
   ZCODE_RPC_HOST_CAPABILITY_HEADER,
   ZCODE_COMPATIBILITY_MANIFEST,
   ZCODE_VERSION,
+  OMNICODE_BROWSER_RELAY_CHANNEL,
   type BotProvider,
   type ServerRemoteInfo,
   type ServerRemoteWorkspaceInfo,
@@ -44,6 +45,7 @@ import {
   type SourceServerWorkspaceIdentityMapper,
 } from "@zcode/services/node";
 import { createHostCapabilityStore } from "./hostCapability.js";
+import { createOmniCodeBrowserRelayChannel } from "./browserRelayChannel.js";
 
 function wrapWebSocket(ws: WebSocket): ISocket {
   const onData = new Emitter<VSBuffer>();
@@ -132,6 +134,10 @@ function setupChannelServer(
     });
   }
   services.exposeOnChannelServer(server, overrides);
+  // [OmniCode] M4b Browser Relay：fork-only 频道注册（频道名同时是
+  // FORK_SERVER_BUNDLE_MARKERS 的 bundle marker）。对 web-remote-replayable 客户端同样
+  // 可达但无订阅方；fork 客户端经连接后 ping 探测命中才订阅，官方 server 无此频道。
+  server.registerChannel(OMNICODE_BROWSER_RELAY_CHANNEL, createOmniCodeBrowserRelayChannel());
   socket.onClose(() => {
     peer?.dispose();
     reverseClient?.dispose();
