@@ -27,9 +27,16 @@ import { dispatchTaskNotification } from "./desktopNotifications.js";
 import {
   clearOAuthRoutesForWindow,
   deliverPendingDeepLink,
+  handleDeepLink,
   parseOAuthStateRegistration,
   registerOAuthState,
 } from "./desktopOAuthDeepLink.js";
+// [OmniCode] 实例专属登录浏览器（spec: docs/omnicode/instance-login-browser.md）
+import {
+  isOmnicodeAuthorizeUrl,
+  isOmnicodeProfileInstanceEnv,
+} from "@zcode/shared";
+import { openOmnicodeInstanceAuthWindow } from "./omnicode/contract.js";
 import {
   dispatchFinalArmsCustomEvent,
   enableSharedFinalArmsCustomEventE2EController,
@@ -357,6 +364,21 @@ export function registerRemoteIpcHandlers(options: {
     }
     if (new URL(url).protocol === "file:") {
       void openFileUrlInDefaultApp(url, options.logger);
+      return;
+    }
+    // [OmniCode] 实例专属登录浏览器：Profile 实例身份下，OAuth 授权 URL 改走内置
+    // 授权窗口（分区 persist:omnicode-auth-<profileId>），回调 zcode:// 在窗口内拦截
+    // 并交由官方 handleDeepLink 路由，全程不经系统浏览器（spec §流程 2-4）。
+    if (
+      isOmnicodeProfileInstanceEnv() &&
+      isOmnicodeAuthorizeUrl(url) &&
+      openOmnicodeInstanceAuthWindow({
+        url,
+        profileId: process.env.OMNICODE_PROFILE_ID?.trim() ?? "",
+        logger: options.logger,
+        onZcodeCallback: (callbackUrl) => handleDeepLink(callbackUrl, options.logger),
+      }).ok
+    ) {
       return;
     }
     const sender = event.sender;
