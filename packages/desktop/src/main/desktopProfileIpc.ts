@@ -14,6 +14,7 @@ import {
   removeOmnicodeProfile,
   restoreOmnicodeInstances,
   sendOmnicodeInstanceCommand,
+  startOmnicodeCredentialBackupScheduler,
   stopOmnicodeProfile,
 } from "./omnicode/contract.js";
 
@@ -23,6 +24,8 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
   // 批次1 P0-3：控制台（重）启动时扫进程表重建实例运行态（异步不阻塞 IPC 注册；
   // 扫描失败保留现状——instanceReconcile 的"失败≠无实例"语义）
   void reconcileOmnicodeRunningInstances();
+  // [OmniCode] 凭据自动备份调度器（每小时 + 装配即跑一次；best-effort）
+  startOmnicodeCredentialBackupScheduler();
 
   ipcMain.handle(PlatformChannels.OmnicodeProfileList, async () => {
     const profiles = await listOmnicodeProfiles();

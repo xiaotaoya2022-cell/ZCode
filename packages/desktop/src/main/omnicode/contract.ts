@@ -39,6 +39,11 @@ export type {
   OmnicodeInstanceBridgeListeners,
 } from "./instanceBridgeServer.js";
 export { startOmnicodeInstanceBridgeClient } from "./instanceBridgeClient.js";
+export {
+  backupAllOmnicodeCredentials,
+  backupCredentialFile,
+  startOmnicodeCredentialBackupScheduler,
+} from "./credentialBackups.js";
 export { openOmnicodeInstanceAuthWindow } from "./instanceAuthWindow.js";
 export type {
   OmnicodeInstanceAuthWindowLogger,

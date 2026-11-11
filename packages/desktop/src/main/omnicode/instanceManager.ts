@@ -25,6 +25,7 @@ import {
   recordProfileLaunched,
 } from "./profileRuntime.js";
 import { scanOmnicodeInstanceProcesses } from "./instanceReconcile.js";
+import { backupCredentialFile } from "./credentialBackups.js";
 // [OmniCode] 桥接服务直接从实现文件导入：经 contract.ts 会与本文件形成导出循环
 import { ensureOmnicodeInstanceBridgeServerStarted, sendOmnicodeInstanceCommand } from "./instanceBridgeServer.js";
 
@@ -147,6 +148,18 @@ async function doLaunch(profileId: string): Promise<number> {
   const profileDir = getOmnicodeProfileDir(profileId);
   await mkdir(join(profileDir, "electron-userdata"), { recursive: true });
   await mkdir(join(profileDir, "electron-session"), { recursive: true });
+  // [OmniCode] 启动前凭据备份（用户拍板轻量补强）：升级/迁移可能重写凭据库，
+  // 启动前留一份快照保证可一键回滚；best-effort 不阻断启动（失败仅告警）。
+  try {
+    const result = await backupCredentialFile(
+      join(profileDir, ".zcode", "v2", "credentials.json"),
+    );
+    if (result === "backed-up") {
+      console.info(`[omnicode] 启动前凭据已备份: profileId=${profileId}`);
+    }
+  } catch (error) {
+    console.warn(`[omnicode] 启动前凭据备份失败（不阻断启动）: profileId=${profileId}`, error);
+  }
 
   // [OmniCode] 桥接服务就绪后再启动实例（回连端口/token 经 spawn env 原子注入）
   const bridge = await ensureOmnicodeInstanceBridgeServerStarted();
