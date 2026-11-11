@@ -17,10 +17,8 @@ import {
   type OAuthProviderMeta,
   BIGMODEL_PROVIDER_ID,
   ZAI_PROVIDER_ID,
-  ZAI_CN_PROVIDER_ID,
 } from "@zcode/shared";
 import {
-  TID_LOGIN_REGION_SWITCH,
   TID_LOGIN_USE_API_KEY_BUTTON,
   TID_OAUTH_ADVANCED_RECOVERY_INPUT,
   TID_OAUTH_ADVANCED_RECOVERY_SUBMIT,
@@ -29,6 +27,7 @@ import {
   TID_OAUTH_COPY_LOGIN_LINK,
   TID_OAUTH_ERROR,
   TID_OAUTH_LOGIN_BUTTON,
+  testId,
 } from "@zcode/shared/test-ids";
 import { Alert, AlertDescription } from "./components/ui/alert.js";
 import { Button } from "./components/ui/button.js";
@@ -38,6 +37,7 @@ import { useOAuth } from "./hooks/useOAuth.js";
 import { usePlatform } from "./hooks/usePlatform.js";
 import { useZCodeIntl } from "./i18n/IntlProvider.js";
 import { LoginApiKeyForm } from "./login/LoginApiKeyForm.js";
+import { renderOAuthProviderIcon } from "./lib/oauthProviderIcon.js";
 import { ThemeHeroVisual } from "./openWorkspacePageThemeHero.js";
 import { useZCodeStore } from "./store/StoreProvider.js";
 import { DesktopOverlayWindowControls } from "@/DesktopOverlayWindowControls.js";
@@ -150,13 +150,10 @@ interface WelcomeScreenProps {
 
 export type LoginCompleteReason = "oauth" | "apiKey" | "skip";
 
-/** 登录页区域展示态；真实区域路由等 Z.ai 国内一方登录 provider 就绪后再接入。 */
-type SingleLoginRegion = "domestic" | "global";
-
-/** 区域展示态跟随界面语言：英文默认海外，中文默认国内。 */
-export function resolveLoginRegionForLocale(locale: string): SingleLoginRegion {
-  return locale === "en-US" ? "global" : "domestic";
-}
+// [OmniCode] 登录面回退（方案 A2）：官方 v3.18.0 的 SingleLoginRegion/区域单 provider
+// 路由不采用——中文界面被路由到 zai_cn（手机号登录）且该身份被官方凭据库排除在
+// 额度家族之外（免费额度显示为空）。恢复 v3.17.2 的多 provider 列表，旧 OAuth
+// 身份在 v3.18.0 快照库下 direct 材料成立、额度照常。
 
 export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
   const { intl } = useZCodeIntl();
@@ -282,10 +279,11 @@ export function LoginPanel({ active, onComplete }: LoginPanelProps) {
   const clearLoginEntryRequest = useZCodeStore((s) => s.clearLoginEntryRequest);
   const markLoginEntryAttemptStatus = useZCodeStore((s) => s.markLoginEntryAttemptStatus);
   const [loginMode, setLoginMode] = useState<"providers" | "apiKey">("providers");
-  const [loginRegion, setLoginRegion] = useState<SingleLoginRegion>(() =>
-    resolveLoginRegionForLocale(locale),
-  );
-  const loginRegionUserSelectedRef = useRef(false);
+  // [OmniCode] 登录面回退（方案 A2）：不跟随官方 v3.18.0 的区域单 provider 路由，
+  // 恢复 v3.17.2 的多 provider 列表（连接 Z.ai / 连接 BigModel / API key）——
+  // 旧 OAuth 身份在 v3.18.0 凭据库快照机制下 direct 材料成立，额度链路照常工作；
+  // zai_cn 手机号登录的会话被官方故意排除在额度家族之外（"中国区 OAuth 不能被
+  // 当成全球区业务凭据"），是"登录后免费额度显示没有"的根源。
   // [OmniCode] 失败态恢复入口（spec §定稿决策 4）：常驻 UI 不出现，仅错误态可展开。
   const [showAdvancedRecovery, setShowAdvancedRecovery] = useState(false);
   const [callbackUrlInput, setCallbackUrlInput] = useState("");
@@ -338,18 +336,13 @@ export function LoginPanel({ active, onComplete }: LoginPanelProps) {
   );
 
   const visibleProviders = useMemo(() => resolveVisibleLoginProviders(providers), [providers]);
-  const loginProvider = useMemo(
-    () => resolveSingleLoginProvider(visibleProviders, loginRegion),
-    [visibleProviders, loginRegion],
+  const providerNameMap = useMemo(
+    () => new Map(providers.map((provider) => [provider.id, provider.displayName])),
+    [providers],
   );
-
-  // 语言可能在挂载后才解析完成（如 system 偏好）；用户未手动切换区域前，让区域跟随语言。
-  useEffect(() => {
-    if (loginRegionUserSelectedRef.current) {
-      return;
-    }
-    setLoginRegion(resolveLoginRegionForLocale(locale));
-  }, [locale]);
+  const pendingProviderName = pendingProvider
+    ? (providerNameMap.get(pendingProvider) ?? pendingProvider)
+    : null;
 
   useEffect(() => {
     if (active) {
@@ -573,7 +566,7 @@ export function LoginPanel({ active, onComplete }: LoginPanelProps) {
               </div>
             ) : null}
 
-            {!loadingProviders && !loginProvider ? (
+            {!loadingProviders && providers.length === 0 ? (
               <Alert
                 variant="warning"
                 className="flex items-center justify-center gap-2 text-center"
@@ -587,24 +580,33 @@ export function LoginPanel({ active, onComplete }: LoginPanelProps) {
             ) : null}
 
             {!loadingProviders ? (
-              <div className="flex flex-col items-center">
-                <Button
-                  variant="default"
-                  className="h-11 w-full rounded-lg text-ui-base font-medium"
-                  size="lg"
-                  data-testid={TID_OAUTH_LOGIN_BUTTON}
-                  disabled={!loginProvider}
-                  onClick={() => {
-                    if (loginProvider) void startTrackedLogin(loginProvider);
-                  }}
-                >
-                  <span className="min-w-0 truncate">
-                    {intl.formatMessage({ id: "login.singleLogin.browserButton" })}
-                  </span>
-                </Button>
+              <div className="space-y-2">
+                {visibleProviders.map((provider) => (
+                  <Button
+                    key={provider.id}
+                    variant="default"
+                    className="h-10 w-full text-ui-base"
+                    size="lg"
+                    data-testid={
+                      provider.id === BIGMODEL_PROVIDER_ID
+                        ? TID_OAUTH_LOGIN_BUTTON
+                        : testId(TID_OAUTH_LOGIN_BUTTON, provider.id)
+                    }
+                    onClick={() => void startTrackedLogin(provider.id)}
+                  >
+                    {renderOAuthProviderIcon(provider.id, "size-4")}
+                    <span className="min-w-0 truncate">
+                      {intl.formatMessage(
+                        { id: getLoginOAuthButtonMessageId(provider.id) },
+                        { provider: provider.displayName },
+                      )}
+                    </span>
+                    <LoginOAuthRegionTag providerId={provider.id} />
+                  </Button>
+                ))}
                 <Button
                   variant="outline"
-                  className="mt-2.5 h-10 w-full rounded-lg text-ui-base font-medium"
+                  className="h-10 w-full text-ui-base"
                   size="lg"
                   data-testid={TID_LOGIN_USE_API_KEY_BUTTON}
                   onClick={() => {
@@ -613,29 +615,6 @@ export function LoginPanel({ active, onComplete }: LoginPanelProps) {
                 >
                   {intl.formatMessage({ id: "login.useApiKey" })}
                 </Button>
-                {/* 当前区域停用时仍保留切换入口，不能把用户锁在不可用区域。 */}
-                <div className="mt-4 flex h-7 w-full items-center justify-center">
-                  <button
-                    type="button"
-                    className="rounded-md px-2 text-ui-sm text-foreground-subtle underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    data-testid={TID_LOGIN_REGION_SWITCH}
-                    onClick={() => {
-                      const nextRegion = loginRegion === "domestic" ? "global" : "domestic";
-                      // 用户手动切换后，区域不再跟随后续语言变化。
-                      loginRegionUserSelectedRef.current = true;
-                      setLoginRegion(nextRegion);
-                      // 区域切换与界面语言联动：国内入口使用中文，海外入口使用英文。
-                      setLocalePreference(nextRegion === "domestic" ? "zh-CN" : "en-US");
-                    }}
-                  >
-                    {intl.formatMessage({
-                      id:
-                        loginRegion === "domestic"
-                          ? "login.singleLogin.switchToGlobal"
-                          : "login.singleLogin.switchToDomestic",
-                    })}
-                  </button>
-                </div>
               </div>
             ) : null}
           </div>
@@ -659,7 +638,10 @@ export function LoginPanel({ active, onComplete }: LoginPanelProps) {
           <div className="flex flex-col">
             <div className="flex h-11 items-center justify-center gap-2 rounded-lg border border-border bg-surface px-2 text-ui-base text-foreground-subtle">
               <LoaderCircle className="size-4 animate-spin" />
-              {intl.formatMessage({ id: "login.singleLogin.waiting" })}
+              {intl.formatMessage(
+                { id: "login.oauth.waiting" },
+                { provider: pendingProviderName ?? "" },
+              )}
             </div>
             <Button
               variant="outline"
@@ -844,12 +826,44 @@ export function resolveVisibleLoginProviders(providers: OAuthProviderMeta[]): OA
   });
 }
 
-export function resolveSingleLoginProvider(
-  providers: OAuthProviderMeta[],
-  region: SingleLoginRegion,
-): OAuthProviderMeta["id"] | null {
-  const providerId = region === "domestic" ? ZAI_CN_PROVIDER_ID : ZAI_PROVIDER_ID;
-  return providers.find((provider) => provider.id === providerId && provider.enabled)?.id ?? null;
+// [OmniCode] 登录面回退（方案 A2）：以下三件 helper 自 v3.17.2 恢复（按钮文案、
+// 区域徽标、区域标签渲染），配合多 provider 列表渲染。
+
+function getLoginOAuthButtonMessageId(providerId: string): string {
+  switch (providerId) {
+    case ZAI_PROVIDER_ID:
+      return "login.oauth.button.zai";
+    case BIGMODEL_PROVIDER_ID:
+      return "login.oauth.button.bigmodel";
+    default:
+      return "login.oauth.button";
+  }
+}
+
+function getLoginOAuthRegionTagMessageId(providerId: string): string | null {
+  switch (providerId) {
+    case ZAI_PROVIDER_ID:
+      return "login.oauth.regionTag.zai";
+    case BIGMODEL_PROVIDER_ID:
+      return "login.oauth.regionTag.bigmodel";
+    default:
+      return null;
+  }
+}
+
+function LoginOAuthRegionTag({ providerId }: { providerId: string }) {
+  const { intl } = useZCodeIntl();
+  const messageId = getLoginOAuthRegionTagMessageId(providerId);
+
+  if (!messageId) {
+    return null;
+  }
+
+  return (
+    <span className="ml-1 inline-flex h-5 shrink-0 items-center rounded-full border border-primary-foreground/30 px-2 text-ui-xs font-medium leading-none text-primary-foreground/60">
+      {intl.formatMessage({ id: messageId })}
+    </span>
+  );
 }
 
 export function resolveLoginRetryProvider({
