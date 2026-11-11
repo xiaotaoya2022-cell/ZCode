@@ -50,6 +50,13 @@ export function applyEarlyDataBaseDirBootstrap(): string | null {
     // 主进程内 paths 由 setDataBaseDir 即刻生效；再写 env 让 host/agent 子进程经
     // buildHostProcessEnv 的 dataBaseDir !== homedir() 分支继承同一数据根。
     process.env.ZCODE_DATA_BASE_DIR = omnicodeDataBaseDir;
+    // [OmniCode] 主实例 HOME_DIR 同步注入（批次2a 补盲）：ZCODE_DESKTOP_HOME_DIR 是
+    // settingService.resolveUserHomeDir 的首选输入——不注入则主实例的 setting.json
+    // 仍落在真实 ~/.zcode/v2/，与官方产品共享（lastActiveWorkspace 互踩 + 双进程
+    // 写同一文件竞争）。Profile 实例由 profileBootstrap 注入同一变量（五件套），
+    // 主实例在此补齐，两条路径语义一致。app.setPath("home") 消费同一 env（desktop
+    // RuntimeEnv.runtimeHomePath），主实例 home 概念指向 console 数据根为预期行为。
+    process.env.ZCODE_DESKTOP_HOME_DIR = omnicodeDataBaseDir;
     return omnicodeDataBaseDir;
   }
   const dataBaseDir = readBootstrapDataBaseDirFromDisk();
