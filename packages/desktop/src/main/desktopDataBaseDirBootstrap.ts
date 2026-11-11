@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { ZCODE_PRODUCT_FLAVOR } from "@zcode/shared";
 import { setDataBaseDir } from "@zcode/services/node";
+import { ensureOmnicodeCredentialSecret } from "./omnicode/credentialSecret.js";
 
 export function resolveBootstrapSettingsFile(homePath: string = homedir()): string {
   return join(homePath, ".zcode", "v2", "setting.json");
@@ -57,6 +58,14 @@ export function applyEarlyDataBaseDirBootstrap(): string | null {
     // 主实例在此补齐，两条路径语义一致。app.setPath("home") 消费同一 env（desktop
     // RuntimeEnv.runtimeHomePath），主实例 home 概念指向 console 数据根为预期行为。
     process.env.ZCODE_DESKTOP_HOME_DIR = omnicodeDataBaseDir;
+    // [OmniCode] 凭据密钥固化（环境隔离根治方案，Cockpit ZCODE_CREDENTIAL_SECRET
+    // 不变量移植）：数据根内固化 credential-secret 文件并注入 env → 官方加密器
+    // 直接采用 env 密钥（source="env"），完全绕过 OS keyring——与官方产品的
+    // keyring entry 物理隔离，互踩通道消除。早期导入时机保证先于一切凭据读取。
+    const credentialSecret = ensureOmnicodeCredentialSecret(omnicodeDataBaseDir);
+    if (credentialSecret) {
+      process.env.ZCODE_CREDENTIAL_SECRET = credentialSecret;
+    }
     return omnicodeDataBaseDir;
   }
   const dataBaseDir = readBootstrapDataBaseDirFromDisk();

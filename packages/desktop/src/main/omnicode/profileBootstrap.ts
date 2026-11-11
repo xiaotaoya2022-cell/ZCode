@@ -16,6 +16,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
+import { ensureOmnicodeCredentialSecret } from "./credentialSecret.js";
 
 const PROFILE_FLAG = "--omnicode-profile=";
 const CONSOLE_FLAG = "--omnicode-console";
@@ -56,6 +57,13 @@ function injectIdentityEnv(profileId: string, profileDir: string): void {
   // 实例自声明（供 Host 侧锁服务识别"本实例占用"）；由本进程自己设置，与 spawn
   // 注入的值一致（双保险）
   process.env.OMNICODE_PROFILE_ID = profileId;
+  // [OmniCode] 凭据密钥固化（环境隔离根治方案）：Profile 数据根内固化独立密钥文件
+  // 并注入 ZCODE_CREDENTIAL_SECRET → 凭据加密完全脱离 OS keyring 与 homedir 派生。
+  // Profile legacy 密文无缝兼容（fallback 候选仍在 legacyKeyCandidates 列表）。
+  const credentialSecret = ensureOmnicodeCredentialSecret(profileDir);
+  if (credentialSecret) {
+    process.env.ZCODE_CREDENTIAL_SECRET = credentialSecret;
+  }
 }
 
 /**
