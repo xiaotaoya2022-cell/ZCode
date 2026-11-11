@@ -22,8 +22,10 @@ import { LucideProvider, RefreshCw } from "lucide-react";
 import {
   APP_RUNTIME_PREFERENCES_CHANGED_BROADCAST_CHANNEL,
   DesktopCommandIds,
+  ZCODE_PRODUCT_FLAVOR,
   appRuntimePreferencesChangedBroadcastPayloadSchema,
 } from "@zcode/shared";
+import { ConsoleHome } from "@/console/ConsoleHome.js";
 import { TooltipProvider } from "@/components/ui/tooltip.js";
 import { Button } from "@/components/ui/button.js";
 import { PlatformProvider } from "@/hooks/usePlatform.js";
@@ -1528,6 +1530,14 @@ function RootInner({
   };
 
   if (credentialRecovery.state) return <CredentialStoreRecovery recovery={credentialRecovery} />;
+
+  // [OmniCode] 批次2a 控制台归位（方案 A）：omnicode flavor 主窗口永远呈现实例管理
+  // 中枢——不管主实例登录与否。控制台自身不是可干活的 ZCode 实例，登录入口移除
+  // （各 Profile 实例在自己的窗口内登录）；startup 守卫链（登录/会话恢复）对控制台
+  // 无意义，直接绕过。官方 flavor（production/preview）渲染路径与现状完全一致。
+  if (ZCODE_PRODUCT_FLAVOR === "omnicode") {
+    return <ConsoleHome />;
+  }
 
   if (isStartupRenderBlocked) {
     const loadingLabel = intl.formatMessage({ id: "common.loading" });
