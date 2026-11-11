@@ -385,6 +385,13 @@ export interface AppSettings {
   proactiveSuggestionsEnabled?: boolean;
   /** 新版只保存活动执行目录；不表达项目/连接成员，null 表示明确清空。 */
   lastActiveWorkspace?: PersistedWorkspaceSessionEntry | null;
+  /**
+   * [OmniCode] 本实例当前打开的全部本地工作区路径（工作区锁集合化的事实源，
+   * spec: docs/omnicode/profile-runtime.md §工作区互斥锁）。persisting 窗口的
+   * useTabPersistence 在 tab 集合变化时全量重写；Host 锁协调器按集合对账获取/释放。
+   * 与 lastActiveWorkspace 相互独立：活动 tab 是远程时本字段仍持续维护。
+   */
+  openLocalWorkspaces?: string[];
   /** Host 从项目/本机入口派生，供旧版降级读取；新版不作为入口真相。 */
   lastWorkspaceSession?: PersistedWorkspaceSessionEntry[];
   /** 每个 Source Server 已解析的 canonical conversation backing workspace。 */
