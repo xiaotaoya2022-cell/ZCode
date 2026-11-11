@@ -1812,12 +1812,15 @@ modules:
       ui: .
     owner: conversation
   # omnicode-workspace-governance：由 architecture:adopt 登记（OmniCode 魔改：工作区锁/共享注册表）
+  # 批次1 锁集合化：coordinator 读写 AppSettings.openLocalWorkspaces（shared protocol/validation）
+  # 并发布结构化错误码 —— requires 增补 shared。
   - id: omnicode-workspace-governance
     roots:
       - packages/services/src/omnicode
     managed: true
     requires:
       - services
+      - shared
     publicEntrypoints:
       - packages/services/src/omnicode/contract.ts
     layers:
@@ -2371,7 +2374,9 @@ exceptions:
       - packages/desktop/src/main/desktopProfileIpc.ts
       - packages/desktop/src/renderer/src/desktopOmnicodePlatformBridge.ts
       - packages/ui/src/settings/ProfileMultiInstanceSection.tsx
-    reason: OmniCode profile runtime wiring files follow the exact same structure as the existing desktopSaveFile IPC registration and desktopBrowserPlatformBridge delegation patterns; the files are OmniCode-fork feature additions reviewed line-by-line (580-finding sealed scan passed), and adopting the whole desktop/ui module trees needs a separate boundary refactor.
+      - packages/desktop/src/main/omnicode/atomicJson.ts
+      - packages/desktop/src/main/omnicode/instanceReconcile.ts
+    reason: OmniCode profile runtime wiring files follow the exact same structure as the existing desktopSaveFile IPC registration and desktopBrowserPlatformBridge delegation patterns; the files are OmniCode-fork feature additions reviewed line-by-line (580-finding sealed scan passed), and adopting the whole desktop/ui module trees needs a separate boundary refactor. Batch-1 adds atomicJson.ts (profile registry atomic write/recovery, mirrors Cockpit atomic_write.rs invariants) and instanceReconcile.ts (running-state rebuild via process-table scan keyed on --omnicode-profile argv, mirrors Cockpit resolve_pid).
   # [OmniCode] M4b Browser Relay：新文件落在既有未受管 shared/server/desktop 大模块内的精确路径准入。
   # shared/browserRelay.ts 为 fork-only 事件契约（沿用 browser-use 既有类型，不发明新形状）；
   # server/browserRelayChannel.ts 仿照 stdio/http 既有 IServerChannel 模式实现 fork 频道；

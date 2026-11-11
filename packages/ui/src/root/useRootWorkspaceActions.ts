@@ -630,6 +630,12 @@ export function useRootWorkspaceActions({
         if (!isCurrent()) return;
         logger.error("[Root] handleSelectProject error:", err);
         setWorkspaceActionError(err instanceof Error ? err.message : String(err));
+        // 批次1 锁下沉：Host 侧拒绝被占用工作区时错误不会走到 addTab（无半打开），
+        // 但 workspaceActionError 无渲染点——toast 让对话框/拖拽/右键入口的用户可见拒绝原因。
+        const code = (err as { code?: string } | null)?.code;
+        if (code === "omnicode.workspace-locked-by-other") {
+          toast(err instanceof Error ? err.message : String(err), { variant: "warning" });
+        }
       }
     },
     [

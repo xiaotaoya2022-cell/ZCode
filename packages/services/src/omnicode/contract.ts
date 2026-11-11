@@ -5,6 +5,7 @@
  */
 export {
   acquireWorkspaceLock,
+  assertWorkspaceNotLockedByOther,
   getOmnicodeSharedRoot,
   getWorkspaceLockHash,
   heartbeatWorkspaceLock,
@@ -12,9 +13,11 @@ export {
   listWorkspaceLocks,
   readWorkspaceLockOwner,
   releaseWorkspaceLock,
+  WORKSPACE_LOCKED_BY_OTHER_ERROR_CODE,
 } from "./workspaceLocks.js";
 export type {
   AcquireWorkspaceLockResult,
+  WorkspaceLockedByOtherErrorData,
   WorkspaceLockDecoration,
   WorkspaceLockEntry,
   WorkspaceLockOwner,

@@ -584,6 +584,9 @@ const appSettingsObjectSchema = z.object({
   memoryEnabled: z.boolean().default(false),
   lastWorkspaceSession: z.array(appWorkspaceSessionEntrySchema).default([]),
   lastActiveWorkspace: appWorkspaceSessionEntrySchema.nullable().optional(),
+  // [OmniCode] 工作区锁集合化的事实源：本实例当前打开的本地工作区路径全集。
+  // 空数组 = 明确清空（关闭全部本地工作区）；缺席 = 旧 renderer 未写，锁协调器退回单活动工作区。
+  openLocalWorkspaces: z.array(nonEmptyStringSchema).max(512).optional(),
   remoteConversationWorkspaceBySourceServerId: z
     .record(nonEmptyStringSchema, remoteConversationWorkspaceRecordSchema)
     .optional(),
@@ -698,6 +701,8 @@ export const appSettingsPatchSchema = z.object({
   memoryEnabled: z.boolean().optional(),
   lastWorkspaceSession: z.array(appWorkspaceSessionEntrySchema).optional(),
   lastActiveWorkspace: appWorkspaceSessionEntrySchema.nullable().optional(),
+  // [OmniCode] 工作区锁集合化：patch 与完整 schema 共用同一校验，否则写入会被验证层拒绝/剥离。
+  openLocalWorkspaces: z.array(nonEmptyStringSchema).max(512).optional(),
   remoteConversationWorkspaceBySourceServerId: z
     .record(nonEmptyStringSchema, remoteConversationWorkspaceRecordSchema)
     .optional(),

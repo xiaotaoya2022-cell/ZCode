@@ -102,6 +102,23 @@ function buildDefaultPersistPatch(state: TabStoreState): Partial<AppSettings> {
   };
 }
 
+/**
+ * [OmniCode] 本实例当前打开的全部本地工作区路径（工作区锁集合化的事实源，
+ * spec: docs/omnicode/profile-runtime.md §工作区互斥锁）。
+ * 只收集本地 workspace tab：带 remote identity / remoteSessionId 的是远程工作区（M1 不锁）。
+ * 独立于活动 tab 计算——活动 tab 是远程/绑定中时集合仍要如实上报，否则已打开的
+ * 本地工作区会在 Host 侧被误判为"已关闭"而提前释放锁。
+ */
+function collectOpenLocalWorkspacePaths(state: TabStoreState): string[] {
+  const paths = new Set<string>();
+  for (const tab of state.tabs) {
+    if (!isWorkspaceTab(tab)) continue;
+    if (tab.workspaceIdentity?.trim() || tab.remoteSessionId) continue;
+    paths.add(tab.workspacePath);
+  }
+  return [...paths];
+}
+
 export function useTabPersistence({
   settingService,
   restoreSession = true,
@@ -298,13 +315,18 @@ export function useTabPersistence({
         // state，默认空 history 会把冻结 identity 改写成当前线路。写前读取同一 settings 快照。
         settingService
           .get()
-          .then((settings) =>
-            settingService.update(
-              buildPersistPatch
-                ? buildPersistPatch(state, settings)
-                : buildDefaultPersistPatch(state),
-            ),
-          )
+          .then((settings) => {
+            const patch = buildPersistPatch
+              ? buildPersistPatch(state, settings)
+              : buildDefaultPersistPatch(state);
+            // [OmniCode] 工作区锁集合化（spec §工作区互斥锁）：把本实例打开的本地工作区全集
+            // 并入每次持久化 patch（无论自定义 builder 返回什么），Host 锁协调器按集合对账
+            // 获取/释放。缺席会让协调器退回单活动工作区行为，破坏集合化锁。
+            return settingService.update({
+              ...patch,
+              openLocalWorkspaces: collectOpenLocalWorkspacePaths(state),
+            });
+          })
           .catch((err) => {
             logger.error("[useTabPersistence] 持久化失败:", err);
           });

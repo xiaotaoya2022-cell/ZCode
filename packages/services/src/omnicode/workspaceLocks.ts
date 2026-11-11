@@ -100,6 +100,36 @@ export function readWorkspaceLockOwner(workspacePath: string): WorkspaceLockOwne
   return { profileId: entry.profileId, pid: entry.pid, workspacePath: entry.workspacePath };
 }
 
+/**
+ * [OmniCode] 锁下沉结构化错误码：打开被其他实例占用的工作区时沿 RPC 抛出。
+ * RPC 层对 Error 的 `code`/`data` 字段做 passthrough（packages/rpc/src/channelServer.ts），
+ * renderer 可按码识别并以 owner 信息提示；message 自身也是用户可读文案。
+ */
+export const WORKSPACE_LOCKED_BY_OTHER_ERROR_CODE = "omnicode.workspace-locked-by-other" as const;
+
+export interface WorkspaceLockedByOtherErrorData {
+  workspacePath: string;
+  profileId: string;
+  pid: number;
+}
+
+/** 打开工作区前的强制查锁。同 profileId（含同实例其他窗口）幂等放行；被其他实例占用即拒绝。 */
+export function assertWorkspaceNotLockedByOther(workspacePath: string, profileId: string): void {
+  const owner = readWorkspaceLockOwner(workspacePath);
+  if (!owner || owner.profileId === profileId) return;
+  const error = new Error(
+    `该工作区正被另一个实例占用（${owner.profileId}），请先在那个实例里关闭它：${owner.workspacePath}`,
+  ) as Error & { code: typeof WORKSPACE_LOCKED_BY_OTHER_ERROR_CODE; data: WorkspaceLockedByOtherErrorData };
+  error.name = "WorkspaceLockedByOtherError";
+  error.code = WORKSPACE_LOCKED_BY_OTHER_ERROR_CODE;
+  error.data = {
+    workspacePath: owner.workspacePath,
+    profileId: owner.profileId,
+    pid: owner.pid,
+  };
+  throw error;
+}
+
 export interface AcquireWorkspaceLockResult {
   ok: boolean;
   owner?: WorkspaceLockOwner;

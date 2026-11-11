@@ -18,6 +18,7 @@ import {
   createTaskAutoArchiveScheduler,
   IProjectService,
   shouldRescanTaskAutoArchive,
+  type SaveProjectInput,
 } from "#src/project/index.js";
 import {
   createManagedWorktreeService,
@@ -494,6 +495,7 @@ import { createLegacyTeamOrganizationResolver } from "./model-provider/legacyTea
 import { createObservableSettingService } from "./setting/observableSettingService.js";
 // [OmniCode] 工作区锁协调器 + 共享工作区注册表（spec: docs/omnicode/profile-runtime.md）
 import {
+  assertWorkspaceNotLockedByOther,
   attachWorkspaceLockCoordinator,
   type WorkspaceLockCoordinator,
 } from "./omnicode/contract.js";
@@ -2385,8 +2387,31 @@ export function createLocalServices(options: {
       }),
     },
   });
-  // [OmniCode] 装配工作区锁协调器：lastActiveWorkspace 变更 → 锁切换 + 10s 心跳；
-  // 装配时把共享工作区表缺失项 saveProject 进本实例项目库（新实例开箱自带全部工作区）。
+  // [OmniCode] 锁下沉（spec §工作区互斥锁）：saveProject(reuseExistingRoot) 是全部目录打开入口
+  // （对话框 / 拖拽 / 项目根行 / 系统右键 / 快捷键）的 Host 侧原子必经点——renderer 各入口先经它
+  // 登记项目，失败即整体中止，不会进入 activateOrSetWorkspace/addTab，保证"进入前拒绝"、
+  // 不产生半打开状态。在此强制查锁：被其他实例占用即抛结构化错误
+  // （错误码 omnicode.workspace-locked-by-other + owner 信息，沿 RPC passthrough 到 renderer）；
+  // 同 profileId（含同实例其他窗口）幂等放行；远程工作区不锁（hostId 非 local 直接放行）。
+  // 注意：装配在工作区锁协调器的共享表合并之前，合并调用必须走下方原始 projectService 绕过守卫
+  // （登记进项目库不是"打开工作区"，被占用的工作区也必须能进共享池开箱）。
+  const selfProfileId = process.env.OMNICODE_PROFILE_ID?.trim() || "default";
+  const projectServiceWithOpenLockGuard: IProjectService = {
+    ...projectService,
+    saveProject: (input: SaveProjectInput) => {
+      if (
+        input.reuseExistingRoot &&
+        (!input.hostId || input.hostId === "local") &&
+        input.roots?.length === 1
+      ) {
+        assertWorkspaceNotLockedByOther(input.roots[0]!, selfProfileId);
+      }
+      return projectService.saveProject(input);
+    },
+  };
+  // [OmniCode] 装配工作区锁协调器：openLocalWorkspaces 打开集合变更 → 集合对账获取/释放 + 10s 全量心跳；
+  // 装配时把共享工作区表缺失项 saveProject 进本实例项目库（新实例开箱自带全部工作区；
+  // 此处传原始 projectService——合并登记绕过打开锁守卫）。
   omnicodeWorkspaceLockCoordinator = attachWorkspaceLockCoordinator({
     settingService,
     projectService,
@@ -3059,7 +3084,9 @@ export function createLocalServices(options: {
     .register(IZCodeTaskService, zcodeTaskService)
     .register(IZCodeAgentService, zcodeAgentService)
     .register(IZCodeSessionService, zcodeSessionService)
-    .register(IProjectService, projectService)
+    // [OmniCode] RPC 面注册带打开锁守卫的 projectService（锁下沉，spec §工作区互斥锁）；
+    // 进程内只读/会话链路（taskGroupService、botsService、prepareProjectExecution）继续用原始实例。
+    .register(IProjectService, projectServiceWithOpenLockGuard)
     .register(ITaskGroupService, taskGroupService)
     .register(IRemoteProjectService, remoteProjectService)
     .register(ICuaPermissionService, cuaPermissionService)
