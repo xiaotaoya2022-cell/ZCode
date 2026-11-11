@@ -10,6 +10,8 @@ import { startOmnicodeInstanceBridgeClient } from "./omnicode/instanceBridgeClie
 /* eslint-disable max-lines */
 // [OmniCode] Profile 实例身份引导：必须先于一切早期 bootstrap（spec: docs/omnicode/profile-runtime.md）
 import "./omnicode/profileBootstrap.js";
+// [OmniCode] 实例 relaunch 身份续接（spec §产品规则 1 / D6）；置于 profileBootstrap 之后
+import { buildOmnicodeInstanceRelaunchArgs } from "./omnicode/contract.js";
 import "./desktopEarlyDataBaseDirBootstrap.js";
 import "./desktopEarlyChromiumHardwareAccelerationBootstrap.js";
 import { powerMonitor, powerSaveBlocker } from "electron";
@@ -1700,7 +1702,16 @@ async function executeDesktopCommandForApp(
     zcodeEndpointEnvBaseOrigin: resolveZCodeEndpointEnvBaseOrigin(hostProcessLocalEnv),
     onRelaunchApp: async () => {
       await prepareAppQuit("desktop-command-relaunch");
-      app.relaunch();
+      // [OmniCode] 实例身份续接（spec §产品规则 1 / D6）：Profile 实例 relaunch 时显式
+      // 携带 --omnicode-profile（handoff 已退役，身份只经 argv/env 通道传递；旧实现原样
+      // 重放 --omnicode-handoff 但文件已读后删 → 实例身份丢失变裸进程）。非实例身份
+      // （控制台/主实例）走默认重放，与官方行为一致。
+      const relaunchArgs = buildOmnicodeInstanceRelaunchArgs();
+      if (relaunchArgs) {
+        app.relaunch({ args: relaunchArgs });
+      } else {
+        app.relaunch();
+      }
       app.quit();
     },
     credentialsDir: getCredentialsDir(),
@@ -2266,7 +2277,11 @@ app.whenReady().then(async () => {
   let bootstrapSettings: AppSettings | undefined;
   try {
     bootstrapSettings = await mainSettingService.get();
-    if (bootstrapSettings.dataBaseDir) {
+    // 批次1 P1-5 守卫（对齐 desktopDataBaseDirBootstrap 的"不跟随"意图）：Profile 实例
+    // （bootstrap 已注入 ZCODE_DATA_BASE_DIR）与 omnicode 主实例（early bootstrap 已设
+    // ~/.omnicode/console 并写回 env）不得被官方 setting.json 的 dataBaseDir 覆盖——
+    // 否则实例业务数据根会被拉回共享目录，串流/凭据互踩由此复发。
+    if (bootstrapSettings.dataBaseDir && !process.env.ZCODE_DATA_BASE_DIR) {
       setDataBaseDir(bootstrapSettings.dataBaseDir);
     }
     if (bootstrapSettings.locale) {

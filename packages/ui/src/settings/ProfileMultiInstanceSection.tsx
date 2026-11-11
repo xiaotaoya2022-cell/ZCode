@@ -104,7 +104,8 @@ export function ProfileMultiInstanceSection() {
 
   const handleLaunch = useCallback(
     (profile: OmnicodeProfileSummaryInfo) => {
-      if (profile.running) return;
+      // 批次1 P1-4「启动=重启」：已运行实例点击启动 = 先三段式优雅停再启动；
+      // 失败经 runAction 的 toast 透出（spec §接口 launch）。
       void runAction(
         () => platform.launchOmnicodeProfile!({ id: profile.id }),
         "settings.omnicodeProfiles.toastLaunched",
@@ -322,6 +323,17 @@ export function ProfileMultiInstanceSection() {
                         >
                           <Maximize2 className="size-3.5" />
                           {intl.formatMessage({ id: "settings.omnicodeProfiles.focus" })}
+                        </Button>
+                        {/* 批次1 P1-4「启动=重启」：运行中实例可点启动触发优雅重启 */}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleLaunch(profile)}
+                          disabled={busy}
+                          title={intl.formatMessage({ id: "settings.omnicodeProfiles.launch" })}
+                        >
+                          <Play className="size-3.5" />
+                          {intl.formatMessage({ id: "settings.omnicodeProfiles.launch" })}
                         </Button>
                         <Button
                           variant="outline"

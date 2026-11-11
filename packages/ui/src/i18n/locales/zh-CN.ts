@@ -3828,7 +3828,7 @@ const zhCN: Record<string, string> = {
   "settings.omnicodeProfiles.loading": "正在读取实例列表…",
   "settings.omnicodeProfiles.empty": "还没有实例。创建第一个后即可与当前窗口并行运行。",
   "settings.omnicodeProfiles.focus": "放大",
-  "settings.omnicodeProfiles.launch": "启动",
+  "settings.omnicodeProfiles.launch": "启动/重启",
   "settings.omnicodeProfiles.stop": "停止",
   "settings.omnicodeProfiles.clone": "克隆（不带登录态）",
   "settings.omnicodeProfiles.delete": "删除",
@@ -3841,7 +3841,7 @@ const zhCN: Record<string, string> = {
   "settings.omnicodeProfiles.toastCreated": "实例已创建",
   "settings.omnicodeProfiles.toastRemoved": "实例已删除",
   "settings.omnicodeProfiles.toastCloned": "实例已克隆（登录态不随克隆）",
-  "settings.omnicodeProfiles.toastLaunched": "实例已启动",
+  "settings.omnicodeProfiles.toastLaunched": "实例已启动/重启",
   "settings.omnicodeProfiles.toastStopped": "实例已停止",
   // [OmniCode] M2 v1 平铺编排（spec §实时视窗）
   "settings.omnicodeProfiles.arrange": "平铺编排",

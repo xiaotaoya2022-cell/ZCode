@@ -1,64 +1,39 @@
 // [OmniCode] Profile 实例身份引导 —— 必须是 main 的第一个副作用导入。
 // spec: docs/omnicode/profile-runtime.md
-// 职责：解析实例身份来源（argv `--omnicode-profile=<id>` 供手动/外部启动，或控制台
-// 一次性 handoff），并在任何官方早期模块（均在导入期读 env）之前把身份 env 四件套
-// 写入自身 process.env。
-// 安全边界：handoff 为固定文件名（全字面量路径，无动态拼接），仅控制台拉起的实例
-// （带 --omnicode-handoff 字面量旗标）消费；profileId 不进命令行、不进长期 env。
+// 职责：解析实例身份来源（argv `--omnicode-profile=<id>`，控制台 spawn 时与 env 一次
+// 性同步注入），并在任何官方早期模块（均在导入期读 env）之前把身份 env 五件套写入
+// 自身 process.env（自派生重赋值覆盖，与 spawn 注入双保险、产出一致）。
+//
+// 安全边界（决策 D6：身份通道 = 一次 spawn 的 argv + env 原子注入）：
+// - profileId 过白名单正则（生成器形态，兼作目录穿越防护），无敏感语义；
+// - 无跨进程文件握手（一次性 handoff 文件已退役：它在 relaunch 重放与消费竞态下
+//   不可靠——文件读取即删后退出登录触发 relaunch 会原样重放已消费的旗标，身份丢失）；
+// - 带身份旗标的进程若解析不到合法 profileId 必须 process.exit(1) 快速失败：
+//   裸进程会与主实例共用 userData → 抢单实例锁聚焦主窗口 + 数据根回落 + 登录走
+//   系统浏览器，比显式失败危险得多，绝不允许静默裸奔。
 // 约束：本模块只做同步、只读的小 IO；不导入 electron；不依赖网络。
-import { existsSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 
 const PROFILE_FLAG = "--omnicode-profile=";
 const CONSOLE_FLAG = "--omnicode-console";
-const HANDOFF_LAUNCH_FLAG = "--omnicode-handoff";
+// [OmniCode] 已退役（D6）：保留字面量检测是为了拦截"旧版本控制台 + 新版本实例"混部
+// 场景——旧控制台仍带 handoff 旗标拉起时，新实例快速退出而不是静默裸奔。
+const RETIRED_HANDOFF_FLAG = "--omnicode-handoff";
 const PROFILE_ROOT_ENV = "OMNICODE_PROFILE_ROOT";
-const HANDOFF_DIRNAME = ".handoff";
-const HANDOFF_FILENAME = "current.json";
+const PROFILE_ID_PATTERN = /^p[0-9a-z]{8,20}$/u;
 
 function resolveProfileRoot(): string {
   const override = process.env[PROFILE_ROOT_ENV]?.trim();
   return override ? override : join(homedir(), ".omnicode", "profiles");
 }
 
-function resolveProfileIdFromArgv(): string | undefined {
+/** argv 身份旗标（首个匹配项）；返回原始旗标与剥离后的 id（空值归一为 undefined）。 */
+function resolveProfileIdFromArgv(): { hasFlag: boolean; profileId?: string } {
   const raw = process.argv.find((entry) => entry.startsWith(PROFILE_FLAG));
-  if (!raw) return undefined;
-  return raw.slice(PROFILE_FLAG.length).trim() || undefined;
-}
-
-/** 一次性 handoff：仅控制台拉起的实例（带 --omnicode-handoff 字面量旗标）消费，读取即删。 */
-function resolveProfileIdFromHandoff(): string | undefined {
-  if (!process.argv.includes(HANDOFF_LAUNCH_FLAG)) return undefined;
-  const handoffPath = join(resolveProfileRoot(), HANDOFF_DIRNAME, HANDOFF_FILENAME);
-  try {
-    if (!existsSync(handoffPath)) {
-      console.error("[omnicode] handoff 文件不存在（可能已被消费）");
-      return undefined;
-    }
-    const parsed = JSON.parse(readFileSync(handoffPath, "utf8")) as {
-      profileId?: string;
-      bridgePort?: number;
-      bridgeToken?: string;
-    };
-    const profileId = parsed.profileId?.trim();
-    // [OmniCode] 桥接回连信息（M2）：端口/token 同样只经 handoff 文件传递
-    if (
-      typeof parsed.bridgePort === "number" &&
-      parsed.bridgePort > 0 &&
-      /^[0-9a-f]{32}$/.test(parsed.bridgeToken ?? "")
-    ) {
-      process.env.OMNICODE_BRIDGE_PORT = String(parsed.bridgePort);
-      process.env.OMNICODE_BRIDGE_TOKEN = parsed.bridgeToken;
-    }
-    rmSync(handoffPath, { force: true });
-    return profileId || undefined;
-  } catch (error) {
-    console.error("[omnicode] handoff 读取失败:", error);
-    return undefined;
-  }
+  if (!raw) return { hasFlag: false };
+  return { hasFlag: true, profileId: raw.slice(PROFILE_FLAG.length).trim() || undefined };
 }
 
 function injectIdentityEnv(profileId: string, profileDir: string): void {
@@ -67,26 +42,41 @@ function injectIdentityEnv(profileId: string, profileDir: string): void {
   process.env.ZCODE_DESKTOP_USER_DATA_DIR = join(profileDir, "electron-userdata");
   process.env.ZCODE_DESKTOP_SESSION_DATA_DIR = join(profileDir, "electron-session");
   process.env.ZCODE_DATA_BASE_DIR = profileDir;
-  // 实例自声明（供 Host 侧锁服务识别"本实例占用"）；由本进程自己设置，不经 spawn 通道
+  // [OmniCode] 第五件套（D6 修订）：ZCODE_DESKTOP_HOME_DIR = profileDir。
+  // 消费面 1：services/settingService.resolveUserHomeDir 优先读该 env → 实例的
+  //   setting.json 落 <profileDir>/.zcode/v2/setting.json（官方 lastActiveWorkspace
+  //   等 settings 在实例间按实例隔离，消除与官方安装版共享 setting.json 的串流通道）。
+  // 消费面 2：desktopRuntimeEnv.runtimeHomePath → index.ts app.setPath("home")，
+  //   实例的 Electron home 概念指向 profileDir（预期行为：home 级别的默认目录也按
+  //   实例隔离，与 Cockpit env 清单对齐——Cockpit 注入 ZCODE_DESKTOP_HOME_DIR=<root>/data）。
+  // 不受影响：services 的 resolveAgentUserInstructionsHomeDir（AGENTS.md 位置）只认
+  //   HOME/USERPROFILE 不认该 env → AGENTS.md 保持全局共享（合理语义）。
+  process.env.ZCODE_DESKTOP_HOME_DIR = profileDir;
+  // 实例自声明（供 Host 侧锁服务识别"本实例占用"）；由本进程自己设置，与 spawn
+  // 注入的值一致（双保险）
   process.env.OMNICODE_PROFILE_ID = profileId;
 }
 
-const argvProfileId = resolveProfileIdFromArgv();
-const handoffProfileId = resolveProfileIdFromHandoff();
-const profileId = argvProfileId ?? handoffProfileId;
+const { hasFlag: hasProfileFlag, profileId: argvProfileId } = resolveProfileIdFromArgv();
+const hasHandoffFlag = process.argv.includes(RETIRED_HANDOFF_FLAG);
 const hasConsoleFlag = process.argv.includes(CONSOLE_FLAG);
 
-if (profileId && hasConsoleFlag) {
+// [OmniCode] 快速失败（D6）：带身份旗标（--omnicode-profile / 已退役的
+// --omnicode-handoff）但解析不出合法 profileId 的进程一律 process.exit(1)。
+if ((hasProfileFlag || hasHandoffFlag) && (!argvProfileId || !PROFILE_ID_PATTERN.test(argvProfileId))) {
+  console.error(
+    `[omnicode] 实例身份旗标存在但 profileId 非法/缺失（${argvProfileId ?? "<empty>"}），快速退出（裸进程会与主实例共用 userData）`,
+  );
+  process.exit(1);
+}
+
+if (argvProfileId && hasConsoleFlag) {
   console.warn("[omnicode] --omnicode-profile 与 --omnicode-console 互斥，按 spec 以 profile 为准");
 }
 
-if (profileId) {
-  if (!/^p[0-9a-z]{8,20}$/u.test(profileId)) {
-    console.error(`[omnicode] 非法 profileId，忽略身份注入: ${profileId}`);
-  } else {
-    injectIdentityEnv(profileId, join(resolveProfileRoot(), profileId));
-    console.info(`[omnicode] profile 身份注入完成: ${profileId}`);
-  }
+if (argvProfileId) {
+  injectIdentityEnv(argvProfileId, join(resolveProfileRoot(), argvProfileId));
+  console.info(`[omnicode] profile 身份注入完成: ${argvProfileId}`);
 } else if (hasConsoleFlag) {
   // 控制台身份：与官方安装版、Profile 实例的 userData 三方互斥（spec §产品规则 3）
   process.env.ZCODE_DESKTOP_APPLICATION_NAME ??= "OmniCode Console";

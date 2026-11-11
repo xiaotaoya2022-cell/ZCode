@@ -1,6 +1,6 @@
 // [OmniCode] 实例侧桥接客户端：回连控制台，接受窗口命令并按需上报缩略图帧。
 // 仅 Profile 实例身份启动时激活（OMNICODE_PROFILE_ID + OMNICODE_BRIDGE_* 由
-// profileBootstrap 从 handoff 注入）。spec: docs/omnicode/profile-runtime.md §实时视窗。
+// profileBootstrap 从 spawn env 注入并自派生双保险，批次1 D6 后不再经 handoff 文件）。
 // 已知限制：窗口隐藏/最小化时 capturePage 可能拿不到新帧（v0 接受，网格停留最后一帧）。
 import WebSocket from "ws";
 import { app, BrowserWindow } from "electron";

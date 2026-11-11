@@ -4,13 +4,13 @@ import { ipcMain } from "electron";
 import { PlatformChannels, type OmnicodeProfileSummaryInfo } from "@zcode/shared";
 import {
   arrangeOmnicodeInstances,
-  cleanupStaleHandoff,
   cloneOmnicodeProfile,
   createOmnicodeProfile,
   ensureOmnicodeInstanceBridgeServerStarted,
   launchOmnicodeProfile,
   listOmnicodeProfiles,
   listOmnicodeRunningInstances,
+  reconcileOmnicodeRunningInstances,
   removeOmnicodeProfile,
   restoreOmnicodeInstances,
   sendOmnicodeInstanceCommand,
@@ -18,10 +18,11 @@ import {
 } from "./omnicode/contract.js";
 
 export function registerDesktopOmnicodeProfileIpcHandlers(): void {
-  // 控制台启动：清理崩溃残留的 handoff（spec §接口 launch 附注）
-  cleanupStaleHandoff();
   // M2：桥接服务随 IPC 装配启动（doLaunch 前必须就绪）
   void ensureOmnicodeInstanceBridgeServerStarted();
+  // 批次1 P0-3：控制台（重）启动时扫进程表重建实例运行态（异步不阻塞 IPC 注册；
+  // 扫描失败保留现状——instanceReconcile 的"失败≠无实例"语义）
+  void reconcileOmnicodeRunningInstances();
 
   ipcMain.handle(PlatformChannels.OmnicodeProfileList, async () => {
     const profiles = await listOmnicodeProfiles();
@@ -54,6 +55,9 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
     return { profile: { ...profile, running: false } };
   });
 
+  // P1-4「启动=重启」：已运行实例先走三段式优雅停再启动（不再是幂等返回现有 pid）。
+  // 启动确认失败/优雅停失败（秒退、pid 残留）以 reject 传播 → renderer invoke reject
+  // → UI toast 透出（spec §接口 launch）。
   ipcMain.handle(PlatformChannels.OmnicodeProfileLaunch, async (_event, input: { id: string }) => {
     const pid = await launchOmnicodeProfile(input.id);
     return { pid };
