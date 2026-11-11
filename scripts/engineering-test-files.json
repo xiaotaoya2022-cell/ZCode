@@ -158,13 +158,10 @@
   "packages/desktop/test/windowsInstallerCompile.test.ts",
   "packages/desktop/test/windowsInstallerNshSmoke.test.ts",
   "packages/desktop/test/windowsInstallerPreserveFiles.test.ts",
-<<<<<<< HEAD
-  "packages/plugin-api/test/version.test.ts",
-  "packages/server/test/remoteOfficialPluginAssets.test.ts",
-=======
   "packages/desktop/test/signWindowsHook.test.ts",
+  "packages/plugin-api/test/version.test.ts",
   "packages/server/test/browserRelayChannel.test.ts",
->>>>>>> dee653fb (feat(browser-relay): M4c 续作收口——relay 降级路由接通远端 server 两形态（含 Source Server Core）)
+  "packages/server/test/remoteOfficialPluginAssets.test.ts",
   "packages/server/test/tsupConfig.test.ts",
   "packages/web/test/viteConfigLoad.test.ts",
   "packages/zcode-server-cli/test/packaging.test.ts",
