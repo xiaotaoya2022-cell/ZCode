@@ -11,7 +11,8 @@
 // - 带身份旗标的进程若解析不到合法 profileId 必须 process.exit(1) 快速失败：
 //   裸进程会与主实例共用 userData → 抢单实例锁聚焦主窗口 + 数据根回落 + 登录走
 //   系统浏览器，比显式失败危险得多，绝不允许静默裸奔。
-// 约束：本模块只做同步、只读的小 IO；不导入 electron；不依赖网络。
+// 约束：本模块只做同步的小 IO（身份注入 + setting sanitize 写回）；不导入 electron；不依赖网络。
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
@@ -57,6 +58,29 @@ function injectIdentityEnv(profileId: string, profileDir: string): void {
   process.env.OMNICODE_PROFILE_ID = profileId;
 }
 
+/**
+ * [OmniCode] Cockpit sanitize_managed_setting 移植（spec §实时视窗/Cockpit 深读）：
+ * 每次启动删除实例自身 setting.json 的 dataBaseDir 键——禁止实例配置把数据根引回
+ * 共享目录（拷贝来的/官方 UI 写入的都可能含该键）。实例数据根由五件套 env 唯一决定，
+ * 任何配置文件都不得覆盖（Cockpit 同名不变量 + 单测锁定）。
+ * 同步小 IO（文件 <100KB）；任何失败 fail-open（env 注入已是兜底事实源）。
+ */
+function sanitizeInstanceSetting(profileDir: string): void {
+  try {
+    const settingPath = join(profileDir, ".zcode", "v2", "setting.json");
+    if (!existsSync(settingPath)) return;
+    const parsed = JSON.parse(readFileSync(settingPath, "utf8")) as Record<string, unknown>;
+    if (parsed.dataBaseDir === undefined) return;
+    delete parsed.dataBaseDir;
+    const tempPath = `${settingPath}.sanitize.tmp`;
+    writeFileSync(tempPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+    renameSync(tempPath, settingPath);
+    console.info("[omnicode] 已清理实例 setting.json 的 dataBaseDir（防串根守卫）");
+  } catch (error) {
+    console.warn("[omnicode] 实例 setting.json sanitize 失败（fail-open）:", error);
+  }
+}
+
 const { hasFlag: hasProfileFlag, profileId: argvProfileId } = resolveProfileIdFromArgv();
 const hasHandoffFlag = process.argv.includes(RETIRED_HANDOFF_FLAG);
 const hasConsoleFlag = process.argv.includes(CONSOLE_FLAG);
@@ -75,7 +99,9 @@ if (argvProfileId && hasConsoleFlag) {
 }
 
 if (argvProfileId) {
-  injectIdentityEnv(argvProfileId, join(resolveProfileRoot(), argvProfileId));
+  const profileDir = join(resolveProfileRoot(), argvProfileId);
+  injectIdentityEnv(argvProfileId, profileDir);
+  sanitizeInstanceSetting(profileDir);
   console.info(`[omnicode] profile 身份注入完成: ${argvProfileId}`);
 } else if (hasConsoleFlag) {
   // 控制台身份：与官方安装版、Profile 实例的 userData 三方互斥（spec §产品规则 3）
