@@ -3820,6 +3820,11 @@ const zhCN: Record<string, string> = {
   "settings.usageTitle": "使用统计",
   // [OmniCode] Profile 多实例
   "settings.omnicodeProfiles.title": "多开实例",
+  // [OmniCode] 欢迎页：实例管理优先，主实例登录次级化（方案 A 第一步）
+  "welcome.omnicodeInstancesTitle": "实例管理",
+  "welcome.omnicodeInstancesHint":
+    "创建独立实例并启动并行工作；每个实例有自己的登录态与数据，互不串扰。",
+  "welcome.loginToggle": "连接账号以使用主实例（可选）",
   "settings.omnicodeProfiles.description":
     "为每个账号创建独立隔离的 ZCode 实例：凭据、会话、浏览器存储互不相通，重启不掉线。启动的实例与本窗口并行运行。",
   "settings.omnicodeProfiles.namePlaceholder": "实例名称（如：工作号）",

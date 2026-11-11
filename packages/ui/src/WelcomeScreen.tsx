@@ -5,15 +5,14 @@
  * 通过 useOAuth hook 驱动 OAuth 流程。
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { LoaderCircle, TriangleAlertIcon } from "lucide-react";
 import {
   ChevronDownIcon,
   ChevronUpIcon,
   Loader2Icon,
+  LoaderCircle,
   LoaderIcon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { type OAuthProviderMeta, BIGMODEL_PROVIDER_ID, ZAI_PROVIDER_ID } from "@zcode/shared";
 import {
   type OAuthProviderMeta,
   BIGMODEL_PROVIDER_ID,
@@ -42,6 +41,8 @@ import { LoginApiKeyForm } from "./login/LoginApiKeyForm.js";
 import { ThemeHeroVisual } from "./openWorkspacePageThemeHero.js";
 import { useZCodeStore } from "./store/StoreProvider.js";
 import { DesktopOverlayWindowControls } from "@/DesktopOverlayWindowControls.js";
+// [OmniCode] 首屏实例管理优先（批次2 方案 A 第一步）：设置页分区组件在欢迎页复用
+import { ProfileMultiInstanceSection } from "@/settings/ProfileMultiInstanceSection.js";
 import { toast } from "@/components/ui/toast.js";
 import type { useCredentialStoreRecovery } from "@/hooks/useCredentials.js";
 import {
@@ -160,6 +161,9 @@ export function resolveLoginRegionForLocale(locale: string): SingleLoginRegion {
 export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
   const { intl } = useZCodeIntl();
   const platform = usePlatform();
+  // [OmniCode] 首屏=实例管理优先（批次2 方案 A 第一步）：未登录即可创建/启动/编排实例，
+  // 主实例自身登录次级化为折叠区——控制台的职能是管理实例，不是登录墙。
+  const [loginOpen, setLoginOpen] = useState(false);
   return (
     <main className="relative h-full min-h-dvh overflow-hidden bg-background text-foreground">
       <ThemeHeroVisual className="absolute inset-0" />
@@ -168,9 +172,36 @@ export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
       <DesktopOverlayWindowControls />
       {/* 矮窗口展开表单时，绝对定位的协议会盖住操作区；同一滚动布局保证两者可达，窗控仍在外层。 */}
       <div className="relative z-10 flex h-dvh flex-col items-center overflow-y-auto px-4 pb-6 pt-14 sm:px-6">
-        <div className="flex w-full flex-1 shrink-0 items-center justify-center py-6">
-          <section className="flex w-full max-w-sm shrink-0 flex-col gap-7 rounded-2xl bg-background p-8 text-ui-base/relaxed shadow-md sm:p-10">
-            <LoginPanel active onComplete={onComplete} />
+        {/* [OmniCode] 实例管理卡：创建/启动/实时缩略图/平铺编排全套，登录前即可用 */}
+        <section className="w-full max-w-2xl shrink-0 flex flex-col gap-3 rounded-2xl border border-popover-border bg-background p-6 shadow-md sm:p-8">
+          <h1 className="text-ui-lg text-foreground">
+            {intl.formatMessage({ id: "welcome.omnicodeInstancesTitle" })}
+          </h1>
+          <p className="text-ui-sm text-foreground-subtle">
+            {intl.formatMessage({ id: "welcome.omnicodeInstancesHint" })}
+          </p>
+          <ProfileMultiInstanceSection />
+        </section>
+        <div className="flex w-full flex-1 shrink-0 flex-col items-center justify-center py-6">
+          <section className="w-full max-w-2xl shrink-0 flex flex-col rounded-2xl border border-popover-border bg-background shadow-md">
+            <button
+              type="button"
+              onClick={() => setLoginOpen((previous) => !previous)}
+              className="flex items-center justify-between px-6 py-4 text-ui-base text-foreground"
+              aria-expanded={loginOpen}
+            >
+              <span>{intl.formatMessage({ id: "welcome.loginToggle" })}</span>
+              {loginOpen ? (
+                <ChevronUpIcon className="size-4" />
+              ) : (
+                <ChevronDownIcon className="size-4" />
+              )}
+            </button>
+            {loginOpen ? (
+              <div className="border-t border-popover-border px-6 py-6 sm:px-8">
+                <LoginPanel active onComplete={onComplete} />
+              </div>
+            ) : null}
           </section>
         </div>
         <footer className="pointer-events-none flex shrink-0 flex-col items-center gap-2 text-center text-ui-xs text-foreground-subtle">
@@ -229,7 +260,6 @@ export function shouldCompleteLoginFromExistingUser(params: {
 
 export function LoginPanel({ active, onComplete }: LoginPanelProps) {
   const { intl, locale, setLocalePreference } = useZCodeIntl();
-  const { intl } = useZCodeIntl();
   const platform = usePlatform();
   const {
     startLogin,

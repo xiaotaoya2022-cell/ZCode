@@ -1,4 +1,14 @@
 /* eslint-disable max-lines -- Desktop renderer bridge 聚合平台、远端 attachment 与启动编排契约。 */
+import { ZCODE_PRODUCT_FLAVOR } from "@zcode/shared";
+// [OmniCode] 任务栏/alt-tab 显示 document.title。index.html 的静态 title 无法按
+// 构建身份插值，这里在主入口第一时间按编译期 flavor 校正（index.html 静态值仅为
+// omnicode flavor 的初始态；preview/production 身份构建由此行覆盖回正确标题）。
+document.title =
+  ZCODE_PRODUCT_FLAVOR === "omnicode"
+    ? "OmniCode"
+    : ZCODE_PRODUCT_FLAVOR === "preview"
+      ? "ZCode Preview"
+      : "ZCode";
 import { DatabaseStartupAdmission } from "./databaseStartupAdmission.js";
 import { initializeDesktopLocalTtft } from "./local-ttft/contract.js";
 import { createRoot } from "react-dom/client";

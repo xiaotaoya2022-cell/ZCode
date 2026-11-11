@@ -23,6 +23,9 @@ const { exposeWindowHostAttachmentServices } =
   await import("../../../../src/host/windowHostAttachmentRpcPolicy.js");
 const { ServiceCollection, ICredentialService } = await import("@zcode/services");
 const { createCredentialService } = await import("@zcode/services/node");
+// [OmniCode] M4c：createCoreHttpServer 的 browserRelayChannel 必传（杜绝半接线态）——
+// e2e 夹具无 relay 消费方，自建空频道实例即可（仅注册，listen 计数为 0）。
+const { createOmniCodeBrowserRelayChannel } = await import("@zcode/services/node");
 const { connectViaProtocol } = await import("@zcode/client");
 const file = join(home, ".zcode", "v2", "credentials.json");
 const raw = Buffer.from('{"unfinished":');
@@ -105,7 +108,12 @@ try {
     );
     const core =
       publisher === "source-server-core"
-        ? await createCoreHttpServer(services, { host: "127.0.0.1", port: 0, ingressToken: token })
+        ? await createCoreHttpServer(services, {
+            host: "127.0.0.1",
+            port: 0,
+            ingressToken: token,
+            browserRelayChannel: createOmniCodeBrowserRelayChannel(),
+          })
         : undefined;
     const web = !core
       ? createHttpServer(services, 0, {

@@ -188,7 +188,6 @@ export {
 export { createCredentialService } from "./credential/credentialService.js";
 export { createBroadcastService } from "./broadcast/broadcastService.js";
 export { createZCodeAgentService } from "./zcode-agent/zcodeAgentService.js";
-<<<<<<< HEAD
 export type {
   PluginUserOptionsReader,
   ZCodeAgentPluginUserOptionsResult,
@@ -196,9 +195,6 @@ export type {
 } from "./zcode-agent/pluginHostQueriesClient.js";
 // [OmniCode] M4c Browser Relay：relay executor 契约类型（server bundle entry 装配注入）。
 export type { BrowserRelayAgentExecutor } from "./zcode-agent/zcodeAgentBrowserAmbientContext.js";
-import type { BrowserRelayAgentExecutor } from "./zcode-agent/zcodeAgentBrowserAmbientContext.js";
-=======
->>>>>>> dee653fb (feat(browser-relay): M4c 续作收口——relay 降级路由接通远端 server 两形态（含 Source Server Core）)
 export { createZCodeTaskServiceAdapter } from "./zcode-agent/zcodeTaskServiceAdapter.js";
 export { createZCodeSessionService } from "./zcode-session/zcodeSessionService.js";
 export {

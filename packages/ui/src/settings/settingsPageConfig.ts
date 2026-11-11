@@ -212,6 +212,8 @@ const BASE_SETTINGS_SECTIONS: SettingsSectionDefinition[] = [
     id: "shares",
     icon: Share2,
     titleId: "conversationShare.manage.nav",
+    groupId: "dataAndStats",
+  },
   // [OmniCode] Profile 多实例（desktop-only，spec: docs/omnicode/profile-runtime.md）
   {
     id: "omnicodeProfiles",

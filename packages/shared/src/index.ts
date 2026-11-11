@@ -52,7 +52,6 @@ export type {
   LegacyPersistedLocalePreference,
   PersistedSettingsLocaleFields,
 } from "./locale.js";
-export { DEFAULT_LOCALE } from "./protocol.js";
 // [OmniCode] 实例专属登录浏览器：授权 URL 形状与实例身份判定（docs/omnicode/instance-login-browser.md）
 export {
   isOmnicodeAuthorizeUrl,

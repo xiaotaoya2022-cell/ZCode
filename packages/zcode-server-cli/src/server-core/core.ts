@@ -63,7 +63,6 @@ export async function runServerCore(generation: number): Promise<void> {
     );
   }
   const sourceServerId = (await resolveCoreServerId()) ?? hostname() ?? "zcode-server";
-<<<<<<< HEAD
   // 旧 Supervisor 会自行回滚，候选 Core 在 owner 换代前必须保持旧格式可读。
   const legacyUpdateOwner =
     process.env[SERVER_CREDENTIAL_FORMAT_ENV] !== String(SERVER_CREDENTIAL_FORMAT);
@@ -72,26 +71,20 @@ export async function runServerCore(generation: number): Promise<void> {
         filePath: join(getAppConfigDir(), "credentials.json"),
       })
     : undefined;
-=======
   // [OmniCode] M4c Browser Relay：频道实例在 services 创建前自建——同一实例经 createCoreHttpServer
   // 注册（listen 订阅计数反映桌面端 relay 能力），并经 relay executor 供 agent browser 后端解析。
   const browserRelayChannel = createOmniCodeBrowserRelayChannel();
->>>>>>> dee653fb (feat(browser-relay): M4c 续作收口——relay 降级路由接通远端 server 两形态（含 Source Server Core）)
   const { services, workspaceIdentityMapper, migrationFailedPathCount } =
     await createServerHostServices({
       sourceServerId,
       zcodeBuiltinProviderConfigFilePath,
       providerProvisioningTargetEnabled: true,
-<<<<<<< HEAD
       credentialCipherProvider,
       topicResourceRelayChannel: (request) => topicResourcePeers.getChannel(request),
-=======
-    topicResourceRelayChannel: (request) => topicResourcePeers.getChannel(request),
       // [OmniCode] M4c：agent 的 browser 反向请求在无本地桥时降级走 relay（订阅门控见
       // zcodeAgentService.resolveBrowserControlExecutor：本地桥优先，未订阅按 backend_unavailable
       // 快速失败，不挂起等超时）。
       browserRelayExecutor: createBrowserRelayAgentExecutor(browserRelayChannel),
->>>>>>> dee653fb (feat(browser-relay): M4c 续作收口——relay 降级路由接通远端 server 两形态（含 Source Server Core）)
     });
   const taskActivityTracker = createTaskActivityTracker(services.getOptional(IZCodeAgentService));
   const ingressToken = await createIngressToken(layout);

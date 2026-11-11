@@ -4078,6 +4078,11 @@ const enUS: Record<string, string> = {
   "settings.usageTitle": "Usage stats",
   // [OmniCode] Profile multi-instance
   "settings.omnicodeProfiles.title": "Multi-instance",
+  // [OmniCode] Welcome screen: instance management first, main-instance sign-in secondary
+  "welcome.omnicodeInstancesTitle": "Instances",
+  "welcome.omnicodeInstancesHint":
+    "Create isolated instances and run them in parallel; each has its own login state and data.",
+  "welcome.loginToggle": "Sign in to use the main instance (optional)",
   "settings.omnicodeProfiles.description":
     "Run isolated ZCode instances per account: credentials, sessions and browser storage stay separate, and logins survive restarts. Launched instances run alongside this window.",
   "settings.omnicodeProfiles.namePlaceholder": "Instance name (e.g. Work)",

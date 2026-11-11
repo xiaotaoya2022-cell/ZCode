@@ -410,6 +410,8 @@ export interface CaptureBrowserGuestPageResult {
   data?: ArrayBuffer;
   /** "guest_not_found" | "guest_not_owned" | "capture_in_progress" | "capture_timeout" | "capture_failed" | "clip_out_of_view" */
   error?: string;
+}
+
 // [OmniCode] Profile 多实例（spec: docs/omnicode/profile-runtime.md）
 export interface OmnicodeProfileSummaryInfo {
   id: string;

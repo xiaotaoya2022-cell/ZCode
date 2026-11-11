@@ -19,9 +19,6 @@ import {
   OAUTH_LINKED_BIGMODEL_KEY,
   isZaiOAuthProvider,
   isBuiltinOAuthProvider,
-  BIGMODEL_PROVIDER_ID,
-  isCredentialDecryptError,
-  ZAI_PROVIDER_ID,
 } from "@zcode/shared";
 import { copyFile } from "node:fs/promises";
 import { join } from "node:path";
