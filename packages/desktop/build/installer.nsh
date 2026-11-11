@@ -242,6 +242,27 @@
     zcodeInstallerInitInteractive:
       !insertmacro ZCodeReportInstallerStage "installer-initialized mode=interactive"
     zcodeInstallerInitDone:
+    ; [OmniCode] 安装路径自动补名（用户反馈：目录页显示裸盘根/无产品名路径时，
+    ; 需要手动补名才能安心）。instFilesPre 兜底机制会在点安装后把不含应用名的
+    ; 目录补成 "$INSTDIR\${APP_FILENAME}"，但目录页显示值不变化，用户无法确认。
+    ; 这里在页面显示前就规整默认值：上次位置已含产品名则尊重；残留的裸盘根或
+    ; 无产品名路径（如卸载残留 E:\）自动补成 <路径>\OmniCode，用户直接点下一步即可。
+    ReadRegStr $R0 SHCTX "${INSTALL_REGISTRY_KEY}" "InstallLocation"
+    ${If} $R0 != ""
+      Push $R1
+      Push $R2
+      StrCpy $R1 $R0 "" -8
+      ${If} $R1 != "OmniCode"
+        StrCpy $R2 $R0 1 -1
+        ${If} $R2 == "\"
+          StrCpy $INSTDIR "$R0OmniCode"
+        ${Else}
+          StrCpy $INSTDIR "$R0\OmniCode"
+        ${EndIf}
+      ${EndIf}
+      Pop $R2
+      Pop $R1
+    ${EndIf}
   !macroend
 
   ; 这些宏由打包时的 electron-builder installSection.nsh 补丁按安装顺序调用。
