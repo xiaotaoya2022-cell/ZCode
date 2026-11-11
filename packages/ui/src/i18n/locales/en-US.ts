@@ -4080,6 +4080,10 @@ const enUS: Record<string, string> = {
   "settings.omnicodeProfiles.title": "Multi-instance",
   // [OmniCode] Welcome screen: instance management first, main-instance sign-in secondary
   "welcome.omnicodeInstancesTitle": "Instances",
+  // [OmniCode] Console home (batch 2a, plan A)
+  "console.homeTitle": "OmniCode Instance Hub",
+  "console.homeSubtitle":
+    "Create isolated instances and run them in parallel; each has its own login state and data. Work and sign-in happen inside instance windows — this window manages them.",
   "welcome.omnicodeInstancesHint":
     "Create isolated instances and run them in parallel; each has its own login state and data.",
   "welcome.loginToggle": "Sign in to use the main instance (optional)",

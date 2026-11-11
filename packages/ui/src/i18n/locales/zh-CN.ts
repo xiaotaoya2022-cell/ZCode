@@ -3822,6 +3822,10 @@ const zhCN: Record<string, string> = {
   "settings.omnicodeProfiles.title": "多开实例",
   // [OmniCode] 欢迎页：实例管理优先，主实例登录次级化（方案 A 第一步）
   "welcome.omnicodeInstancesTitle": "实例管理",
+  // [OmniCode] 批次2a 控制台主视图（方案 A）
+  "console.homeTitle": "OmniCode 实例管理中枢",
+  "console.homeSubtitle":
+    "创建独立实例并并行运行；每个实例有自己的登录态与数据。工作与登录都在实例窗口内完成，本窗口负责管理。",
   "welcome.omnicodeInstancesHint":
     "创建独立实例并启动并行工作；每个实例有自己的登录态与数据，互不串扰。",
   "welcome.loginToggle": "连接账号以使用主实例（可选）",
