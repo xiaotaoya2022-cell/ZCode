@@ -4090,7 +4090,7 @@ const enUS: Record<string, string> = {
   "settings.omnicodeProfiles.empty":
     "No instances yet. Create the first one to run it alongside this window.",
   "settings.omnicodeProfiles.focus": "Focus",
-  "settings.omnicodeProfiles.launch": "Launch",
+  "settings.omnicodeProfiles.launch": "Launch/Restart",
   "settings.omnicodeProfiles.stop": "Stop",
   "settings.omnicodeProfiles.clone": "Clone (without login state)",
   "settings.omnicodeProfiles.delete": "Delete",
@@ -4103,7 +4103,7 @@ const enUS: Record<string, string> = {
   "settings.omnicodeProfiles.toastCreated": "Instance created",
   "settings.omnicodeProfiles.toastRemoved": "Instance deleted",
   "settings.omnicodeProfiles.toastCloned": "Instance cloned (login state not copied)",
-  "settings.omnicodeProfiles.toastLaunched": "Instance launched",
+  "settings.omnicodeProfiles.toastLaunched": "Instance launched/restarted",
   "settings.omnicodeProfiles.toastStopped": "Instance stopped",
   // [OmniCode] M2 v1 tile arrangement (spec §实时视窗)
   "settings.omnicodeProfiles.arrange": "Tile windows",

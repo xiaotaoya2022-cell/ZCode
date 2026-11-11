@@ -5,6 +5,7 @@
 import { launchOmnicodeProfile } from "./contract.js";
 
 export async function exampleOmnicodeProfileLaunch(profileId: string): Promise<number> {
-  // 启动即幂等：运行中返回现有 pid；并发点击由单飞合并（spec §并发与竞态）。
+  // 批次1 P1-4「启动=重启」：已运行实例先三段式优雅停再启动；并发点击由单飞合并，
+  // 全局串行链屏障 = 上一实例启动确认完成（spec §并发与竞态 / 决策 D6）。
   return launchOmnicodeProfile(profileId);
 }

@@ -37,6 +37,8 @@ import {
   resolveDesktopZoomLevelFromFactor,
 } from "./desktopZoom.js";
 import { exportLogs } from "./exportLogs.js";
+// [OmniCode] 实例 relaunch 身份续接（spec §产品规则 1 / D6）
+import { buildOmnicodeInstanceRelaunchArgs } from "./omnicode/contract.js";
 import { openResourceManager } from "./resourceManagerWindow.js";
 
 export const HELP_TOGGLE_DEV_TOOLS_MENU_ID = "help.toggle-dev-tools";
@@ -128,7 +130,14 @@ async function clearAllDataAndRelaunch(options: {
     options.logger.error("[clear-all-data] failed to clear session data:", error);
   }
 
-  app.relaunch();
+  // [OmniCode] 实例身份续接（spec §产品规则 1 / D6）：Profile 实例清除数据重启时显式
+  // 携带 --omnicode-profile；非实例身份走默认重放。
+  const relaunchArgs = buildOmnicodeInstanceRelaunchArgs();
+  if (relaunchArgs) {
+    app.relaunch({ args: relaunchArgs });
+  } else {
+    app.relaunch();
+  }
   app.exit(0);
 }
 

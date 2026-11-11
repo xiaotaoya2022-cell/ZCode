@@ -6,24 +6,28 @@
  */
 export {
   assertValidProfileId,
+  clearProfileLaunched,
   cloneOmnicodeProfile,
   createOmnicodeProfile,
   getOmnicodeProfileDir,
   getOmnicodeProfileRoot,
   listOmnicodeProfiles,
+  recordProfileLaunched,
   removeOmnicodeProfile,
 } from "./profileRuntime.js";
 export type { OmnicodeProfileRecord, OmnicodeProfileSummary } from "./profileRuntime.js";
 export {
-  cleanupStaleHandoff,
+  buildOmnicodeInstanceRelaunchArgs,
   isOmnicodeProfileRunning,
   listOmnicodeRunningInstances,
   launchOmnicodeProfile,
+  reconcileOmnicodeRunningInstances,
   stopOmnicodeProfile,
   arrangeOmnicodeInstances,
   restoreOmnicodeInstances,
 } from "./instanceManager.js";
 export type { OmnicodeRunningInstance } from "./instanceManager.js";
+export { scanOmnicodeInstanceProcesses } from "./instanceReconcile.js";
 export {
   ensureOmnicodeInstanceBridgeServerStarted,
   getOmnicodeInstanceBridgeInfo,

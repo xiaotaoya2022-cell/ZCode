@@ -1,9 +1,10 @@
 // [OmniCode] 实例桥接枢纽（控制台侧）：本地 WebSocket 服务，实例回连上报缩略图帧并接受命令。
-// spec: docs/omnicode/profile-runtime.md §实时视窗（M2）。
+// spec: docs/omnicode/profile-runtime.md §实时视窗。
 //
 // 安全边界：
 // - 仅监听 127.0.0.1，端口随机（listen(0)）；
-// - 握手 token = randomBytes(16).hex，经 handoff 文件交给实例（不进命令行/长期 env）；
+// - 握手 token = randomBytes(16).hex，经 spawn env 原子注入实例（批次1 D6：身份通道
+//   退役一次性 handoff 文件，回连信息与身份同走 spawn 参数面）；
 // - token 比较用 timingSafeEqual；一个 profileId 同时只允许一条连接（后连踢前连）；
 // - 缩略图帧只投递给注册的监听者（console main 转发给 renderer）。
 import { WebSocketServer, type WebSocket } from "ws";
