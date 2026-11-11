@@ -1405,6 +1405,7 @@ function assertNoHostOnlyWorktreeFields(envelope: CommandEnvelope): void {
       ? payload.cwd !== undefined || payload.worktreeCreation !== undefined
       : envelope.type === "forkAssistant" && payload.targetCwd !== undefined;
   if (forbidden) throw new Error("worktree.host-only-field");
+}
 
 // [OmniCode] M4c Browser Relay：browser 后端解析的统一入口。
 // 优先级：本地 browserControlExecutor（desktop host / 本机 server）> relay 降级执行器

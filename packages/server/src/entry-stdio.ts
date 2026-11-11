@@ -74,11 +74,10 @@ async function main() {
     content: readBundledZCodeBuiltinProviderConfig(),
   });
   await migrateApplicationStorage(await createSettingService().get());
-  const { authorityModeParseResult, services } = await createStdioServices({
   // [OmniCode] M4c Browser Relay：频道实例在 services 创建前自建——同一实例经 createStdioServer
   // 注册（listen 订阅计数反映桌面端 relay 能力），并经 relay executor 供 agent browser 后端解析。
   const browserRelayChannel = createOmniCodeBrowserRelayChannel();
-  const { authorityModeParseResult, services } = createStdioServices({
+  const { authorityModeParseResult, services } = await createStdioServices({
     env: process.env,
     zcodeBuiltinProviderConfigFilePath,
     topicResourceRelayChannel: () => {

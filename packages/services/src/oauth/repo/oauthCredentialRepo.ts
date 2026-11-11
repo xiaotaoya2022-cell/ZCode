@@ -20,9 +20,6 @@ import {
   isZaiOAuthProvider,
   isBuiltinOAuthProvider,
   resolveStartPlanFamilyFromOAuthProvider,
-  BIGMODEL_PROVIDER_ID,
-  isCredentialDecryptError,
-  ZAI_PROVIDER_ID,
 } from "@zcode/shared";
 import { copyFile } from "node:fs/promises";
 import { join } from "node:path";
