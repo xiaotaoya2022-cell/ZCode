@@ -421,6 +421,7 @@ import {
   buildServerRemoteWorkspaceIdentity,
   DEFAULT_APP_TOOL_SEARCH_MODE,
   remoteHostIdFromWorkspaceIdentity,
+  ZCODE_PRODUCT_FLAVOR,
 } from "@zcode/shared";
 import { SourceServerWorkspaceAliasRepo } from "./session/sourceServerWorkspaceAliasRepo.js";
 import { SourceServerWorkspaceIdentityMapper } from "./source-server-workspace/sourceServerWorkspaceIdentityChannelServer.js";
@@ -2387,28 +2388,36 @@ export function createLocalServices(options: {
   // 管理器不打开工作区、不参与实例互斥（协调器心跳/获取全部跳过；saveProject 打开
   // 锁守卫对无工作区的管理器是纯开销）。门控 env 由 main 在管理器身份确立时注入
   // （OMNICODE_CONSOLE_MODE=1），host utilityProcess 经 buildHostProcessEnv 继承。
-  // 官方 flavor / Profile 实例路径完全不受影响。
+  // Profile 实例路径完全不受影响；官方 flavor 的查锁面自 B2-2 起随下方守卫门控收窄。
   const omnicodeConsoleMode = process.env.OMNICODE_CONSOLE_MODE === "1";
-  // [OmniCode] 锁下沉（spec §工作区互斥锁）：saveProject(reuseExistingRoot) 是全部目录打开入口
-  // （对话框 / 拖拽 / 项目根行 / 系统右键 / 快捷键）的 Host 侧原子必经点——renderer 各入口先经它
-  // 登记项目，失败即整体中止，不会进入 activateOrSetWorkspace/addTab，保证"进入前拒绝"、
-  // 不产生半打开状态。在此强制查锁：被其他实例占用即抛结构化错误
-  // （错误码 omnicode.workspace-locked-by-other + owner 信息，沿 RPC passthrough 到 renderer）；
-  // 同 profileId（含同实例其他窗口）幂等放行；远程工作区不锁（hostId 非 local 直接放行）。
-  // 注意：装配在工作区锁协调器的共享表合并之前，合并调用必须走下方原始 projectService 绕过守卫
-  // （登记进项目库不是"打开工作区"，被占用的工作区也必须能进共享池开箱）。
+  // [OmniCode] B2-2 全入口锁强制（spec §批次2 D8）：守卫仅在 omnicode flavor 且非管理器模式下生效
+  // （官方 flavor 零影响——批次1 的官方侧查锁随本批收窄为 omnicode 专属；管理器不打开工作区，
+  // B2-1 语义保持）。守卫条件从 reuseExistingRoot 单根形态扩展到**全部带本地 roots 的 saveProject
+  // 形态**：对话框 / 拖拽 / 项目根行 / 系统右键 / 快捷键（reuse 单根）与项目编辑器新建/加根
+  // （多根 / 显式 name）全部覆盖——roots 里任一目录被其他实例持有即整体拒绝（进入前拒绝、
+  // 无半打开；renderer 收到结构化错误后弹锁冲突对话框，提供「只读打开」观察者入口）。
+  // 无 roots 的元数据更新（置顶等）不拦；远程 hostId 不锁（M1 范围）。
+  // 注意：协调器的共享表合并调用走下方原始 projectService 绕过守卫（登记进项目库不是
+  // "打开工作区"，被占用的工作区也必须能进共享池开箱）。
+  const omnicodeOpenGuardActive = ZCODE_PRODUCT_FLAVOR === "omnicode" && !omnicodeConsoleMode;
+  // [OmniCode] 锁下沉（spec §工作区互斥锁）：saveProject 是全部目录打开入口的 Host 侧原子必经点
+  // ——renderer 各入口先经它登记项目，失败即整体中止，不会进入 activateOrSetWorkspace/addTab。
+  // 被其他实例占用即抛结构化错误（错误码 omnicode.workspace-locked-by-other + owner 信息，
+  // 沿 RPC passthrough 到 renderer）；同 profileId（含同实例其他窗口）幂等放行。
   const selfProfileId = process.env.OMNICODE_PROFILE_ID?.trim() || "default";
-  const projectServiceWithOpenLockGuard: IProjectService = omnicodeConsoleMode
+  const projectServiceWithOpenLockGuard: IProjectService = !omnicodeOpenGuardActive
     ? projectService
     : {
         ...projectService,
         saveProject: (input: SaveProjectInput) => {
-          if (
-            input.reuseExistingRoot &&
-            (!input.hostId || input.hostId === "local") &&
-            input.roots?.length === 1
-          ) {
-            assertWorkspaceNotLockedByOther(input.roots[0]!, selfProfileId);
+          const guardRoots =
+            (!input.hostId || input.hostId === "local") && input.roots?.length
+              ? input.roots
+              : undefined;
+          if (guardRoots) {
+            for (const root of guardRoots) {
+              assertWorkspaceNotLockedByOther(root, selfProfileId);
+            }
           }
           return projectService.saveProject(input);
         },

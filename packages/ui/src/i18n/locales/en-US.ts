@@ -4092,6 +4092,9 @@ const enUS: Record<string, string> = {
     "A new instance pointing at the previous OmniCode console data directory will be created (zero-copy). Its sign-in state and conversation history are preserved as-is.",
   "console.adoptionDefaultName": "Instance (adopted)",
   "console.adoptionToastDone": "Adopted as an instance — launch it from the list above.",
+  // [OmniCode] B2-2 workspace lock enforcement + read-only observer mode (spec: docs/omnicode/profile-runtime.md §批次2 D8)
+  "omnicode.observer.restoreRejected":
+    "Workspace {path} was not restored: it is held by another instance ({profileId}).",
   "welcome.omnicodeInstancesHint":
     "Create isolated instances and run them in parallel; each has its own login state and data.",
   "welcome.loginToggle": "Sign in to use the main instance (optional)",

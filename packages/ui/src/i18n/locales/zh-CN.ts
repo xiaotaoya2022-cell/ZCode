@@ -3833,6 +3833,9 @@ const zhCN: Record<string, string> = {
     "将创建一个指向原 OmniCode 控制台数据目录的新实例（零拷贝），登录态与会话历史原样保留。",
   "console.adoptionDefaultName": "实例-收养",
   "console.adoptionToastDone": "已收养为实例，可在上方列表启动。",
+  // [OmniCode] B2-2 工作区锁强制 + 只读观察者模式（spec: docs/omnicode/profile-runtime.md §批次2 D8）
+  "omnicode.observer.restoreRejected":
+    "未恢复工作区 {path}：正被另一实例（{profileId}）占用。",
   "welcome.omnicodeInstancesHint":
     "创建独立实例并启动并行工作；每个实例有自己的登录态与数据，互不串扰。",
   "welcome.loginToggle": "连接账号以使用主实例（可选）",

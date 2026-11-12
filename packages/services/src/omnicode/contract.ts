@@ -13,6 +13,7 @@ export {
   listWorkspaceLocks,
   readWorkspaceLockOwner,
   releaseWorkspaceLock,
+  resolveWorkspaceOpenGuardDecision,
   WORKSPACE_LOCKED_BY_OTHER_ERROR_CODE,
 } from "./workspaceLocks.js";
 export type {
@@ -21,6 +22,7 @@ export type {
   WorkspaceLockDecoration,
   WorkspaceLockEntry,
   WorkspaceLockOwner,
+  WorkspaceOpenGuardDecision,
 } from "./workspaceLocks.js";
 export {
   diffMissingSharedWorkspaces,
