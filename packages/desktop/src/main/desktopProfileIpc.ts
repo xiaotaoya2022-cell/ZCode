@@ -27,6 +27,7 @@ import {
   listOmnicodeProfiles,
   listOmnicodeRunningInstances,
   reconcileOmnicodeRunningInstances,
+  readOmnicodeProcessMemoryMBs,
   removeOmnicodeProfile,
   resolveOmnicodeConsoleAdoptionAvailable,
   restoreOmnicodeInstances,
@@ -74,12 +75,18 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
     const pidByProfileId = new Map(
       listOmnicodeRunningInstances().map((entry) => [entry.profileId, entry.pid]),
     );
+    // [OmniCode] B2 评审修复（P2-11②）：运行实例内存占用（Windows tasklist 单次查询；
+    // 失败/非 Windows 返回 undefined → memoryMB 缺省，控制台底栏不显示合计）
+    const memoryByPid = await readOmnicodeProcessMemoryMBs([...pidByProfileId.values()]);
     const infos: OmnicodeProfileSummaryInfo[] = profiles.map((profile) => {
       const pid = pidByProfileId.get(profile.id);
       return {
         ...profile,
         running: pid !== undefined,
         ...(pid !== undefined ? { pid } : {}),
+        ...(pid !== undefined && memoryByPid?.has(pid)
+          ? { memoryMB: memoryByPid.get(pid) }
+          : {}),
       };
     });
     return { profiles: infos };
@@ -267,7 +274,9 @@ function registerDesktopOmnicodeConsoleAdoptionIpcHandlers(): void {
     PlatformChannels.OmnicodeConsoleAdopt,
     async (_event, input: { name: string }) => {
       const profile = await adoptOmnicodeConsoleAsProfile(
-        typeof input?.name === "string" ? input.name : "实例-收养",
+        // [OmniCode] B2 评审修复（P2-11①）：main 侧无 i18n 机制，畸形入参的兜底名改为
+        // 语言无关的 "instance-adopted"（正常路径 renderer 始终传本地化名称，不走此值）
+        typeof input?.name === "string" ? input.name : "instance-adopted",
         getOmnicodeConsoleDataBaseDir(),
       );
       return { profile: { ...profile, running: false } };

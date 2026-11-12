@@ -41,7 +41,7 @@ export {
   restoreOmnicodeInstances,
 } from "./instanceManager.js";
 export type { OmnicodeRunningInstance, OmnicodeWorkspaceRouteDeps } from "./instanceManager.js";
-export { scanOmnicodeInstanceProcesses } from "./instanceReconcile.js";
+export { scanOmnicodeInstanceProcesses, readOmnicodeProcessMemoryMBs } from "./instanceReconcile.js";
 export {
   ensureOmnicodeInstanceBridgeServerStarted,
   getOmnicodeInstanceBridgeInfo,

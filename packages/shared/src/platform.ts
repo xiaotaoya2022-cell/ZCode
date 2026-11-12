@@ -422,6 +422,11 @@ export interface OmnicodeProfileSummaryInfo {
   running: boolean;
   /** 运行中实例的 pid */
   pid?: number;
+  /**
+   * [OmniCode] B2 评审修复（P2-11②）：运行中实例内存占用（MB，Windows tasklist
+   * 聚合，控制台底栏"内存合计"数据源）。查询失败/非 Windows 时缺省（UI 不显示合计）。
+   */
+  memoryMB?: number;
 }
 
 export interface OmnicodeProfileCreateInput {

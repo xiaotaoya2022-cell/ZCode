@@ -3842,6 +3842,8 @@ const zhCN: Record<string, string> = {
   "console.arrangeTileDisabledTitle": "仅桌面模式可用（内嵌模式下实例窗口在卡片内，无需平铺）",
   "console.previewLabel": "实时预览",
   "console.statusRunning": "运行 {running}/{total}",
+  // [OmniCode] B2 评审修复（P2-11②）：底栏内存合计（设计 §4.1 承诺；任一实例内存不可得时不显示）
+  "console.statusMemory": "内存合计 {memory} MB",
   "console.gridHintEmbedded": "双击运行卡片放大单视图 · 点击画面区即交互实例窗口",
   "console.gridHintDesktop": "桌面模式：点击卡片聚焦真窗口 · 可「平铺编排」实例窗口",
   "console.emptyTitle": "还没有任何实例",

@@ -1,6 +1,7 @@
 // [OmniCode] 批次2 B2-3：控制台实例卡片 + 新建实例弹窗（spec: docs/omnicode/profile-runtime.md §批次2 D9）。
 // 卡片结构对照演示稿：顶条（28-32px 管理器自绘控制钮区，内嵌模式下实例窗口贴下方画面区）+
 // 画面区（letterbox 预览 / 停止占位 / 桌面模式模糊遮罩 / 预览关角标）+ 底部备注。
+import { useEffect, useState } from "react";
 import {
   Copy,
   FolderOpen,
@@ -68,10 +69,25 @@ export function ConsoleInstanceCard(props: {
     onToggleEnlarge,
   } = props;
   const { id, name, running, notes, pid } = profile;
-  const aspectRatio =
+  const frameAspectRatio =
     frame?.width && frame?.height && frame.width > 0 && frame.height > 0
       ? `${frame.width} / ${frame.height}`
       : String(DEFAULT_FRAME_ASPECT_RATIO);
+  // [OmniCode] B2 评审修复（P2-7 内嵌尺寸反馈环）：内嵌下"帧尺寸→卡片画面区高（aspect）
+  // →embedLayout 矩形→实例窗口 setBounds→下一帧尺寸"形成反馈环（微抖）。进入内嵌后
+  // 冻结首次收到的帧比例（embedLayout 生效前的自然基线，反馈环无起点）；桌面模式恢复
+  // 动态（真窗口不贴卡片，无环）。
+  const [embeddedAspectRatio, setEmbeddedAspectRatio] = useState<string | null>(null);
+  useEffect(() => {
+    if (mode !== "embedded") {
+      setEmbeddedAspectRatio(null); // 桌面态恢复动态比例
+      return;
+    }
+    if (embeddedAspectRatio === null && frame?.width && frame?.height && frame.width > 0 && frame.height > 0) {
+      setEmbeddedAspectRatio(`${frame.width} / ${frame.height}`);
+    }
+  }, [mode, frame, embeddedAspectRatio]);
+  const aspectRatio = mode === "embedded" ? (embeddedAspectRatio ?? String(DEFAULT_FRAME_ASPECT_RATIO)) : frameAspectRatio;
 
   const handleCardClick = () => {
     // 桌面模式：点击卡片 = 聚焦真窗口（内嵌模式的画面区被真窗口覆盖，点击到不了这里）

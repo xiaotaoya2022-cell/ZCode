@@ -14,7 +14,12 @@
 import { WebSocketServer, type WebSocket } from "ws";
 import { BrowserWindow } from "electron";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { PlatformChannels, type OmnicodeInstanceEventPayload } from "@zcode/shared";
+import {
+  PlatformChannels,
+  ZCODE_PRODUCT_FLAVOR,
+  type OmnicodeInstanceEventPayload,
+  type ZCodeProductFlavor,
+} from "@zcode/shared";
 
 export interface OmnicodeInstanceBridgeCommand {
   type:
@@ -75,6 +80,16 @@ function broadcastOmnicodeInstanceEvent(payload: OmnicodeInstanceEventPayload): 
 
 let startPromise: Promise<{ port: number; token: string }> | null = null;
 
+/**
+ * [OmniCode] B2 评审修复（P1-2）：实例连接时是否沿用 v0"连上即订阅缩略图"。
+ * 仅官方 flavor 保留（官方进程无管理器订阅编排，且实际不会有实例回连，纯零影响保持）；
+ * omnicode 管理器完全交给 managerHooks.onInstanceConnected → reconcilePreviewSubscriptions
+ * 的按卡片对账（spec §批次2 D9"总开关关闭 = 全部退订；不再是连上即订阅"）。纯函数可单测。
+ */
+export function shouldAutoSubscribeThumbnailsOnConnect(flavor: ZCodeProductFlavor): boolean {
+  return flavor !== "omnicode";
+}
+
 /** [OmniCode] 幂等启动桥接服务并接通 renderer 广播；doLaunch 前必须 await。 */
 export function ensureOmnicodeInstanceBridgeServerStarted(): Promise<{
   port: number;
@@ -91,10 +106,13 @@ export function ensureOmnicodeInstanceBridgeServerStarted(): Promise<{
         }),
       onInstanceConnected: (profileId) => {
         broadcastOmnicodeInstanceEvent({ profileId, type: "connected" });
-        // v0：实例连上即订阅缩略图（1.4fps/实例，本地回环开销可忽略）；
-        // 按设置页可见性精化订阅是 v1 优化点。批次2 B2-3：管理器进程的按卡片订阅
-        // 对账经 managerHooks 即时纠正（official flavor 保持自动订阅行为不变）。
-        setOmnicodeInstanceThumbnailSubscription(profileId, true);
+        // [OmniCode] B2 评审修复（P1-2）：v0"连上即订阅"收窄为官方 flavor 专属
+        //（官方无订阅编排、实际无实例回连，零影响保持）；omnicode 管理器连接后由
+        // managerHooks.onInstanceConnected → reconcilePreviewSubscriptions 按
+        // 总开关∧视口可见 对账订阅（spec §批次2 D9——预览关时连接不产生订阅）。
+        if (shouldAutoSubscribeThumbnailsOnConnect(ZCODE_PRODUCT_FLAVOR)) {
+          setOmnicodeInstanceThumbnailSubscription(profileId, true);
+        }
         managerHooks?.onInstanceConnected?.(profileId);
       },
       onInstanceDisconnected: (profileId) => {
@@ -177,10 +195,13 @@ export function startOmnicodeInstanceBridgeServer(
         }
       });
       ws.on("close", () => {
+        // [OmniCode] B2 评审修复（P2-10）：一个 profileId 同时只允许一条连接（后连踢前连）。
+        // 被顶替的旧连接关闭时 connectionsByProfileId 已指向新连接——只有当前登记连接
+        // 的 close 才代表该实例真正断开（否则 UI 收到假 disconnected、内嵌簿记被误清）。
         if (connectionsByProfileId.get(profileIdParam) === ws) {
           connectionsByProfileId.delete(profileIdParam);
+          serverState?.listeners.onInstanceDisconnected?.(profileIdParam);
         }
-        serverState?.listeners.onInstanceDisconnected?.(profileIdParam);
       });
     });
   });

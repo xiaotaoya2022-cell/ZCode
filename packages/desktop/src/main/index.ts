@@ -2308,6 +2308,14 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
     },
   });
   registerStabilityMainWindow(win);
+  // [OmniCode] B2 评审修复（P2-11③）：主窗口存在销毁重建路径（renderer 崩溃自愈
+  // discard→createWindow / macOS activate 重建），每次创建/重建都重挂内嵌编排的
+  // owner 侧引用（owned-window 的 GWL_HWNDPARENT 属主 + move/resize 跟随监听）——
+  // 仅在 app-ready 挂一次会让重建后的窗口失去内嵌跟随。桌面模式/官方 flavor 挂入
+  // 无害（编排仅在管理器注册 IPC 后生效）。
+  if (isOmnicodeManagerMain) {
+    setOmnicodeEmbedManagerWindow(win);
+  }
   return win;
 }
 

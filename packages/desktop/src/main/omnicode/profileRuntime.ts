@@ -291,7 +291,9 @@ export async function adoptOmnicodeConsoleAsProfile(
   const profiles = await listOmnicodeProfiles();
   const name = nextOmnicodeAdoptionProfileName(
     profiles.map((profile) => profile.name),
-    baseName.trim() || "实例-收养",
+    // [OmniCode] B2 评审修复（P2-11①）：main 侧无 i18n 机制，空名兜底改为语言无关字面量
+    // （正常路径 renderer 传本地化名称；本地化兜底由 UI 层负责）
+    baseName.trim() || "instance-adopted",
   );
   return createOmnicodeProfile(name, undefined, { dataBaseDirOverride: normalizedDir });
 }

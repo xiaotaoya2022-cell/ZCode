@@ -4104,6 +4104,8 @@ const enUS: Record<string, string> = {
     "Desktop mode only (in embedded mode instance windows live inside the cards — no tiling needed)",
   "console.previewLabel": "Live preview",
   "console.statusRunning": "Running {running}/{total}",
+  // [OmniCode] Review fix (P2-11): footer memory total (hidden when any instance memory is unavailable)
+  "console.statusMemory": "Memory {memory} MB total",
   "console.gridHintEmbedded":
     "Double-click a running card to zoom · click the viewport to interact with the instance window",
   "console.gridHintDesktop":
