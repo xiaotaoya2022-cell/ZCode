@@ -18,6 +18,12 @@ import {
   routeOmnicodeWorkspaceOpenFromManager,
   startOmnicodeInstanceSelfCredentialBackupScheduler,
 } from "./omnicode/contract.js";
+// [OmniCode] 批次2 B2-3：管理器内嵌编排（owned-window 生命周期红线——退出收尾队列在
+// prepareAppQuit 屏障内 await；主窗口引用在 whenReady 创建后挂入，spec §批次2 D9）
+import {
+  releaseOmnicodeEmbedForQuit,
+  setOmnicodeEmbedManagerWindow,
+} from "./omnicode/consoleEmbedding.js";
 import "./desktopEarlyDataBaseDirBootstrap.js";
 import "./desktopEarlyChromiumHardwareAccelerationBootstrap.js";
 import { powerMonitor, powerSaveBlocker } from "electron";
@@ -1414,6 +1420,10 @@ async function prepareAppQuit(reason: string, kind: AppShutdownKind = "normal"):
   );
 
   appQuitPreparationInFlight = Promise.all([
+    // [OmniCode] 批次2 B2-3 生命周期红线：管理器退出前解除全部内嵌实例的 owned 关系
+    //（Win32 owned window 随 owner 销毁——不解除会连坐杀死实例）。幂等 + 4s 总预算，
+    // 与其它 owner 并行进入屏障不放大退出预算；管理器崩溃无法收尾为已知限制（D9）。
+    isOmnicodeManagerMain ? releaseOmnicodeEmbedForQuit() : Promise.resolve(),
     // 退出屏障结束后再启动窗口尺寸写入，可能在 app.exit 前留下 setting.json.lock。
     // 尺寸已在 resize 防抖或最大化状态变化时保存，退出屏障不再创建新的尺寸写入。
     // 修复原因：Main 过去不会等待仍在发送的 /event/report，正常退出也会直接丢事件。
@@ -2921,6 +2931,13 @@ app.whenReady().then(async () => {
 
   logger.info("[startup] 创建主窗口");
   await primaryWindowCoordinator.ensurePrimaryWindow("app-ready");
+  // [OmniCode] 批次2 B2-3：管理器主窗口挂入内嵌编排（owned-window 的 owner 侧引用 +
+  // move/resize 跟随监听；桌面模式/官方 flavor 挂入无害——编排仅在管理器注册 IPC 后生效）
+  if (isOmnicodeManagerMain) {
+    setOmnicodeEmbedManagerWindow(
+      getApplicationWindowsExcludingCuaIndicator()[0] ?? BrowserWindow.getAllWindows()[0] ?? null,
+    );
+  }
   // [OmniCode] Profile 实例回连控制台桥接（仅实例身份启动时激活；控制台/官方身份为 no-op）
   startOmnicodeInstanceBridgeClient();
   // [OmniCode] 批次2 B2-1（T2）：实例进程自带数据根的凭据备份调度（管理器关闭后实例

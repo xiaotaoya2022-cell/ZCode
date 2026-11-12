@@ -457,6 +457,49 @@ export interface OmnicodeInstanceEventPayload {
   type: "thumbnail" | "connected" | "disconnected";
   /** type=thumbnail 时的 JPEG base64 */
   frame?: string;
+  /**
+   * [OmniCode] 批次2 B2-3：缩略图帧的内容区宽高（DIP，实例侧 capturePage 时同步读取）。
+   * 卡片按真实宽高比 letterbox（修"显示不完整"）；缺省时卡片回退默认比例。
+   */
+  width?: number;
+  height?: number;
+}
+
+/**
+ * [OmniCode] 批次2 B2-3：控制台 UI 状态（管理器持久化 console-ui.json，spec §批次2 D9）。
+ * mode 为全局开关：内嵌=实例窗口 owned 进卡片画面区；桌面=独立窗口+模糊预览。
+ */
+export interface OmnicodeConsoleUiState {
+  mode: "embedded" | "desktop";
+  previewEnabled: boolean;
+}
+
+/** UI 状态部分更新（字段缺省=不变；非法值在 main 侧归一后落盘）。 */
+export interface OmnicodeConsoleUiStatePatch {
+  mode?: "embedded" | "desktop";
+  previewEnabled?: boolean;
+}
+
+/** 内嵌跟随：renderer 上报的卡片画面区矩形（窗口客户区 CSS 像素）。 */
+export interface OmnicodeConsoleEmbedRect {
+  profileId: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface OmnicodeConsoleEmbedLayoutInput {
+  /** 上报时刻的 renderer 视口尺寸（CSS px），main 用 contentBounds/viewport 比例换算 zoom。 */
+  viewportWidth: number;
+  viewportHeight: number;
+  rects: OmnicodeConsoleEmbedRect[];
+}
+
+/** 实时预览订阅状态：总开关（默认开）+ 视口内运行中卡片集合（IntersectionObserver）。 */
+export interface OmnicodeConsolePreviewStateInput {
+  previewEnabled: boolean;
+  visibleProfileIds: string[];
 }
 
 export function createOpenInEditorRemoteTarget(
@@ -993,6 +1036,25 @@ export interface IPlatformService {
   adoptOmnicodeConsole?(
     input: OmnicodeConsoleAdoptInput,
   ): Promise<{ profile: OmnicodeProfileSummaryInfo }>;
+  /**
+   * [OmniCode] 批次2 B2-3：读控制台 UI 状态（内嵌/桌面模式 + 实时预览开关，持久化）。
+   * 仅管理器 Desktop。
+   */
+  getOmnicodeConsoleUiState?(): Promise<OmnicodeConsoleUiState>;
+  /** 更新控制台 UI 状态；mode 变化触发内嵌 owned / 解除编排（spec §批次2 D9）。仅管理器 Desktop。 */
+  setOmnicodeConsoleUiState?(input: OmnicodeConsoleUiStatePatch): Promise<OmnicodeConsoleUiState>;
+  /**
+   * [OmniCode] 批次2 B2-3：内嵌跟随——上报卡片画面区矩形（客户区 CSS 像素 + 视口尺寸），
+   * main 换算屏幕 DIP 后经桥 embedLayout 下发（renderer rAF+~60ms 节流）。仅管理器 Desktop。
+   */
+  sendOmnicodeEmbedLayout?(input: OmnicodeConsoleEmbedLayoutInput): Promise<{ ok: boolean }>;
+  /**
+   * [OmniCode] 批次2 B2-3：实时预览订阅状态（总开关 + 视口内卡片集合；关=退订全部，
+   * 卡片停留最后一帧灰暗化）。仅管理器 Desktop。
+   */
+  setOmnicodePreviewState?(input: OmnicodeConsolePreviewStateInput): Promise<{ ok: boolean }>;
+  /** [OmniCode] 批次2 B2-3：在系统文件管理器中打开实例数据目录。仅管理器 Desktop。 */
+  revealOmnicodeProfileDataDir?(input: OmnicodeProfileIdInput): Promise<{ ok: boolean }>;
 
   // [OmniCode] 实例专属登录浏览器：失败态恢复入口（手动粘贴完整 OAuth 回调 URL，spec:
   // docs/omnicode/instance-login-browser.md）。accepted=false 表示回调未被接收

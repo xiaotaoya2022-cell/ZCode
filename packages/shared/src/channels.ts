@@ -82,6 +82,11 @@ import type {
   OmnicodeInstanceEventPayload,
   OmnicodeConsoleAdoptionCheckResult,
   OmnicodeConsoleAdoptInput,
+  OmnicodeConsoleUiState,
+  OmnicodeConsoleUiStatePatch,
+  OmnicodeConsoleEmbedLayoutInput,
+  OmnicodeConsolePreviewStateInput,
+  OmnicodeProfileIdInput,
   OpenInEditorOptions,
   PostUpdateReleaseNotesPayload,
   RemoteSessionClosedEvent,
@@ -275,6 +280,17 @@ export const PlatformChannels = {
   // [OmniCode] 批次2 B2-1：旧控制台收养——检测/执行（spec §批次2：旧控制台数据收养）
   OmnicodeConsoleAdoptionCheck: "zcode:omnicode-console-adoption-check",
   OmnicodeConsoleAdopt: "zcode:omnicode-console-adopt",
+  // [OmniCode] 批次2 B2-3：控制台 UI 状态（内嵌/桌面模式 + 实时预览开关，持久化到管理器
+  // 数据根 console-ui.json；set 触发模式切换的 owned/release 编排，spec §批次2 D9）
+  OmnicodeConsoleUiStateGet: "zcode:omnicode-console-ui-state-get",
+  OmnicodeConsoleUiStateSet: "zcode:omnicode-console-ui-state-set",
+  // [OmniCode] 批次2 B2-3：内嵌跟随——renderer 上报卡片画面区矩形（窗口客户区 CSS 像素），
+  // main 换算屏幕 DIP 后经桥 embedLayout 下发到实例（节流 ~60ms，spec §批次2 D9）
+  OmnicodeConsoleEmbedLayout: "zcode:omnicode-console-embed-layout",
+  // [OmniCode] 批次2 B2-3：实时预览订阅状态（总开关 + 视口内卡片集合，IntersectionObserver）
+  OmnicodeConsolePreviewState: "zcode:omnicode-console-preview-state",
+  // [OmniCode] 批次2 B2-3：在系统文件管理器中打开实例数据目录
+  OmnicodeProfileRevealDataDir: "zcode:omnicode-profile-reveal-data-dir",
   /** Renderer → Main：用 Chromium 打印引擎把当前页面 print 媒体版面导出为 PDF */
   PrintToPdf: "zcode:print-to-pdf",
   /** Renderer → Main：检查并按需请求系统麦克风权限 */
@@ -961,6 +977,29 @@ export interface PlatformChannelMap {
   [PlatformChannels.OmnicodeConsoleAdopt]: {
     request: OmnicodeConsoleAdoptInput;
     response: { profile: OmnicodeProfileSummaryInfo };
+  };
+  // [OmniCode] 批次2 B2-3：控制台 UI 状态（mode/previewEnabled，持久化 console-ui.json）
+  [PlatformChannels.OmnicodeConsoleUiStateGet]: {
+    request: void;
+    response: OmnicodeConsoleUiState;
+  };
+  [PlatformChannels.OmnicodeConsoleUiStateSet]: {
+    request: OmnicodeConsoleUiStatePatch;
+    response: OmnicodeConsoleUiState;
+  };
+  // [OmniCode] 批次2 B2-3：内嵌跟随——rects 为窗口客户区 CSS 像素（含 viewport 尺寸供 zoom 换算）
+  [PlatformChannels.OmnicodeConsoleEmbedLayout]: {
+    request: OmnicodeConsoleEmbedLayoutInput;
+    response: { ok: boolean };
+  };
+  // [OmniCode] 批次2 B2-3：实时预览订阅（总开关 + 可见卡片集合）
+  [PlatformChannels.OmnicodeConsolePreviewState]: {
+    request: OmnicodeConsolePreviewStateInput;
+    response: { ok: boolean };
+  };
+  [PlatformChannels.OmnicodeProfileRevealDataDir]: {
+    request: OmnicodeProfileIdInput;
+    response: { ok: boolean };
   };
   [PlatformChannels.PrintToPdf]: {
     request: void;

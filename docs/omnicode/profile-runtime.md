@@ -196,3 +196,50 @@
 4. **restore 预检路径归一**：Host 锁条目存 resolve 后路径，renderer 以大小写不敏感+去尾分隔符宽松归一比对；跨盘符大小写差异漏筛时退化为旧"恢复+灰显"软语义（fail-open，不产生双开硬拒绝缺口——灰显 tab 本身不可进入）。
 5. **persistSession 窗口期（批次1 已知，保持）**：恢复完成到 renderer 首次写回 `openLocalWorkspaces` 之间，协调器只持 lastActiveWorkspace 单活动锁；全集锁待首次写回补齐（单测锁定该现状语义）。
 6. **task-row 灰显项不提供观察者入口**（点击保持拒绝+提示）；观察者入口只在打开流（对话框/拖拽/recent/deep-link/桥）的锁冲突对话框。
+
+## 批次2 B2-3：控制台网格 + 内嵌/桌面双模式 + 预览升级（D9，2026-11-13）
+
+上位设计：BATCH2-DESIGN.md §4。本节是内嵌语义、生命周期红线与状态落盘的行为事实源。
+
+### 内嵌模式语义（owned-window）
+
+- **机制**：运行实例窗口经 Win32 `SetWindowLongPtr(GWL_HWNDPARENT, consoleHwnd)` 成为管理器窗口的 owned window（自动置顶于管理器、随管理器最小化/恢复）+ `skipTaskbar(true)` + 冻结 resizable/最低尺寸（内嵌下限 160×96，低于 arrange 的 200×150——格子由网格 minmax 与真实宽高比决定，21:9 卡片画面区高度会低于 150px）。
+- **owned 设置/解除 = 一次性 PowerShell**（`-NoProfile -NonInteractive -Command`，argv 数组直传、禁 shell 拼接）：Add-Type P/Invoke `SetWindowLongPtr`；全部 HWND 经 `^0x[0-9a-f]{1,16}$` 白名单后才可进字面量（`[Convert]::ToInt64('<hex>',16)`）。不长驻任何脚本进程；单次批处理硬超时 5s，失败仅告警（重复设置幂等无害）。
+- **HWND 获取**：实例桥新增 `hello` 消息（实例侧 1s 轮询主窗口 `getNativeWindowHandle`，变化即上报；管理器兜底命令 `requestWindowHandle` 强制重报）。
+- **布局跟随**：renderer 上报卡片画面区矩形（**窗口客户区 CSS 像素** + 视口尺寸，rAF+~60ms 节流；管理器窗口 move/resize 再兜一层同规格节流）→ main 经 `contentBounds/viewport` 比例换算屏幕 DIP（对任意 zoomFactor 成立，换算收口在 main）→ 桥命令 `embedLayout {rects[]}`（全量矩形广播，实例按自身 profileId 滤出并独立校验——最低规格内联在 `embedLayoutMath`，双端共用纯函数）。卡片顶条约 28-32px 留给管理器自绘控制钮（实例窗口贴画面区，不含顶条）。
+- **视口外内嵌实例临时隐藏**（owned 窗口无裁剪，悬在管理器外会遮挡桌面）：布局里消失 → `hide`；回到布局 → `embedLayout` 自带 show。
+- **解除**：`releaseEmbed` 桥命令（恢复 resizable/桌面最低尺寸/skipTaskbar(false) + 回内嵌前基线 bounds）+ PowerShell `GWLP=[IntPtr]::Zero`。切桌面模式、arrange 编排前均先解除（内嵌态不参与平铺——「平铺到屏幕」为桌面模式专属，内嵌下禁用置灰）。
+- **放大语义**：双击卡片 = 该实例独占网格区（其余卡片不渲染），embedLayout 跟随新矩形；ESC/返回钮 = 回网格。非内嵌态的放大 = 桌面模式点击卡片聚焦真窗口（桥 `focus`）。
+
+### 生命周期红线（退出屏障）
+
+Win32 owned window 随 owner 销毁——管理器窗口直接销毁会**连带杀死内嵌实例**。因此：
+
+- 管理器 `prepareAppQuit` 屏障内 `await releaseOmnicodeEmbedForQuit()`：先于窗口销毁解除全部 owned（PowerShell 批处理 + releaseEmbed），幂等、总预算 4s，超时放行退出。
+- 切桌面模式同样先解除（`applyOmnicodeConsoleModeChange`）。
+- **管理器崩溃/被强杀无法收尾 → 内嵌实例被连坐销毁**，记录为已知限制（无 GUI 环境未做运行时实测）。
+- 实例侧正常 stop（三段式优雅停）不受内嵌态影响：实例进程退出即窗口销毁，管理器收到桥 disconnected 清簿记。
+
+### 预览管线升级（{w,h} 帧协议 + 视口订阅）
+
+- 桥 `thumbnail` 帧可选附 `width/height`（实例侧 capturePage 同刻 `getContentSize`，DIP）——卡片按真实宽高比 letterbox（修"显示不完整"）；缺省回退默认比例（旧实例兼容）。
+- **订阅状态化**：管理器侧期望订阅 = `previewEnabled ∧ 卡片在视口内`（renderer IntersectionObserver 上报可见集合；`resolveOmnicodePreviewSubscriptions` 纯函数决策 + 与桥实际态 diff 后增减 `subscribeThumbnails/unsubscribeThumbnails`）。实例连接时即時对账。总开关关闭 = 全部退订，卡片停留最后一帧灰暗化 + 角标（不再是"连上即订阅"的粗放行为；官方 flavor 桥服务保持自动订阅不变）。
+- 实例侧最小化/隐藏跳帧策略保持（隐藏窗口停留最后一帧）。
+
+### console-ui.json 状态落盘
+
+- 管理器数据根 `console-ui.json`（原子写 + 损坏回退默认 `{mode:"embedded", previewEnabled:true}`；**不写** `.zcode/v2/setting.json`——收养后该树归实例，管理器只写自己的管理数据）。字段 patch 合并为纯函数（未知/非法字段丢弃，落盘值永远收敛合法形态）。
+- mode 为全局开关（切换对全部运行实例即时生效：进内嵌 = owned 全部已连接实例并等待布局；进桌面 = 先解除全部）。预览总开关同为持久化状态。
+
+### 内嵌/桌面双模式语义（UI 呈现）
+
+- **内嵌**：卡片画面区 = 真窗口贴合区（不可见缩略图被真窗口覆盖；顶条控制钮管理实例）；点击画面区即交互真窗口。
+- **桌面**：实例窗口独立在桌面（有任务栏）；卡片显示实时缩略图 + 高斯模糊遮罩（`backdrop-filter: blur` + `pointer-events:none`）+「桌面模式·点击聚焦真窗口」提示；点击卡片 = 桥 `focus`。
+- 模式切换 IPC 返回后的 UI 状态即时生效；持久化保证重启回到上次模式。
+
+### 已知限制（如实记录）
+
+1. 内嵌 owned 关系仅 Windows（非 win32 平台 owned 设置 no-op，内嵌模式退化为"窗口不跟随"——本产品当前仅 win 发版）。
+2. 管理器崩溃未解除 owned → 内嵌实例连坐销毁（上述红线只覆盖正常退出路径）。
+3. 多显示器/高 DPI 缩放差异下的换算精度依赖 `contentBounds/viewport` 比例假设（单显示器 100%/200% 缩放推演正确；未做全 DPI 矩阵实测）。
+4. 内嵌实例的 alt-tab/任务栏入口消失（skipTaskbar），只能经管理器卡片管理——切桌面模式或停止实例恢复。

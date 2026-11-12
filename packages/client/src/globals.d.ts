@@ -182,6 +182,24 @@ declare global {
       adoptOmnicodeConsole?(payload: {
         name: string;
       }): Promise<{ profile: import("@zcode/shared").OmnicodeProfileSummaryInfo }>;
+      /** [OmniCode] 批次2 B2-3：读控制台 UI 状态（内嵌/桌面模式 + 预览开关，持久化） */
+      getOmnicodeConsoleUiState?(): Promise<import("@zcode/shared").OmnicodeConsoleUiState>;
+      /** [OmniCode] 批次2 B2-3：更新控制台 UI 状态（模式切换触发 owned 编排/解除） */
+      setOmnicodeConsoleUiState?(
+        payload: import("@zcode/shared").OmnicodeConsoleUiStatePatch,
+      ): Promise<import("@zcode/shared").OmnicodeConsoleUiState>;
+      /** [OmniCode] 批次2 B2-3：内嵌跟随——上报卡片画面区矩形（客户区 CSS px + 视口尺寸） */
+      sendOmnicodeEmbedLayout?(
+        payload: import("@zcode/shared").OmnicodeConsoleEmbedLayoutInput,
+      ): Promise<{ ok: boolean }>;
+      /** [OmniCode] 批次2 B2-3：实时预览订阅（总开关 + 视口内卡片集合） */
+      setOmnicodePreviewState?(
+        payload: import("@zcode/shared").OmnicodeConsolePreviewStateInput,
+      ): Promise<{ ok: boolean }>;
+      /** [OmniCode] 批次2 B2-3：系统文件管理器打开实例数据目录 */
+      revealOmnicodeProfileDataDir?(
+        payload: import("@zcode/shared").OmnicodeProfileIdInput,
+      ): Promise<{ ok: boolean }>;
       /** 从系统拖拽/文件输入得到的 Web File 解析真实本地路径 */
       getPathForFile?(file: File): string | null;
       /** dwf 产物「作为文件打开」：把某一版的字节落成本机副本，返回其路径 */

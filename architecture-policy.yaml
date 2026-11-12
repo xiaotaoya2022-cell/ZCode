@@ -1826,12 +1826,16 @@ modules:
     layers:
       adapters: .
   # omnicode-profile-runtime：由 architecture:adopt 登记（OmniCode 魔改：Profile 多实例编排）
+  # 批次2 B2-3 requires 增补 desktop：instanceBridgeClient 释放内嵌时恢复桌面窗口最低尺寸
+  #（MIN_DESKTOP_WINDOW_WIDTH/HEIGHT，desktopWindowSize 常量）——与 plugin-sandbox 同款
+  # 子树→desktop 主树依赖声明（desktop 为 managed:false，不产生循环）。
   - id: omnicode-profile-runtime
     roots:
       - packages/desktop/src/main/omnicode
     managed: true
     requires:
       - shared
+      - desktop
     publicEntrypoints:
       - packages/desktop/src/main/omnicode/contract.ts
       - packages/desktop/src/main/omnicode/profileBootstrap.ts
@@ -2378,7 +2382,10 @@ exceptions:
       - packages/desktop/src/main/omnicode/instanceReconcile.ts
       - packages/desktop/src/main/omnicode/credentialBackups.ts
       - packages/ui/src/console/ConsoleHome.tsx
-    reason: OmniCode profile runtime wiring files follow the exact same structure as the existing desktopSaveFile IPC registration and desktopBrowserPlatformBridge delegation patterns; the files are OmniCode-fork feature additions reviewed line-by-line (580-finding sealed scan passed), and adopting the whole desktop/ui module trees needs a separate boundary refactor. Batch-1 adds atomicJson.ts (profile registry atomic write/recovery, mirrors Cockpit atomic_write.rs invariants) and instanceReconcile.ts (running-state rebuild via process-table scan keyed on --omnicode-profile argv, mirrors Cockpit resolve_pid).
+      - packages/ui/src/console/ConsoleInstanceGrid.tsx
+      - packages/ui/src/console/ConsoleInstanceCard.tsx
+      - packages/ui/src/console/useOmnicodeConsoleInstances.ts
+    reason: OmniCode profile runtime wiring files follow the exact same structure as the existing desktopSaveFile IPC registration and desktopBrowserPlatformBridge delegation patterns; the files are OmniCode-fork feature additions reviewed line-by-line (580-finding sealed scan passed), and adopting the whole desktop/ui module trees needs a separate boundary refactor. Batch-1 adds atomicJson.ts (profile registry atomic write/recovery, mirrors Cockpit atomic_write.rs invariants) and instanceReconcile.ts (running-state rebuild via process-table scan keyed on --omnicode-profile argv, mirrors Cockpit resolve_pid). Batch-2 B2-3 adds the console grid files (shared instances hook + card view + grid orchestrator, reusing the same platform bridge delegation pattern as ConsoleHome).
   # [OmniCode] M4b Browser Relay：新文件落在既有未受管 shared/server/desktop 大模块内的精确路径准入。
   # shared/browserRelay.ts 为 fork-only 事件契约（沿用 browser-use 既有类型，不发明新形状）；
   # server/browserRelayChannel.ts 仿照 stdio/http 既有 IServerChannel 模式实现 fork 频道；

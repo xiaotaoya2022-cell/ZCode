@@ -105,6 +105,10 @@ import type {
   OmnicodeProfileCloneInput,
   OmnicodeProfileIdInput,
   OmnicodeInstanceEventPayload,
+  OmnicodeConsoleUiState,
+  OmnicodeConsoleUiStatePatch,
+  OmnicodeConsoleEmbedLayoutInput,
+  OmnicodeConsolePreviewStateInput,
   SSHConfigAliasOption,
   WebRemoteControlContext,
   WebRemoteControlReconnectWorkspaceRequest,
@@ -425,6 +429,23 @@ contextBridge.exposeInMainWorld("zcode", {
           ipcRenderer.on(PlatformChannels.OmnicodeInstanceEvent, handler);
           return () => ipcRenderer.removeListener(PlatformChannels.OmnicodeInstanceEvent, handler);
         },
+        // [OmniCode] 批次2 B2-3：控制台网格/内嵌/预览（spec §批次2 D9）
+        getOmnicodeConsoleUiState: (): Promise<OmnicodeConsoleUiState> =>
+          ipcRenderer.invoke(PlatformChannels.OmnicodeConsoleUiStateGet),
+        setOmnicodeConsoleUiState: (
+          payload: OmnicodeConsoleUiStatePatch,
+        ): Promise<OmnicodeConsoleUiState> =>
+          ipcRenderer.invoke(PlatformChannels.OmnicodeConsoleUiStateSet, payload),
+        sendOmnicodeEmbedLayout: (
+          payload: OmnicodeConsoleEmbedLayoutInput,
+        ): Promise<{ ok: boolean }> =>
+          ipcRenderer.invoke(PlatformChannels.OmnicodeConsoleEmbedLayout, payload),
+        setOmnicodePreviewState: (
+          payload: OmnicodeConsolePreviewStateInput,
+        ): Promise<{ ok: boolean }> =>
+          ipcRenderer.invoke(PlatformChannels.OmnicodeConsolePreviewState, payload),
+        revealOmnicodeProfileDataDir: (payload: OmnicodeProfileIdInput): Promise<{ ok: boolean }> =>
+          ipcRenderer.invoke(PlatformChannels.OmnicodeProfileRevealDataDir, payload),
       }
     : {}),
   // [OmniCode] 失败态恢复入口：手动粘贴完整 OAuth 回调 URL，main 复用 handleDeepLink 路由
