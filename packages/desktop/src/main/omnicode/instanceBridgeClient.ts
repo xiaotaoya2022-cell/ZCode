@@ -4,6 +4,7 @@
 // 已知限制：窗口隐藏/最小化时 capturePage 可能拿不到新帧（v0 接受，网格停留最后一帧）。
 import WebSocket from "ws";
 import { app, BrowserWindow } from "electron";
+import { PlatformChannels } from "@zcode/shared";
 import process from "node:process";
 
 const CAPTURE_INTERVAL_MS = 700; // ≈1.4fps；JPEG q55 单帧约 40-80KB，本地回环无压力
@@ -42,7 +43,18 @@ function isOmnicodeArrangeBounds(value: unknown): value is Electron.Rectangle {
   );
 }
 
-function applyCommand(command: { type?: string; bounds?: unknown }): void {
+function applyCommand(command: { type?: string; bounds?: unknown; path?: unknown }): void {
+  // [OmniCode] 批次2 B2-1（T4）：openWorkspace 不依赖窗口存在性——冷启动早期的请求也
+  // 要能投递（Root 的 onOpenWorkspacePath 由 preload 先缓存后回放，天然容忍 renderer
+  // 未就绪）。其余命令仍以主窗口存在为前提。
+  if (command.type === "openWorkspace") {
+    const path = typeof command.path === "string" ? command.path.trim() : "";
+    if (!path) return;
+    // 实例走自身正常打开流程：官方 OpenWorkspacePath 通道 → Root onOpenWorkspacePath
+    // → saveProject 打开锁守卫（工作区被其他实例占用即结构化错误冒泡，不再静默）。
+    getPrimaryInstanceWindow()?.webContents.send(PlatformChannels.OpenWorkspacePath, path);
+    return;
+  }
   const win = getPrimaryInstanceWindow();
   if (!win) return;
   switch (command.type) {

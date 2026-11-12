@@ -17,12 +17,16 @@ import { createWriteStream } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
-import { app, screen } from "electron";
+import { app, dialog, screen } from "electron";
 import {
   assertValidProfileId,
   clearProfileLaunched,
+  createOmnicodeProfile,
   getOmnicodeProfileDir,
+  getOmnicodeProfileRecord,
+  listOmnicodeProfiles,
   recordProfileLaunched,
+  resolveOmnicodeWorkspaceOpenRoute,
 } from "./profileRuntime.js";
 import { scanOmnicodeInstanceProcesses } from "./instanceReconcile.js";
 import { backupCredentialFile } from "./credentialBackups.js";
@@ -50,6 +54,8 @@ const launchInFlightByProfileId = new Map<string, Promise<number>>();
 let launchChain: Promise<unknown> = Promise.resolve();
 
 const PROFILE_FLAG_PREFIX = "--omnicode-profile=";
+/** [OmniCode] 批次2 B2-1（T4）：管理器"新建并打开"下发的工作区目录旗标。 */
+const OPEN_WORKSPACE_FLAG_PREFIX = "--omnicode-open-workspace=";
 /** 桥接 token 白名单（与实例侧 startOmnicodeInstanceBridgeClient 校验同形）。 */
 const BRIDGE_TOKEN_PATTERN = /^[0-9a-f]{32}$/u;
 /** 启动确认稳定窗口（spec §接口 launch）：窗口内未退出即视为启动成功。 */
@@ -119,14 +125,19 @@ export async function reconcileOmnicodeRunningInstances(): Promise<void> {
  * P1-4「启动=重启」：已运行实例先走三段式优雅停（P1-7）再启动，不再幂等返回现有 pid；
  * 运行中的目标在串行链内实时取，避免快照被并发 stop 清掉后误停新进程。
  * 并发：per-profile in-flight 去重 + 全局串行链（屏障 = 上一实例启动确认完成）。
+ * 批次2 B2-1（T4）：options.openWorkspacePath 供"新建并打开"把工作区目录经 argv
+ * 下发（实例就绪后走自身正常打开流程，尊重工作区锁）；常规启动不带该旗标。
  */
-export function launchOmnicodeProfile(profileId: string): Promise<number> {
+export function launchOmnicodeProfile(
+  profileId: string,
+  options?: { openWorkspacePath?: string },
+): Promise<number> {
   assertValidProfileId(profileId);
   const inFlight = launchInFlightByProfileId.get(profileId);
   if (inFlight) return inFlight; // 单飞：双击/并发点击合并为一次启动（spec §并发与竞态）
   const pending = launchChain.then(
-    () => doRestartLaunch(profileId),
-    () => doRestartLaunch(profileId), // 前一次失败不阻断后续启动
+    () => doRestartLaunch(profileId, options),
+    () => doRestartLaunch(profileId, options), // 前一次失败不阻断后续启动
   );
   launchInFlightByProfileId.set(profileId, pending);
   launchChain = pending.catch(() => undefined);
@@ -134,26 +145,34 @@ export function launchOmnicodeProfile(profileId: string): Promise<number> {
   return pending;
 }
 
-async function doRestartLaunch(profileId: string): Promise<number> {
+async function doRestartLaunch(
+  profileId: string,
+  options?: { openWorkspacePath?: string },
+): Promise<number> {
   // 运行态在串行链执行时刻再取（进入链前挂起的调用可能已被并发 stop 清理）
   const entry = runningByProfileId.get(profileId);
   if (entry) {
     await stopByPid(entry.pid); // 停止失败向上抛：不进入启动（IPC → UI toast）
   }
-  return doLaunch(profileId);
+  return doLaunch(profileId, options);
 }
 
-async function doLaunch(profileId: string): Promise<number> {
+async function doLaunch(
+  profileId: string,
+  options?: { openWorkspacePath?: string },
+): Promise<number> {
   assertValidProfileId(profileId); // 串行链入口已校验，防御性再校验
   const profileDir = getOmnicodeProfileDir(profileId);
+  // 批次2 B2-1（T5 收养）：.zcode 数据根支持 profile 记录的 dataBaseDirOverride
+  // （零拷贝指向旧控制台根）；electron-userdata/session 仍用 profile 自身目录。
+  const record = await getOmnicodeProfileRecord(profileId).catch(() => undefined);
+  const dataBaseDir = record?.dataBaseDirOverride?.trim() || profileDir;
   await mkdir(join(profileDir, "electron-userdata"), { recursive: true });
   await mkdir(join(profileDir, "electron-session"), { recursive: true });
   // [OmniCode] 启动前凭据备份（用户拍板轻量补强）：升级/迁移可能重写凭据库，
   // 启动前留一份快照保证可一键回滚；best-effort 不阻断启动（失败仅告警）。
   try {
-    const result = await backupCredentialFile(
-      join(profileDir, ".zcode", "v2", "credentials.json"),
-    );
+    const result = await backupCredentialFile(join(dataBaseDir, ".zcode", "v2", "credentials.json"));
     if (result === "backed-up") {
       console.info(`[omnicode] 启动前凭据已备份: profileId=${profileId}`);
     }
@@ -172,9 +191,26 @@ async function doLaunch(profileId: string): Promise<number> {
   // packaged：execPath 即应用本体；开发态：electron.exe + appPath（与 dev:desktop 等价，
   // appPath 必须是 electron.exe 的第一个参数，dev 态保持可用）。
   // 身份 = 字面量旗标 + 白名单 profileId（spec §产品规则 8 / D6）。
+  // 批次2 B2-1（T4）：openWorkspacePath 经 argv 下发（实例 bootstrap 搬运到 env，
+  // index.ts 就绪后消费）；不含控制字符的目录路径才注入（防御性，spawn 参数面白名单）。
   const profileArg = `${PROFILE_FLAG_PREFIX}${profileId}`;
+  const openWorkspacePath = options?.openWorkspacePath?.trim() || "";
+  // 含 NUL/CR/LF 的工作区路径不注入 argv（spawn 参数面白名单；NUL 会截断参数）。
+  // 不用正则（no-control-regex），改为逐字符 includes。
+  const openWorkspacePathInjectable =
+    openWorkspacePath !== "" &&
+    !openWorkspacePath.includes("\x00") &&
+    !openWorkspacePath.includes("\r") &&
+    !openWorkspacePath.includes("\n");
+  const openWorkspaceArg = openWorkspacePathInjectable
+    ? `${OPEN_WORKSPACE_FLAG_PREFIX}${openWorkspacePath}`
+    : undefined;
   const appPath = app.isPackaged ? undefined : app.getAppPath();
-  const args = appPath ? [appPath, profileArg] : [profileArg];
+  const args = [
+    ...(appPath ? [appPath] : []),
+    profileArg,
+    ...(openWorkspaceArg ? [openWorkspaceArg] : []),
+  ];
   const bootLog = await openBootLog(profileDir);
   const child = spawn(process.execPath, args, {
     // [OmniCode] 身份与数据根经 env 一次性同步注入（覆盖继承的同名项）：
@@ -192,8 +228,11 @@ async function doLaunch(profileId: string): Promise<number> {
       OMNICODE_PROFILE_ID: profileId,
       ZCODE_DESKTOP_USER_DATA_DIR: join(profileDir, "electron-userdata"),
       ZCODE_DESKTOP_SESSION_DATA_DIR: join(profileDir, "electron-session"),
-      ZCODE_DATA_BASE_DIR: profileDir,
-      ZCODE_DESKTOP_HOME_DIR: profileDir,
+      // 批次2 B2-1（T5 收养）：数据根五件套中的两件随 dataBaseDirOverride 指向旧根；
+      // 实例 bootstrap（profileBootstrap）自派生时读同一 profile.json，双保险同值。
+      ZCODE_DATA_BASE_DIR: dataBaseDir,
+      ZCODE_DESKTOP_HOME_DIR: dataBaseDir,
+      ...(openWorkspaceArg ? { OMNICODE_OPEN_WORKSPACE: openWorkspacePath } : {}),
       OMNICODE_BRIDGE_PORT: String(bridge.port),
       OMNICODE_BRIDGE_TOKEN: bridge.token,
     },
@@ -494,4 +533,126 @@ export function restoreOmnicodeInstances(): { delivered: string[] } {
     }
   }
   return { delivered };
+}
+
+// ─── [OmniCode] 批次2 B2-1（T4）：管理器"打开工作区"路由 ───
+
+/** 向运行中实例投递 openWorkspace 桥命令；未回连返回 false。 */
+export function sendOmnicodeOpenWorkspace(profileId: string, workspacePath: string): boolean {
+  assertValidProfileId(profileId);
+  return sendOmnicodeInstanceCommand(profileId, { type: "openWorkspace", path: workspacePath });
+}
+
+export interface OmnicodeWorkspaceRouteDeps {
+  /** 文案语言（与 index.ts 的 currentApplicationLocale 判定一致：zh-CN 为中文）。 */
+  isZh: boolean;
+  /** 零实例路径"新建并打开"的新 profile 名称（locale 感知，由调用方生成）。 */
+  resolveNewProfileName: () => string;
+  /** 对话框父窗口（缺省用无父级原生框）。 */
+  parentWindow?: import("electron").BrowserWindow | null;
+  logger?: { info: (...args: unknown[]) => void; warn: (...args: unknown[]) => void };
+}
+
+/**
+ * 管理器收到"打开工作区"（second-instance 参数 / zcode:// 深链 / 冷启动 argv）后的路由：
+ * - 恰一实例在跑 → openWorkspace 桥命令直转该实例（实例走自身打开流程，尊重工作区锁）；
+ * - 多实例 → 原生选择框（按钮列实例名）→ 投递所选实例；
+ * - 零实例 → 原生引导框"请先创建实例"，确认即新建 profile 并带工作区路径启动
+ *   （argv `--omnicode-open-workspace=<path>`，实例启动后自行打开）。
+ * 决策逻辑在 profileRuntime.resolveOmnicodeWorkspaceOpenRoute（纯函数，单测覆盖）。
+ */
+export async function routeOmnicodeWorkspaceOpenFromManager(
+  workspacePath: string,
+  deps: OmnicodeWorkspaceRouteDeps,
+): Promise<void> {
+  const trimmedPath = workspacePath.trim();
+  if (!trimmedPath) return;
+  const running = listOmnicodeRunningInstances();
+  const route = resolveOmnicodeWorkspaceOpenRoute(running.map((entry) => entry.profileId));
+  const log = deps.logger ?? console;
+
+  if (route.kind === "single") {
+    const delivered = sendOmnicodeOpenWorkspace(route.profileId, trimmedPath);
+    log.info(
+      `[omnicode] 工作区打开请求直转唯一运行实例: profileId=${route.profileId} delivered=${delivered}`,
+    );
+    if (!delivered) {
+      showManagerWorkspaceNotice(deps, deps.isZh
+        ? "实例正在启动中，尚未回连管理器，请稍后在实例内手动打开该目录。"
+        : "The instance is still starting up and has not connected back yet. Please open the directory inside the instance later.");
+    }
+    return;
+  }
+
+  if (route.kind === "choose") {
+    const profiles = await listOmnicodeProfiles();
+    const nameById = new Map(profiles.map((profile) => [profile.id, profile.name]));
+    const entries = route.profileIds.map((profileId) => ({
+      profileId,
+      name: nameById.get(profileId) ?? profileId,
+    }));
+    const cancelLabel = deps.isZh ? "取消" : "Cancel";
+    const { response } = await showManagerMessageBox(deps, {
+      type: "question",
+      buttons: [...entries.map((entry) => entry.name), cancelLabel],
+      defaultId: 0,
+      cancelId: entries.length,
+      title: deps.isZh ? "选择实例" : "Choose an instance",
+      message: deps.isZh ? "要打开到哪个实例？" : "Which instance should open this workspace?",
+      detail: trimmedPath,
+      noLink: true,
+    });
+    const chosen = entries[response];
+    if (!chosen) return; // 取消
+    const delivered = sendOmnicodeOpenWorkspace(chosen.profileId, trimmedPath);
+    log.info(
+      `[omnicode] 工作区打开请求路由到所选实例: profileId=${chosen.profileId} delivered=${delivered}`,
+    );
+    if (!delivered) {
+      showManagerWorkspaceNotice(deps, deps.isZh
+        ? "实例尚未回连管理器，请稍后在实例内手动打开该目录。"
+        : "The instance has not connected back yet. Please open the directory inside the instance later.");
+    }
+    return;
+  }
+
+  // 零实例：引导"新建并打开"
+  const confirmLabel = deps.isZh ? "新建并打开" : "Create & open";
+  const cancelLabel = deps.isZh ? "取消" : "Cancel";
+  const { response } = await showManagerMessageBox(deps, {
+    type: "question",
+    buttons: [confirmLabel, cancelLabel],
+    defaultId: 0,
+    cancelId: 1,
+    title: deps.isZh ? "没有正在运行的实例" : "No running instances",
+    message: deps.isZh ? "请先创建实例后再打开工作区。" : "Create an instance first to open this workspace.",
+    detail: trimmedPath,
+    noLink: true,
+  });
+  if (response !== 0) return;
+  const profile = await createOmnicodeProfile(deps.resolveNewProfileName());
+  const pid = await launchOmnicodeProfile(profile.id, { openWorkspacePath: trimmedPath });
+  log.info(
+    `[omnicode] 新建并打开完成: profileId=${profile.id} pid=${pid} workspace=${trimmedPath}`,
+  );
+}
+
+/** showMessageBox 的可选父窗口包装（Electron 重载不接受 undefined 父窗口）。 */
+function showManagerMessageBox(
+  deps: OmnicodeWorkspaceRouteDeps,
+  options: Electron.MessageBoxOptions,
+): Promise<Electron.MessageBoxReturnValue> {
+  const parent =
+    deps.parentWindow && !deps.parentWindow.isDestroyed() ? deps.parentWindow : undefined;
+  return parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options);
+}
+
+function showManagerWorkspaceNotice(deps: OmnicodeWorkspaceRouteDeps, message: string): void {
+  void showManagerMessageBox(deps, {
+    type: "info",
+    buttons: [deps.isZh ? "知道了" : "OK"],
+    title: deps.isZh ? "实例未就绪" : "Instance not ready",
+    message,
+    noLink: true,
+  });
 }

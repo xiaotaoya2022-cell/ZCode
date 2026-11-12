@@ -4084,6 +4084,14 @@ const enUS: Record<string, string> = {
   "console.homeTitle": "OmniCode Instance Hub",
   "console.homeSubtitle":
     "Create isolated instances and run them in parallel; each has its own login state and data. Work and sign-in happen inside instance windows — this window manages them.",
+  "console.adoptionTitle":
+    "Previous main setup detected — adopt it as an instance to keep its sign-in and history.",
+  "console.adoptionAction": "Adopt",
+  "console.adoptionConfirmTitle": "Adopt the previous main setup",
+  "console.adoptionConfirmDescription":
+    "A new instance pointing at the previous OmniCode console data directory will be created (zero-copy). Its sign-in state and conversation history are preserved as-is.",
+  "console.adoptionDefaultName": "Instance (adopted)",
+  "console.adoptionToastDone": "Adopted as an instance — launch it from the list above.",
   "welcome.omnicodeInstancesHint":
     "Create isolated instances and run them in parallel; each has its own login state and data.",
   "welcome.loginToggle": "Sign in to use the main instance (optional)",

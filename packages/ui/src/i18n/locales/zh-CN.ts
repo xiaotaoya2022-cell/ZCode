@@ -3826,6 +3826,13 @@ const zhCN: Record<string, string> = {
   "console.homeTitle": "OmniCode 实例管理中枢",
   "console.homeSubtitle":
     "创建独立实例并并行运行；每个实例有自己的登录态与数据。工作与登录都在实例窗口内完成，本窗口负责管理。",
+  "console.adoptionTitle": "检测到原主实例数据——收养为实例可保留登录与历史。",
+  "console.adoptionAction": "收养",
+  "console.adoptionConfirmTitle": "收养原主实例",
+  "console.adoptionConfirmDescription":
+    "将创建一个指向原 OmniCode 控制台数据目录的新实例（零拷贝），登录态与会话历史原样保留。",
+  "console.adoptionDefaultName": "实例-收养",
+  "console.adoptionToastDone": "已收养为实例，可在上方列表启动。",
   "welcome.omnicodeInstancesHint":
     "创建独立实例并启动并行工作；每个实例有自己的登录态与数据，互不串扰。",
   "welcome.loginToggle": "连接账号以使用主实例（可选）",

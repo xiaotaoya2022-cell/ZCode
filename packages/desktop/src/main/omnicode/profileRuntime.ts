@@ -5,7 +5,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { cp, mkdir, rm } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import process from "node:process";
 import { readJsonWithRecovery, writeJsonAtomic, writeOwnerMark, checkOwnerMarkForDelete } from "./atomicJson.js";
 
@@ -14,6 +14,12 @@ export interface OmnicodeProfileRecord {
   name: string;
   createdAt: string;
   notes?: string;
+  /**
+   * [OmniCode] 批次2 B2-1（T5 收养）：业务数据根覆盖（.zcode 树所在目录，零拷贝指向
+   * 旧控制台数据根等外部目录）。electron-userdata/session 仍用 profile 自身目录——
+   * 仅 .zcode 数据根（凭据/会话库/setting.json）与 credential-secret 随该目录走。
+   */
+  dataBaseDirOverride?: string;
   /** 最近一次启动确认成功的实例进程 pid（批次1 P0-3：运行态重建的加速提示，真相以进程表扫描为准）。 */
   lastPid?: number;
   lastLaunchedAt?: string;
@@ -63,6 +69,18 @@ async function readProfileRecord(profileId: string): Promise<OmnicodeProfileReco
     throw new Error(`[omnicode] profile.json 身份不一致: ${parsed.id} != ${profileId}`);
   }
   return parsed;
+}
+
+/**
+ * [OmniCode] 批次2 B2-1（T5）：按 id 读取完整 profile 记录（含 dataBaseDirOverride）。
+ * instanceManager.doLaunch 与收养检查消费；profileId 非法/不存在时抛错或返回 undefined
+ * （与 readProfileRecord 同语义）。
+ */
+export async function getOmnicodeProfileRecord(
+  profileId: string,
+): Promise<OmnicodeProfileRecord | undefined> {
+  assertValidProfileId(profileId);
+  return readProfileRecord(profileId);
 }
 
 /** 批次1 P0-3：启动确认成功后由 instanceManager 调用；控制台重启后据此重建运行态。 */
@@ -118,12 +136,21 @@ export async function listOmnicodeProfiles(): Promise<OmnicodeProfileSummary[]> 
   return summaries;
 }
 
-export async function createOmnicodeProfile(name: string, notes?: string): Promise<OmnicodeProfileSummary> {
+export async function createOmnicodeProfile(
+  name: string,
+  notes?: string,
+  options?: { dataBaseDirOverride?: string },
+): Promise<OmnicodeProfileSummary> {
   const trimmedName = name.trim();
   if (!trimmedName) throw new Error("[omnicode] Profile 名称不能为空");
   const profileId = newProfileId();
   const profileDir = getOmnicodeProfileDir(profileId);
-  await mkdir(join(profileDir, ".zcode", "v2"), { recursive: true });
+  // 收养（批次2 B2-1）：.zcode 数据根由 override 指向旧目录，profile 自身目录只建
+  // 注册表/Chromium 存储；默认（无 override）仍建自身 .zcode/v2。
+  const dataBaseDirOverride = options?.dataBaseDirOverride?.trim() || undefined;
+  if (!dataBaseDirOverride) {
+    await mkdir(join(profileDir, ".zcode", "v2"), { recursive: true });
+  }
   await mkdir(join(profileDir, "electron-userdata"), { recursive: true });
   await mkdir(join(profileDir, "electron-session"), { recursive: true });
   const record: OmnicodeProfileRecord = {
@@ -131,6 +158,7 @@ export async function createOmnicodeProfile(name: string, notes?: string): Promi
     name: trimmedName,
     createdAt: new Date().toISOString(),
     ...(notes?.trim() ? { notes: notes.trim() } : {}),
+    ...(dataBaseDirOverride ? { dataBaseDirOverride } : {}),
   };
   await writeJsonAtomic(join(profileDir, "profile.json"), record);
   // 批次1 P2-10：目录所有权标记（防误删用户数据——只有本仓创建的目录才允许整目录删除）
@@ -183,4 +211,108 @@ export async function cloneOmnicodeProfile(sourceId: string, newName: string): P
     },
   });
   return target;
+}
+
+// ─── [OmniCode] 批次2 B2-1：旧控制台收养 + 工作区路由纯函数（spec §批次2 D7） ───
+
+/**
+ * 收养可用性（纯决策，供单测）：旧控制台数据根存在凭据文件，且尚无 profile 已指向它。
+ * 已收养过的根不再重复提示（重复收养 = 两个实例写同一 .zcode 会话库，串流事故源）。
+ */
+export function resolveOmnicodeConsoleAdoptionAvailable(
+  hasConsoleCredentials: boolean,
+  adoptedConsoleDirs: readonly string[],
+): boolean {
+  if (!hasConsoleCredentials) return false;
+  return adoptedConsoleDirs.length === 0;
+}
+
+/**
+ * 收养 profile 默认名（纯函数）：基础名被占用时追加 " 2"/" 3"/…（与 clone 的
+ * `${name} 2` 风格一致）。renderer 也可自带 localized 基础名走同一决策。
+ */
+export function nextOmnicodeAdoptionProfileName(
+  existingNames: readonly string[],
+  baseName: string,
+): string {
+  const taken = new Set(existingNames.map((name) => name.trim().toLowerCase()));
+  if (!taken.has(baseName.trim().toLowerCase())) return baseName;
+  for (let index = 2; index <= 999; index += 1) {
+    const candidate = `${baseName} ${index}`;
+    if (!taken.has(candidate.trim().toLowerCase())) return candidate;
+  }
+  return `${baseName} ${Date.now()}`;
+}
+
+/** 管理器（控制台）数据根：与 desktopDataBaseDirBootstrap/credentialBackups 同一解析规则。 */
+export function getOmnicodeConsoleDataBaseDir(): string {
+  return process.env.ZCODE_DATA_BASE_DIR?.trim() || join(homedir(), ".omnicode", "console");
+}
+
+/** 旧控制台数据根是否存在凭据文件（收养价值所在：登录态 + 历史会话）。 */
+export function hasOmnicodeConsoleCredentials(consoleDataBaseDir: string): boolean {
+  return existsSync(join(consoleDataBaseDir, ".zcode", "v2", "credentials.json"));
+}
+
+/** 是否已有 profile 的 dataBaseDirOverride 指向目标目录（路径比较归一化，防重复收养）。 */
+export async function isOmnicodeDataBaseDirAdopted(targetDir: string): Promise<boolean> {
+  const normalizedTarget = resolve(targetDir);
+  const root = getOmnicodeProfileRoot();
+  if (!existsSync(root)) return false;
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    try {
+      const record = await readProfileRecord(entry.name);
+      if (
+        record?.dataBaseDirOverride &&
+        resolve(record.dataBaseDirOverride) === normalizedTarget
+      ) {
+        return true;
+      }
+    } catch {
+      // 单个坏档不阻断判定（与 listOmnicodeProfiles 同策略）
+    }
+  }
+  return false;
+}
+
+/** 收养入口：新建 profile 零拷贝指向旧控制台数据根（名称自增避让既有 profile）。 */
+export async function adoptOmnicodeConsoleAsProfile(
+  baseName: string,
+  consoleDataBaseDir: string,
+): Promise<OmnicodeProfileSummary> {
+  const normalizedDir = resolve(consoleDataBaseDir);
+  if (!hasOmnicodeConsoleCredentials(normalizedDir)) {
+    throw new Error("[omnicode] 旧控制台数据根没有凭据文件，无需收养");
+  }
+  if (await isOmnicodeDataBaseDirAdopted(normalizedDir)) {
+    throw new Error("[omnicode] 该数据根已被收养（拒绝重复收养：两个实例写同一会话库）");
+  }
+  const profiles = await listOmnicodeProfiles();
+  const name = nextOmnicodeAdoptionProfileName(
+    profiles.map((profile) => profile.name),
+    baseName.trim() || "实例-收养",
+  );
+  return createOmnicodeProfile(name, undefined, { dataBaseDirOverride: normalizedDir });
+}
+
+/**
+ * [OmniCode] 批次2 B2-1（T4）：管理器"打开工作区"路由决策（纯函数，供单测）。
+ * 恰一实例在跑 → 直转；多实例 → 原生选择框（候选列表）；零实例 → 引导"新建并打开"。
+ */
+export type OmnicodeWorkspaceOpenRoute =
+  | { kind: "single"; profileId: string }
+  | { kind: "choose"; profileIds: string[] }
+  | { kind: "none" };
+
+export function resolveOmnicodeWorkspaceOpenRoute(
+  runningProfileIds: readonly string[],
+): OmnicodeWorkspaceOpenRoute {
+  if (runningProfileIds.length === 1) {
+    return { kind: "single", profileId: runningProfileIds[0]! };
+  }
+  if (runningProfileIds.length > 1) {
+    return { kind: "choose", profileIds: [...runningProfileIds] };
+  }
+  return { kind: "none" };
 }

@@ -144,3 +144,29 @@ export function startOmnicodeCredentialBackupScheduler(): void {
   const timer = setInterval(run, SCHEDULER_INTERVAL_MS);
   timer.unref?.();
 }
+
+// ─── [OmniCode] 批次2 B2-1（T2）：实例进程自身的凭据备份调度 ───
+
+let instanceSelfSchedulerStarted = false;
+
+/**
+ * 实例进程启动路径装配（index.ts whenReady，仅 Profile 实例身份调用）：只备份实例
+ * 自己数据根的 credentials.json（收养实例随 override 根走）。管理器的全量调度器
+ * （backupAllOmnicodeCredentials）覆盖全部 profile 目录，但管理器关闭后实例独立
+ * 存活（批次2 关闭语义），实例侧必须自带兜底调度，不因 T3 门控丢失。
+ * 与管理器侧调度器互不冲突：同一文件内容未变化时不产生新副本（unchanged 短路）。
+ * 幂等；timer unref 不阻碍退出。
+ */
+export function startOmnicodeInstanceSelfCredentialBackupScheduler(): void {
+  if (instanceSelfSchedulerStarted) return;
+  const dataBaseDir = process.env.ZCODE_DATA_BASE_DIR?.trim();
+  if (!dataBaseDir) return; // 实例身份必有该 env（profileBootstrap 五件套）；缺失即不装配
+  instanceSelfSchedulerStarted = true;
+  const credentialPath = join(dataBaseDir, ".zcode", "v2", "credentials.json");
+  const run = (): void => {
+    void backupCredentialFile(credentialPath).catch(() => undefined);
+  };
+  run();
+  const timer = setInterval(run, SCHEDULER_INTERVAL_MS);
+  timer.unref?.();
+}
