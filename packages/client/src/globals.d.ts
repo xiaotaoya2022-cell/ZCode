@@ -145,6 +145,13 @@ declare global {
         payload: import("@zcode/shared").CaptureBrowserGuestPageRequest,
       ): Promise<import("@zcode/shared").CaptureBrowserGuestPageResult>;
       // [OmniCode] Profile 多实例（spec: docs/omnicode/profile-runtime.md）
+      /**
+       * [OmniCode] 批次2 B2-1：renderer 实例身份通道（preload 同步快照，非 IPC）。
+       * null=管理器/官方进程；实例进程为白名单 profileId。旧 preload 缺席=undefined。
+       */
+      omnicodeInstanceId?: string | null;
+      /** [OmniCode] 批次2 B2-1：实例窗口标题（"ZCode [实例名]"；管理器/官方为 null）。 */
+      omnicodeInstanceTitle?: string | null;
       listOmnicodeProfiles?(): Promise<{ profiles: import("@zcode/shared").OmnicodeProfileSummaryInfo[] }>;
       createOmnicodeProfile?(payload: import("@zcode/shared").OmnicodeProfileCreateInput): Promise<{
         profile: import("@zcode/shared").OmnicodeProfileSummaryInfo;
@@ -167,6 +174,14 @@ declare global {
         ok: boolean;
         accepted: boolean;
       }>;
+      /** [OmniCode] 批次2 B2-1：检测旧控制台数据根是否可收养（仅管理器注册 handler） */
+      checkOmnicodeConsoleAdoption?(): Promise<
+        import("@zcode/shared").OmnicodeConsoleAdoptionCheckResult
+      >;
+      /** [OmniCode] 批次2 B2-1：把旧控制台数据根收养为新实例 profile（零拷贝指向） */
+      adoptOmnicodeConsole?(payload: {
+        name: string;
+      }): Promise<{ profile: import("@zcode/shared").OmnicodeProfileSummaryInfo }>;
       /** 从系统拖拽/文件输入得到的 Web File 解析真实本地路径 */
       getPathForFile?(file: File): string | null;
       /** dwf 产物「作为文件打开」：把某一版的字节落成本机副本，返回其路径 */

@@ -3,9 +3,11 @@ import { ZCODE_PRODUCT_FLAVOR } from "@zcode/shared";
 // [OmniCode] 任务栏/alt-tab 显示 document.title。index.html 的静态 title 无法按
 // 构建身份插值，这里在主入口第一时间按编译期 flavor 校正（index.html 静态值仅为
 // omnicode flavor 的初始态；preview/production 身份构建由此行覆盖回正确标题）。
+// 批次2 B2-1：实例窗口标题 = "ZCode [实例名]"（profileBootstrap 注入 env → preload
+// 透传快照）；管理器/旧 preload 回落 "OmniCode"。
 document.title =
   ZCODE_PRODUCT_FLAVOR === "omnicode"
-    ? "OmniCode"
+    ? window.zcode.omnicodeInstanceTitle?.trim() || "OmniCode"
     : ZCODE_PRODUCT_FLAVOR === "preview"
       ? "ZCode Preview"
       : "ZCode";

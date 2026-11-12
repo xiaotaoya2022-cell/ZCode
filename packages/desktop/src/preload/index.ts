@@ -39,6 +39,12 @@ function parseDeviceIdFromArgs(): string {
 // 在 contextBridge 建立之前就暴露同步值，让 renderer 在 React 渲染前就能读到
 contextBridge.exposeInMainWorld("__ZCODE_DEVICE_ID__", parseDeviceIdFromArgs());
 
+// [OmniCode] 批次2 B2-1：renderer 实例身份通道（spec profile-runtime.md D7）。preload 与
+// renderer 共享 main 注入的 env（profileBootstrap/spawn 原子注入 OMNICODE_PROFILE_ID），
+// 在 contextBridge 前解析为同步快照：null=管理器/官方进程，非空=Profile 实例。
+const omnicodeInstanceId = resolveOmnicodeInstanceIdFromEnv(process.env);
+const omnicodeInstanceTitle = process.env.OMNICODE_INSTANCE_TITLE?.trim() || null;
+
 import type {
   AppSettings,
   ApplicationIconRequest,
@@ -120,6 +126,7 @@ import {
   InternalChannels,
   PlatformChannels,
   formatZCodeRendererProcessName,
+  resolveOmnicodeInstanceIdFromEnv,
   scopedServicePortPayloadSchema,
   shouldEnableE2ETestBridge,
 } from "@zcode/shared";
@@ -371,35 +378,58 @@ contextBridge.exposeInMainWorld("zcode", {
     payload: CaptureBrowserGuestPageRequest,
   ): Promise<CaptureBrowserGuestPageResult> =>
     ipcRenderer.invoke(PlatformChannels.CaptureBrowserGuestPage, payload),
-  // [OmniCode] Profile 多实例（spec: docs/omnicode/profile-runtime.md）
-  listOmnicodeProfiles: (): Promise<{ profiles: OmnicodeProfileSummaryInfo[] }> =>
-    ipcRenderer.invoke(PlatformChannels.OmnicodeProfileList),
-  createOmnicodeProfile: (payload: OmnicodeProfileCreateInput): Promise<{ profile: OmnicodeProfileSummaryInfo }> =>
-    ipcRenderer.invoke(PlatformChannels.OmnicodeProfileCreate, payload),
-  removeOmnicodeProfile: (payload: OmnicodeProfileIdInput): Promise<{ ok: boolean }> =>
-    ipcRenderer.invoke(PlatformChannels.OmnicodeProfileRemove, payload),
-  cloneOmnicodeProfile: (payload: OmnicodeProfileCloneInput): Promise<{ profile: OmnicodeProfileSummaryInfo }> =>
-    ipcRenderer.invoke(PlatformChannels.OmnicodeProfileClone, payload),
-  launchOmnicodeProfile: (payload: OmnicodeProfileIdInput): Promise<{ pid: number }> =>
-    ipcRenderer.invoke(PlatformChannels.OmnicodeProfileLaunch, payload),
-  stopOmnicodeProfile: (payload: OmnicodeProfileIdInput): Promise<{ ok: boolean }> =>
-    ipcRenderer.invoke(PlatformChannels.OmnicodeProfileStop, payload),
-  focusOmnicodeProfile: (payload: OmnicodeProfileIdInput): Promise<{ ok: boolean }> =>
-    ipcRenderer.invoke(PlatformChannels.OmnicodeProfileFocus, payload),
-  // [OmniCode] M2 v1 平铺编排/还原（spec §实时视窗）
-  arrangeOmnicodeInstances: (): Promise<{ delivered: string[] }> =>
-    ipcRenderer.invoke(PlatformChannels.OmnicodeProfileArrange),
-  restoreOmnicodeInstances: (): Promise<{ delivered: string[] }> =>
-    ipcRenderer.invoke(PlatformChannels.OmnicodeProfileRestore),
+  // [OmniCode] 批次2 B2-1：renderer 实例身份通道（同步快照，无 IPC 往返）。
+  omnicodeInstanceId,
+  omnicodeInstanceTitle,
+  // [OmniCode] 批次2 B2-1（嵌套封死）：Profile 管理 API 仅管理器/官方进程暴露；实例
+  // renderer 的 contextBridge 面按身份裁剪（实例内没有 Profile IPC handler，暴露只会
+  // 产生"另一层管理器"的错误入口）。submitOmnicodeCallback 是实例自身的 OAuth 恢复
+  // 通道，保留。
+  ...(omnicodeInstanceId === null
+    ? {
+        // [OmniCode] Profile 多实例（spec: docs/omnicode/profile-runtime.md）
+        listOmnicodeProfiles: (): Promise<{ profiles: OmnicodeProfileSummaryInfo[] }> =>
+          ipcRenderer.invoke(PlatformChannels.OmnicodeProfileList),
+        createOmnicodeProfile: (
+          payload: OmnicodeProfileCreateInput,
+        ): Promise<{ profile: OmnicodeProfileSummaryInfo }> =>
+          ipcRenderer.invoke(PlatformChannels.OmnicodeProfileCreate, payload),
+        removeOmnicodeProfile: (payload: OmnicodeProfileIdInput): Promise<{ ok: boolean }> =>
+          ipcRenderer.invoke(PlatformChannels.OmnicodeProfileRemove, payload),
+        cloneOmnicodeProfile: (
+          payload: OmnicodeProfileCloneInput,
+        ): Promise<{ profile: OmnicodeProfileSummaryInfo }> =>
+          ipcRenderer.invoke(PlatformChannels.OmnicodeProfileClone, payload),
+        launchOmnicodeProfile: (payload: OmnicodeProfileIdInput): Promise<{ pid: number }> =>
+          ipcRenderer.invoke(PlatformChannels.OmnicodeProfileLaunch, payload),
+        stopOmnicodeProfile: (payload: OmnicodeProfileIdInput): Promise<{ ok: boolean }> =>
+          ipcRenderer.invoke(PlatformChannels.OmnicodeProfileStop, payload),
+        focusOmnicodeProfile: (payload: OmnicodeProfileIdInput): Promise<{ ok: boolean }> =>
+          ipcRenderer.invoke(PlatformChannels.OmnicodeProfileFocus, payload),
+        // [OmniCode] M2 v1 平铺编排/还原（spec §实时视窗）
+        arrangeOmnicodeInstances: (): Promise<{ delivered: string[] }> =>
+          ipcRenderer.invoke(PlatformChannels.OmnicodeProfileArrange),
+        restoreOmnicodeInstances: (): Promise<{ delivered: string[] }> =>
+          ipcRenderer.invoke(PlatformChannels.OmnicodeProfileRestore),
+        // [OmniCode] 批次2 B2-1：旧控制台收养（spec §批次2：旧控制台数据收养）
+        checkOmnicodeConsoleAdoption: (): Promise<{
+          available: boolean;
+        }> => ipcRenderer.invoke(PlatformChannels.OmnicodeConsoleAdoptionCheck),
+        adoptOmnicodeConsole: (payload: {
+          name: string;
+        }): Promise<{ profile: OmnicodeProfileSummaryInfo }> =>
+          ipcRenderer.invoke(PlatformChannels.OmnicodeConsoleAdopt, payload),
+        onOmnicodeInstanceEvent: (callback: (payload: OmnicodeInstanceEventPayload) => void) => {
+          const handler = (_event: unknown, payload: unknown) =>
+            callback(payload as OmnicodeInstanceEventPayload);
+          ipcRenderer.on(PlatformChannels.OmnicodeInstanceEvent, handler);
+          return () => ipcRenderer.removeListener(PlatformChannels.OmnicodeInstanceEvent, handler);
+        },
+      }
+    : {}),
   // [OmniCode] 失败态恢复入口：手动粘贴完整 OAuth 回调 URL，main 复用 handleDeepLink 路由
   submitOmnicodeCallback: (payload: { url: string }): Promise<{ ok: boolean; accepted: boolean }> =>
     ipcRenderer.invoke(PlatformChannels.OmnicodeSubmitCallback, payload),
-  onOmnicodeInstanceEvent: (callback: (payload: OmnicodeInstanceEventPayload) => void) => {
-    const handler = (_event: unknown, payload: unknown) =>
-      callback(payload as OmnicodeInstanceEventPayload);
-    ipcRenderer.on(PlatformChannels.OmnicodeInstanceEvent, handler);
-    return () => ipcRenderer.removeListener(PlatformChannels.OmnicodeInstanceEvent, handler);
-  },
   /** 从系统拖拽/文件输入得到的 Web File 解析真实本地路径 */
   getPathForFile: (file: File): string | null => {
     // Electron 32 起移除了非标准 File.path，renderer 不能再直接从拖拽 File 上取路径。

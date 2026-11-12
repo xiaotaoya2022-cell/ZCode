@@ -53,10 +53,13 @@ export type {
   PersistedSettingsLocaleFields,
 } from "./locale.js";
 // [OmniCode] 实例专属登录浏览器：授权 URL 形状与实例身份判定（docs/omnicode/instance-login-browser.md）
+// 批次2 B2-1 增补进程模式判据（管理器/实例/renderer 身份通道，spec profile-runtime.md D7）
 export {
   isOmnicodeAuthorizeUrl,
   isOmnicodeProfileId,
   isOmnicodeProfileInstanceEnv,
+  isOmnicodeManagerProcess,
+  resolveOmnicodeInstanceIdFromEnv,
 } from "./omnicodeAuth.js";
 export { ZCODE_VERSION, ZCODE_COMMIT, ZCODE_BUILD_TIME } from "./version.js";
 export type { HelloMessage, HelloAckMessage } from "./handshake.js";
@@ -262,6 +265,8 @@ export type {
   OmnicodeProfileCloneInput,
   OmnicodeProfileIdInput,
   OmnicodeInstanceEventPayload,
+  OmnicodeConsoleAdoptionCheckResult,
+  OmnicodeConsoleAdoptInput,
   DesktopCloseToTrayCapability,
   DesktopCommandId,
   CuaOsSupport,

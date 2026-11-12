@@ -1531,11 +1531,12 @@ function RootInner({
 
   if (credentialRecovery.state) return <CredentialStoreRecovery recovery={credentialRecovery} />;
 
-  // [OmniCode] 批次2a 控制台归位（方案 A）：omnicode flavor 主窗口永远呈现实例管理
-  // 中枢——不管主实例登录与否。控制台自身不是可干活的 ZCode 实例，登录入口移除
-  // （各 Profile 实例在自己的窗口内登录）；startup 守卫链（登录/会话恢复）对控制台
-  // 无意义，直接绕过。官方 flavor（production/preview）渲染路径与现状完全一致。
-  if (ZCODE_PRODUCT_FLAVOR === "omnicode") {
+  // [OmniCode] 批次2 B2-1：控制台归位收紧——只有「管理器」（omnicode flavor ∧ 无实例
+  // 身份）才渲染 ConsoleHome；Profile 实例（omnicodeInstanceId 非空）走正常 ZCode 根
+  // 渲染（工作台/欢迎登录屏，恢复官方路径；此前实例窗口也早返回 ConsoleHome，正是
+  // “点击启动实例打开了另一个管理器”的根因，spec profile-runtime.md §批次2 D7）。
+  // 官方 flavor（production/preview）渲染路径与现状完全一致。
+  if (ZCODE_PRODUCT_FLAVOR === "omnicode" && (platform.omnicodeInstanceId ?? null) === null) {
     return <ConsoleHome />;
   }
 

@@ -80,6 +80,8 @@ import type {
   CaptureBrowserGuestPageResult,
   OmnicodeProfileSummaryInfo,
   OmnicodeInstanceEventPayload,
+  OmnicodeConsoleAdoptionCheckResult,
+  OmnicodeConsoleAdoptInput,
   OpenInEditorOptions,
   PostUpdateReleaseNotesPayload,
   RemoteSessionClosedEvent,
@@ -270,6 +272,9 @@ export const PlatformChannels = {
   // [OmniCode] Renderer → Main：失败态恢复入口——手动粘贴完整 OAuth 回调 URL，
   // main 侧复用官方 handleDeepLink 路由（spec: docs/omnicode/instance-login-browser.md）
   OmnicodeSubmitCallback: "zcode:omnicode-submit-callback",
+  // [OmniCode] 批次2 B2-1：旧控制台收养——检测/执行（spec §批次2：旧控制台数据收养）
+  OmnicodeConsoleAdoptionCheck: "zcode:omnicode-console-adoption-check",
+  OmnicodeConsoleAdopt: "zcode:omnicode-console-adopt",
   /** Renderer → Main：用 Chromium 打印引擎把当前页面 print 媒体版面导出为 PDF */
   PrintToPdf: "zcode:print-to-pdf",
   /** Renderer → Main：检查并按需请求系统麦克风权限 */
@@ -947,6 +952,15 @@ export interface PlatformChannelMap {
   [PlatformChannels.OmnicodeSubmitCallback]: {
     request: { url: string };
     response: { ok: boolean; accepted: boolean };
+  };
+  // [OmniCode] 批次2 B2-1：旧控制台收养（检测=数据根存在凭据且未被收养；执行=新建指向旧根的 profile）
+  [PlatformChannels.OmnicodeConsoleAdoptionCheck]: {
+    request: void;
+    response: OmnicodeConsoleAdoptionCheckResult;
+  };
+  [PlatformChannels.OmnicodeConsoleAdopt]: {
+    request: OmnicodeConsoleAdoptInput;
+    response: { profile: OmnicodeProfileSummaryInfo };
   };
   [PlatformChannels.PrintToPdf]: {
     request: void;

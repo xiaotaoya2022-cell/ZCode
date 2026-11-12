@@ -438,6 +438,19 @@ export interface OmnicodeProfileIdInput {
   id: string;
 }
 
+/**
+ * [OmniCode] 批次2 B2-1：旧控制台收养（spec §批次2：旧控制台数据收养）。
+ * 检测管理器数据根（~/.omnicode/console）是否存在凭据文件——存在即提示可收养。
+ */
+export interface OmnicodeConsoleAdoptionCheckResult {
+  available: boolean;
+}
+
+/** 收养入参：新 profile 名称（renderer 按 locale 生成默认名）。 */
+export interface OmnicodeConsoleAdoptInput {
+  name: string;
+}
+
 /** [OmniCode] 控制台 main → renderer 的实例事件（缩略图帧 / 连接态）。 */
 export interface OmnicodeInstanceEventPayload {
   profileId: string;
@@ -952,6 +965,13 @@ export interface IPlatformService {
   requestSourceSettingsAttachment?(sourceServerId: string): Promise<{ attachmentId: string }>;
 
   // [OmniCode] Profile 多实例（spec: docs/omnicode/profile-runtime.md）。仅 Desktop 实现，缺席即无入口。
+  /**
+   * [OmniCode] 批次2 B2-1：renderer 实例身份通道（preload 透传 main env 的
+   * OMNICODE_PROFILE_ID；null=管理器/官方进程）。只读快照，无 IPC。
+   */
+  omnicodeInstanceId?: string | null;
+  /** [OmniCode] 批次2 B2-1：实例窗口标题（"ZCode [实例名]"，profileBootstrap 注入 env）。 */
+  omnicodeInstanceTitle?: string | null;
   listOmnicodeProfiles?(): Promise<{ profiles: OmnicodeProfileSummaryInfo[] }>;
   createOmnicodeProfile?(input: OmnicodeProfileCreateInput): Promise<{ profile: OmnicodeProfileSummaryInfo }>;
   removeOmnicodeProfile?(input: OmnicodeProfileIdInput): Promise<{ ok: boolean }>;
@@ -967,6 +987,12 @@ export interface IPlatformService {
   onOmnicodeInstanceEvent?(
     handler: (payload: OmnicodeInstanceEventPayload) => void,
   ): () => void;
+  /** [OmniCode] 批次2 B2-1：检测旧控制台数据根是否可收养（存在凭据文件且未被收养）。仅管理器 Desktop。 */
+  checkOmnicodeConsoleAdoption?(): Promise<OmnicodeConsoleAdoptionCheckResult>;
+  /** [OmniCode] 批次2 B2-1：把旧控制台数据根收养为新实例 profile（零拷贝指向）。仅管理器 Desktop。 */
+  adoptOmnicodeConsole?(
+    input: OmnicodeConsoleAdoptInput,
+  ): Promise<{ profile: OmnicodeProfileSummaryInfo }>;
 
   // [OmniCode] 实例专属登录浏览器：失败态恢复入口（手动粘贴完整 OAuth 回调 URL，spec:
   // docs/omnicode/instance-login-browser.md）。accepted=false 表示回调未被接收
