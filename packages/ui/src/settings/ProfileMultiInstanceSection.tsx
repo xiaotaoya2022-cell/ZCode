@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
-import { Copy, LayoutGrid, Maximize2, Play, RefreshCw, Square, Trash2, Undo2 } from "lucide-react";
-import { Download } from "lucide-react";
+import { Download, LayoutGrid, Maximize2, Play, RefreshCw, Square, Trash2, Copy, Undo2 } from "lucide-react";
 import type { OmnicodeProfileSummaryInfo } from "@zcode/shared";
 import { Button } from "@/components/ui/button.js";
 import { Input } from "@/components/ui/input.js";
 import { toast } from "@/components/ui/toast.js";
 import { useConfirmDialogStore } from "@/store/confirmDialogStore.js";
+import {
+  useOmnicodeConsoleInstances,
+  type OmnicodeInstanceFrame,
+} from "@/console/useOmnicodeConsoleInstances.js";
 import { usePlatform } from "@/hooks/usePlatform.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
@@ -73,80 +76,28 @@ export function useOmnicodeConsoleAdoption(options?: { onAdopted?: () => void })
 
 /**
  * OmniCode Profile 多实例管理分区（desktop-only，spec: docs/omnicode/profile-runtime.md）。
- * 列表/创建/克隆/删除/启动/停止；运行态来自控制台主进程内存注册表（重启即重建）。
- * 删除与克隆在实例运行中被主进程拒绝（PROFILE_RUNNING / 目录占用），失败经 toast 透出。
+ * 批次2 B2-3：列表/实时帧/操作链与控制台网格共用同一 hook（useOmnicodeConsoleInstances），
+ * 本组件保持设置页紧凑列表形态；缩略图按帧附带的 {w,h} 真实宽高比 letterbox。
  */
 export function ProfileMultiInstanceSection() {
   const { intl } = useZCodeIntl();
   const platform = usePlatform();
-  const requestConfirmation = useConfirmDialogStore((state) => state.requestConfirmation);
-  const [profiles, setProfiles] = useState<OmnicodeProfileSummaryInfo[]>([]);
-  const [loading, setLoading] = useState(true);
   const [newName, setNewName] = useState("");
   const [newNotes, setNewNotes] = useState("");
-  const [busy, setBusy] = useState(false);
 
-  const refresh = useCallback(async () => {
-    try {
-      const result = await platform.listOmnicodeProfiles?.();
-      setProfiles(result?.profiles ?? []);
-    } catch (error) {
-      logger.warn("[omnicode] 读取 Profile 列表失败", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [platform]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  // [OmniCode] 实例事件订阅：缩略图帧实时更新（1.4fps/实例，M2 视窗管线）
-  const [frames, setFrames] = useState<ReadonlyMap<string, string>>(new Map());
-  useEffect(() => {
-    const unsubscribe = platform.onOmnicodeInstanceEvent?.((payload) => {
-      if (payload.type === "thumbnail" && payload.frame) {
-        const profileId = payload.profileId;
-        const frame = payload.frame;
-        setFrames((previous) => {
-          const next = new Map(previous);
-          next.set(profileId, frame);
-          return next;
-        });
-      }
-      if (payload.type === "disconnected") {
-        void refresh();
-      }
-    });
-    return unsubscribe ?? (() => {});
-  }, [platform, refresh]);
-
-  const runAction = useCallback(
-    async (action: () => Promise<unknown>, successMessageId: string | null) => {
-      setBusy(true);
-      try {
-        await action();
-        if (successMessageId) {
-          toast(intl.formatMessage({ id: successMessageId }), { variant: "success" });
-        }
-        await refresh();
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        toast(
-          `${intl.formatMessage({ id: "settings.omnicodeProfiles.actionFailed" })}: ${message}`,
-          { variant: "warning" },
-        );
-        logger.warn("[omnicode] Profile 操作失败", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      } finally {
-        setBusy(false);
-      }
-    },
-    [intl, refresh],
-  );
+  const {
+    profiles,
+    loading,
+    busy,
+    frames,
+    refresh,
+    handleLaunch,
+    handleStop,
+    handleClone,
+    handleFocus,
+    handleArrange,
+    handleRemove,
+  } = useOmnicodeConsoleInstances();
 
   const handleCreate = useCallback(() => {
     const name = newName.trim();
@@ -156,132 +107,25 @@ export function ProfileMultiInstanceSection() {
       });
       return;
     }
-    void runAction(
-      () => platform.createOmnicodeProfile!({ name, notes: newNotes.trim() || undefined }),
-      "settings.omnicodeProfiles.toastCreated",
-    );
-    setNewName("");
-    setNewNotes("");
-  }, [intl, newNotes, newName, platform, runAction]);
-
-  const handleLaunch = useCallback(
-    (profile: OmnicodeProfileSummaryInfo) => {
-      // 批次1 P1-4「启动=重启」：已运行实例点击启动 = 先三段式优雅停再启动；
-      // 失败经 runAction 的 toast 透出（spec §接口 launch）。
-      void runAction(
-        () => platform.launchOmnicodeProfile!({ id: profile.id }),
-        "settings.omnicodeProfiles.toastLaunched",
-      );
-    },
-    [platform, runAction],
-  );
-
-  const handleStop = useCallback(
-    (profile: OmnicodeProfileSummaryInfo) => {
-      if (!profile.running) return;
-      void runAction(
-        () => platform.stopOmnicodeProfile!({ id: profile.id }),
-        "settings.omnicodeProfiles.toastStopped",
-      );
-    },
-    [platform, runAction],
-  );
-
-  const handleClone = useCallback(
-    (profile: OmnicodeProfileSummaryInfo) => {
-      const name = `${profile.name} 2`;
-      void runAction(
-        () => platform.cloneOmnicodeProfile!({ id: profile.id, name }),
-        "settings.omnicodeProfiles.toastCloned",
-      );
-    },
-    [platform, runAction],
-  );
-
-  const handleFocus = useCallback(
-    (profile: OmnicodeProfileSummaryInfo) => {
-      if (!profile.running) return;
-      void platform.focusOmnicodeProfile?.({ id: profile.id });
-    },
-    [platform],
-  );
-
-  // [OmniCode] M2 v1 平铺编排/还原（spec: docs/omnicode/profile-runtime.md §实时视窗）。
-  // delivered=0 通常是运行中实例尚未回连桥（如刚启动或崩溃），如实提示而非谎报成功。
-  const handleArrange = useCallback(() => {
     void (async () => {
       try {
-        const result = await platform.arrangeOmnicodeInstances?.();
-        const count = result?.delivered.length ?? 0;
-        if (count === 0) {
-          toast(intl.formatMessage({ id: "settings.omnicodeProfiles.toastArrangeNone" }), {
-            variant: "warning",
-          });
-          return;
-        }
-        toast(
-          intl.formatMessage({ id: "settings.omnicodeProfiles.toastArranged" }, { count: String(count) }),
-          { variant: "success" },
-        );
+        await platform.createOmnicodeProfile!({ name, notes: newNotes.trim() || undefined });
+        toast(intl.formatMessage({ id: "settings.omnicodeProfiles.toastCreated" }), {
+          variant: "success",
+        });
+        setNewName("");
+        setNewNotes("");
+        await refresh();
       } catch (error) {
-        logger.warn("[omnicode] 平铺编排失败", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        toast(intl.formatMessage({ id: "settings.omnicodeProfiles.actionFailed" }), {
-          variant: "warning",
-        });
+        toast(
+          `${intl.formatMessage({ id: "settings.omnicodeProfiles.actionFailed" })}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          { variant: "warning" },
+        );
       }
     })();
-  }, [intl, platform]);
-
-  const handleRestore = useCallback(() => {
-    void (async () => {
-      try {
-        const result = await platform.restoreOmnicodeInstances?.();
-        const count = result?.delivered.length ?? 0;
-        if (count === 0) {
-          toast(intl.formatMessage({ id: "settings.omnicodeProfiles.toastArrangeNone" }), {
-            variant: "warning",
-          });
-          return;
-        }
-        toast(
-          intl.formatMessage({ id: "settings.omnicodeProfiles.toastRestored" }, { count: String(count) }),
-          { variant: "success" },
-        );
-      } catch (error) {
-        logger.warn("[omnicode] 还原窗口失败", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        toast(intl.formatMessage({ id: "settings.omnicodeProfiles.actionFailed" }), {
-          variant: "warning",
-        });
-      }
-    })();
-  }, [intl, platform]);
-
-  const handleRemove = useCallback(
-    (profile: OmnicodeProfileSummaryInfo) => {
-      void (async () => {
-        const confirmed = await requestConfirmation({
-          confirmVariant: "destructive",
-          title: intl.formatMessage({ id: "settings.omnicodeProfiles.deleteConfirmTitle" }),
-          description: intl.formatMessage(
-            { id: "settings.omnicodeProfiles.deleteConfirmDescription" },
-            { name: profile.name },
-          ),
-        });
-        if (!confirmed) return;
-        await runAction(
-          () => platform.removeOmnicodeProfile!({ id: profile.id }),
-          "settings.omnicodeProfiles.toastRemoved",
-        );
-      })();
-    },
-    [intl, platform, requestConfirmation, runAction],
-  );
-
-  const runningCount = profiles.filter((profile) => profile.running).length;
+  }, [intl, newNotes, newName, platform, refresh]);
 
   // [OmniCode] 批次2 B2-1（T5）：旧控制台收养行——仅当旧数据根有凭据且未被收养时显示
   //（检测在 main；收养=新建零拷贝指向旧根的 profile，保留登录态与历史会话）。
@@ -291,6 +135,8 @@ export function ProfileMultiInstanceSection() {
   // preload 已按身份裁剪掉管理 API（window.zcode 缺席这些方法），设置页的这个分区在
   // 实例内直接不渲染（所有 hooks 已在上方无条件执行，此处 early-return 合法）。
   if (platform.omnicodeInstanceId != null) return null;
+
+  const runningCount = profiles.filter((profile) => profile.running).length;
 
   return (
     <div className="flex flex-col gap-4">
@@ -303,7 +149,7 @@ export function ProfileMultiInstanceSection() {
         <Button
           variant="outline"
           size="sm"
-          onClick={handleArrange}
+          onClick={() => handleArrange("settings.omnicodeProfiles.toastArranged")}
           disabled={busy || runningCount === 0}
           title={intl.formatMessage({ id: "settings.omnicodeProfiles.arrange" })}
         >
@@ -313,7 +159,7 @@ export function ProfileMultiInstanceSection() {
         <Button
           variant="outline"
           size="sm"
-          onClick={handleRestore}
+          onClick={() => handleArrange("settings.omnicodeProfiles.toastRestored")}
           disabled={busy || runningCount === 0}
           title={intl.formatMessage({ id: "settings.omnicodeProfiles.restore" })}
         >
@@ -374,14 +220,10 @@ export function ProfileMultiInstanceSection() {
           <ul className="flex flex-col divide-y divide-border rounded-md border border-border">
             {profiles.map((profile) => (
               <li key={profile.id} className="flex flex-col px-3 py-2">
-                {profile.running && frames.get(profile.id) ? (
-                  // [OmniCode] 实时缩略图（1.4fps JPEG；窗口隐藏时停留最后一帧）
-                  <img
-                    src={`data:image/jpeg;base64,${frames.get(profile.id)}`}
-                    alt=""
-                    className="mb-2 h-32 w-full rounded border border-border object-cover object-top"
-                  />
-                ) : null}
+                <InstanceListRowThumbnail
+                  profile={profile}
+                  frame={profile.running ? frames.get(profile.id) : undefined}
+                />
                 <div className="flex items-center gap-3">
                   <span
                     className={`inline-block size-2 shrink-0 rounded-full ${profile.running ? "bg-emerald-500" : "bg-foreground-subtlest"}`}
@@ -471,5 +313,26 @@ export function ProfileMultiInstanceSection() {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * [OmniCode] 批次2 B2-3：设置页列表行缩略图——帧附 {w,h} 时按真实宽高比 letterbox
+ *（修"显示不完整"）；缺省回退固定比例（旧实例兼容）。
+ */
+function InstanceListRowThumbnail(props: {
+  profile: OmnicodeProfileSummaryInfo;
+  frame?: OmnicodeInstanceFrame;
+}) {
+  const { profile, frame } = props;
+  if (!profile.running || !frame) return null;
+  const hasSize = frame.width !== undefined && frame.height !== undefined && frame.width > 0 && frame.height > 0;
+  return (
+    <img
+      src={`data:image/jpeg;base64,${frame.frame}`}
+      alt=""
+      style={hasSize ? { aspectRatio: `${frame.width} / ${frame.height}` } : undefined}
+      className="mb-2 h-32 w-full rounded border border-border bg-black/90 object-contain object-top"
+    />
   );
 }

@@ -4092,6 +4092,43 @@ const enUS: Record<string, string> = {
     "A new instance pointing at the previous OmniCode console data directory will be created (zero-copy). Its sign-in state and conversation history are preserved as-is.",
   "console.adoptionDefaultName": "Instance (adopted)",
   "console.adoptionToastDone": "Adopted as an instance — launch it from the list above.",
+  // [OmniCode] Batch 2 B2-3 console grid + embedded/desktop modes + preview upgrade (spec: docs/omnicode/profile-runtime.md §批次2 D9)
+  "console.toolbarNewInstance": "New instance",
+  "console.modeEmbedded": "Embedded",
+  "console.modeDesktop": "Desktop",
+  "console.modeToastEmbedded":
+    "Embedded mode: instance windows dock into their card viewports (always above the console, minimized with it).",
+  "console.modeToastDesktop":
+    "Desktop mode: instance windows are independent on the desktop; cards show a blurred preview.",
+  "console.arrangeTileDisabledTitle":
+    "Desktop mode only (in embedded mode instance windows live inside the cards — no tiling needed)",
+  "console.previewLabel": "Live preview",
+  "console.statusRunning": "Running {running}/{total}",
+  "console.gridHintEmbedded":
+    "Double-click a running card to zoom · click the viewport to interact with the instance window",
+  "console.gridHintDesktop":
+    "Desktop mode: click a card to focus its real window · tile instance windows via Arrange",
+  "console.emptyTitle": "No instances yet",
+  "console.emptyBody":
+    "An instance is a fully isolated ZCode desktop session (its own data directory, sign-in state, and workspaces), launched, previewed, and orchestrated from this window.",
+  "console.emptyCreate": "Create your first instance",
+  "console.newInstanceTitle": "New instance",
+  "console.newInstanceBody":
+    "Creates an isolated ZCode session and launches it immediately (separate data directory and sign-in state; the window is orchestrated by the console).",
+  "console.dialogCancel": "Cancel",
+  "console.createAndLaunch": "Create & launch",
+  "console.toastCreatedAndLaunched": "Instance created and launched",
+  "console.stoppedHint": "Instance stopped · click to launch",
+  "console.waitingFrame": "Waiting for instance frame…",
+  "console.desktopOverlayTitle": "Desktop mode · instance window is on the desktop",
+  "console.desktopOverlayHint": "Click the card to focus the real window",
+  "console.previewOffBadge": "Preview off",
+  "console.backToGrid": "Back to grid",
+  "console.zoomInTitle": "Zoom to single view (same as double-clicking the card)",
+  "console.moreTitle": "More actions",
+  "console.menuClone": "Clone instance",
+  "console.menuRevealDataDir": "Open data directory",
+  "console.stoppedNoZoom": "A stopped instance has no live viewport to zoom into",
   // [OmniCode] B2-2 workspace lock enforcement + read-only observer mode (spec: docs/omnicode/profile-runtime.md §批次2 D8)
   "omnicode.observer.banner":
     "Observer mode (read-only) — this workspace is in use by instance {profileId}",
