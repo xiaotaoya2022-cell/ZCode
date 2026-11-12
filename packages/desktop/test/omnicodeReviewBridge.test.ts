@@ -25,6 +25,7 @@ import {
   applyOmnicodePreviewState,
   notifyOmnicodeInstanceConnected,
   notifyOmnicodeInstanceDisconnected,
+  resolveOmnicodeOwnBackoffFilter,
   resolveOmnicodeOwnCandidates,
   resolveOmnicodeOwnedRegistrationOutcome,
 } from "../src/main/omnicode/consoleEmbedding.js";
@@ -154,5 +155,34 @@ describe("omnicode review fix P1-2 + P2-10: bridge connect reconciliation & repl
     second.close();
     await waitMs(200);
     expect(disconnected).toEqual([PROFILE_ID]);
+  });
+});
+
+// [OmniCode] B2 复审修复单测（N1/N2）：owned 设置/解除失败的退避过滤决策（纯函数）。
+describe("omnicode own backoff filter (N1/N2)", () => {
+  it("退避期内实例被挡、期外放行、无记录放行", () => {
+    const now = 1_000_000;
+    const backoff = new Map<string, number>([
+      ["backoff1111", now + 5_000], // 仍在退避期
+      ["expired2222", now - 1], // 已过期（边界：until > now 才算退避）
+    ]);
+    const { eligible, backedOff } = resolveOmnicodeOwnBackoffFilter(
+      ["backoff1111", "expired2222", "fresh3333"],
+      backoff,
+      now,
+    );
+    expect(backedOff).toEqual(["backoff1111"]);
+    expect(eligible).toEqual(["expired2222", "fresh3333"]);
+  });
+
+  it("空输入与空退避表：全部放行", () => {
+    expect(resolveOmnicodeOwnBackoffFilter([], new Map(), 0)).toEqual({
+      eligible: [],
+      backedOff: [],
+    });
+    expect(resolveOmnicodeOwnBackoffFilter(["fresh3333"], new Map(), 0)).toEqual({
+      eligible: ["fresh3333"],
+      backedOff: [],
+    });
   });
 });
