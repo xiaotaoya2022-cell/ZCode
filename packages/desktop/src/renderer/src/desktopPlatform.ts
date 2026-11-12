@@ -166,6 +166,10 @@ export function createDesktopPlatform(options: {
     browserViewScreenshotSurfaceReady: (payload) =>
       window.zcode.browserViewScreenshotSurfaceReady?.(payload),
     ...desktopBrowserPlatformBridge,
+    // [OmniCode] 批次2 B2-1：renderer 实例身份通道（preload 同步快照；旧 preload 无值时
+    // 按 null 处理——Root 的管理器判定要求"确知非实例"而非"未知"）。
+    omnicodeInstanceId: window.zcode.omnicodeInstanceId ?? null,
+    omnicodeInstanceTitle: window.zcode.omnicodeInstanceTitle ?? null,
     // [OmniCode] Profile 多实例（desktop-only 可选能力，spec: docs/omnicode/profile-runtime.md）
     ...desktopOmnicodePlatformBridge,
     onNewTask: (handler) => window.zcode.onNewTask(handler),
