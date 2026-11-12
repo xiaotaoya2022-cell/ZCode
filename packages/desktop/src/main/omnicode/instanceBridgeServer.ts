@@ -7,6 +7,10 @@
 //   退役一次性 handoff 文件，回连信息与身份同走 spawn 参数面）；
 // - token 比较用 timingSafeEqual；一个 profileId 同时只允许一条连接（后连踢前连）；
 // - 缩略图帧只投递给注册的监听者（console main 转发给 renderer）。
+// [OmniCode] 批次2 B2-3：thumbnail 帧可附内容区 {w,h}（卡片 letterbox）；hello 消息
+// 上报实例 HWND（管理器 owned-window 内嵌）；新增 embedLayout/releaseEmbed/
+// requestWindowHandle 命令（spec §批次2 D9）。管理器侧反应经 managerHooks 注入
+//（desktopProfileIpc 装配，避免 server↔consoleEmbedding 导入循环）。
 import { WebSocketServer, type WebSocket } from "ws";
 import { BrowserWindow } from "electron";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
@@ -26,17 +30,38 @@ export interface OmnicodeInstanceBridgeCommand {
     | "restoreBounds"
     // [OmniCode] 批次2 B2-1（T4）：管理器把"打开工作区"请求直转实例（实例走自身
     // 正常打开流程，尊重工作区锁）；path 为本地目录绝对路径
-    | "openWorkspace";
+    | "openWorkspace"
+    // [OmniCode] 批次2 B2-3（T2 内嵌，spec §批次2 D9）：rects=屏幕 DIP 矩形（实例按
+    // 自身 profileId 滤出并独立校验）；releaseEmbed=解除内嵌回桌面基线；
+    // requestWindowHandle=索取 hello（HWND 兜底重报）
+    | "embedLayout"
+    | "releaseEmbed"
+    | "requestWindowHandle";
   /** arrange 命令的目标矩形（父进程由 workArea 计算后下发）。 */
   bounds?: { x: number; y: number; width: number; height: number };
   /** openWorkspace 命令的工作区目录路径。 */
   path?: string;
+  /** embedLayout 命令的目标矩形集合（管理器换算屏幕 DIP 后下发，含全部内嵌实例）。 */
+  rects?: { profileId: string; x: number; y: number; width: number; height: number }[];
 }
 
 export interface OmnicodeInstanceBridgeListeners {
   onInstanceConnected?: (profileId: string) => void;
   onInstanceDisconnected?: (profileId: string) => void;
-  onThumbnail?: (profileId: string, frameBase64: string) => void;
+  onThumbnail?: (profileId: string, frameBase64: string, size?: { width: number; height: number }) => void;
+}
+
+/** 管理器侧反应钩子（desktopProfileIpc 注入：HWND 登记 / 内嵌跟接 / 预览订阅对账）。 */
+export interface OmnicodeInstanceBridgeManagerHooks {
+  onInstanceConnected?: (profileId: string) => void;
+  onInstanceDisconnected?: (profileId: string) => void;
+  onInstanceHello?: (profileId: string, hwndHex: string) => void;
+}
+
+let managerHooks: OmnicodeInstanceBridgeManagerHooks | null = null;
+
+export function setOmnicodeInstanceBridgeManagerHooks(hooks: OmnicodeInstanceBridgeManagerHooks | null): void {
+  managerHooks = hooks;
 }
 
 /** [OmniCode] 推送给全部 renderer 窗口（设置页网格订阅渲染缩略图）。 */
@@ -57,16 +82,25 @@ export function ensureOmnicodeInstanceBridgeServerStarted(): Promise<{
 }> {
   if (!startPromise) {
     startPromise = startOmnicodeInstanceBridgeServer({
-      onThumbnail: (profileId, frame) =>
-        broadcastOmnicodeInstanceEvent({ profileId, type: "thumbnail", frame }),
+      onThumbnail: (profileId, frame, size) =>
+        broadcastOmnicodeInstanceEvent({
+          profileId,
+          type: "thumbnail",
+          frame,
+          ...(size ? { width: size.width, height: size.height } : {}),
+        }),
       onInstanceConnected: (profileId) => {
         broadcastOmnicodeInstanceEvent({ profileId, type: "connected" });
         // v0：实例连上即订阅缩略图（1.4fps/实例，本地回环开销可忽略）；
-        // 按设置页可见性精化订阅是 v1 优化点。
+        // 按设置页可见性精化订阅是 v1 优化点。批次2 B2-3：管理器进程的按卡片订阅
+        // 对账经 managerHooks 即时纠正（official flavor 保持自动订阅行为不变）。
         setOmnicodeInstanceThumbnailSubscription(profileId, true);
+        managerHooks?.onInstanceConnected?.(profileId);
       },
-      onInstanceDisconnected: (profileId) =>
-        broadcastOmnicodeInstanceEvent({ profileId, type: "disconnected" }),
+      onInstanceDisconnected: (profileId) => {
+        broadcastOmnicodeInstanceEvent({ profileId, type: "disconnected" });
+        managerHooks?.onInstanceDisconnected?.(profileId);
+      },
     });
   }
   return startPromise;
@@ -127,9 +161,19 @@ export function startOmnicodeInstanceBridgeServer(
           return;
         }
         if (!parsed || typeof parsed !== "object") return;
-        const message = parsed as { type?: string; frame?: unknown };
+        const message = parsed as { type?: string; frame?: unknown; hwndHex?: unknown; width?: unknown; height?: unknown };
         if (message.type === "thumbnail" && typeof message.frame === "string") {
-          serverState?.listeners.onThumbnail?.(profileIdParam, message.frame);
+          const width = typeof message.width === "number" && message.width > 0 ? message.width : undefined;
+          const height = typeof message.height === "number" && message.height > 0 ? message.height : undefined;
+          serverState?.listeners.onThumbnail?.(
+            profileIdParam,
+            message.frame,
+            width !== undefined && height !== undefined ? { width, height } : undefined,
+          );
+          return;
+        }
+        if (message.type === "hello" && typeof message.hwndHex === "string") {
+          managerHooks?.onInstanceHello?.(profileIdParam, message.hwndHex.trim());
         }
       });
       ws.on("close", () => {
@@ -144,6 +188,11 @@ export function startOmnicodeInstanceBridgeServer(
 
 export function getOmnicodeInstanceBridgeInfo(): { port: number; token: string } | null {
   return serverState ? { port: serverState.port, token: serverState.token } : null;
+}
+
+/** 当前已回连的实例 profileId 集合（预览订阅对账/内嵌目标计算用）。 */
+export function getOmnicodeConnectedInstanceProfileIds(): string[] {
+  return [...connectionsByProfileId.keys()];
 }
 
 /** 向实例发命令；未连接返回 false。 */

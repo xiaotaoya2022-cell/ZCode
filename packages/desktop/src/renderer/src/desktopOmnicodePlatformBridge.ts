@@ -2,6 +2,10 @@
 // 与 desktopBrowserPlatformBridge 同一模式：desktopPlatform.ts 展开合入，
 // IPlatformService 上这些方法为可选，缺席（Web/旧 preload）即无入口。
 import type {
+  OmnicodeConsoleEmbedLayoutInput,
+  OmnicodeConsolePreviewStateInput,
+  OmnicodeConsoleUiState,
+  OmnicodeConsoleUiStatePatch,
   OmnicodeInstanceEventPayload,
   OmnicodeProfileCloneInput,
   OmnicodeProfileCreateInput,
@@ -59,4 +63,21 @@ export const desktopOmnicodePlatformBridge = {
     handler: (payload: OmnicodeInstanceEventPayload) => void,
   ): (() => void) =>
     window.zcode.onOmnicodeInstanceEvent?.(handler) ?? (() => {}),
+  // [OmniCode] 批次2 B2-3：控制台网格/内嵌/预览（spec §批次2 D9；缺席=官方 flavor
+  // 或旧 preload——ConsoleHome 不渲染于官方 flavor，缺席面无消费方）。
+  getOmnicodeConsoleUiState: (): Promise<OmnicodeConsoleUiState> =>
+    window.zcode.getOmnicodeConsoleUiState?.() ??
+    Promise.resolve({ mode: "embedded", previewEnabled: true }),
+  setOmnicodeConsoleUiState: (
+    payload: OmnicodeConsoleUiStatePatch,
+  ): Promise<OmnicodeConsoleUiState> =>
+    requireBridge(window.zcode.setOmnicodeConsoleUiState?.(payload)),
+  sendOmnicodeEmbedLayout: (payload: OmnicodeConsoleEmbedLayoutInput): Promise<{ ok: boolean }> =>
+    window.zcode.sendOmnicodeEmbedLayout?.(payload) ?? Promise.resolve({ ok: false }),
+  setOmnicodePreviewState: (
+    payload: OmnicodeConsolePreviewStateInput,
+  ): Promise<{ ok: boolean }> =>
+    window.zcode.setOmnicodePreviewState?.(payload) ?? Promise.resolve({ ok: false }),
+  revealOmnicodeProfileDataDir: (payload: OmnicodeProfileIdInput): Promise<{ ok: boolean }> =>
+    window.zcode.revealOmnicodeProfileDataDir?.(payload) ?? Promise.resolve({ ok: false }),
 };
