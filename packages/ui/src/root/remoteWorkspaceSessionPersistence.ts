@@ -77,6 +77,9 @@ export function buildRemoteWorkspacePersistPatch(
     .filter(isWorkspaceTab)
     .find((candidate) => buildWorkspaceSessionKey(candidate) === activeKey);
   if (!tab) return { lastActiveWorkspace: null };
+  // [OmniCode] B2-2 观察者 tab 不作为"上次活动工作区"持久化——重启后不得默认恢复成
+  // 只读查看态（恢复守卫会按当时锁态重新裁决），也不把观察目标写进官方 lastActive 语义。
+  if (tab.omnicodeObserver) return { lastActiveWorkspace: null };
   if (tab.workspaceIdentity || tab.remoteSessionId) {
     const remote = remoteSessions.find((entry) => buildWorkspaceSessionKey(entry) === activeKey);
     // 绑定仍在进行时没有可保存的远端快照；不能把远端路径写成本机目录。

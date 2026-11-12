@@ -32,7 +32,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { Hand } from "lucide-react";
+import { Eye, Hand } from "lucide-react";
 import {
   BUILTIN_MODEL_PROVIDER_IDS,
   buildCustomSupplierKey,
@@ -354,6 +354,8 @@ import { isProviderNotReadyError } from "@/lib/chatPrepareError.js";
 import { useOptionalCodingPlanUpgradeDialog } from "@/settings/CodingPlanUpgradeDialogProvider.js";
 import { setPendingSettingsSectionIntent } from "@/lib/settingsNavigation.js";
 import { useOptionalTabStore } from "@/store/TabStoreProvider.js";
+// [OmniCode] B2-2 观察者横幅：读取观察者 tab 持有者（只读打开，spec §批次2 D8）
+import { findWorkspaceObserverHolder } from "@/store/tabStore.js";
 import { useIsMobileTextInputViewport } from "@/lib/mobileTextInput.js";
 import type {
   OpenPlanDetailSideTabRequest,
@@ -2054,6 +2056,12 @@ export function SessionPane({
   );
   const codingPlanUpgradeDialog = useOptionalCodingPlanUpgradeDialog();
   const openSettingsTab = useOptionalTabStore((state) => state.openSettingsTab);
+  // [OmniCode] B2-2 观察者模式：该工作区被他实例持锁且以只读形态打开时，pane 顶部常驻横幅
+  // （spec: docs/omnicode/profile-runtime.md §批次2 D8）。只读面本身走官方 readOnly 链路
+  // （workspaceReadOnlyReason → SessionPane readOnly：会话输入禁用、Git/终端入口关闭等）。
+  const omnicodeObserverHolder = useOptionalTabStore((state) =>
+    findWorkspaceObserverHolder(state, workspacePath, workspaceIdentity),
+  );
   const billingDiscount = useCodingPlanBillingDiscountFromService(
     baseWorkspaceServices.codingPlanSubscriptionService,
   );
@@ -6664,6 +6672,21 @@ export function SessionPane({
                 })}
               </span>
             </div>
+          </div>
+        ) : null}
+        {omnicodeObserverHolder !== null ? (
+          <div
+            role="status"
+            data-testid="omnicode-observer-banner"
+            className="flex w-full shrink-0 items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-4 py-1.5 text-ui-base text-amber-700 dark:text-amber-300"
+          >
+            <Eye aria-hidden="true" className="size-4 shrink-0" />
+            <span className="min-w-0 truncate">
+              {intl.formatMessage(
+                { id: "omnicode.observer.banner" },
+                { profileId: omnicodeObserverHolder },
+              )}
+            </span>
           </div>
         ) : null}
         <ConversationHeader

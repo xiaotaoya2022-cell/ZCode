@@ -5,6 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import {
   DesktopCommandIds,
   remoteHostIdFromWorkspaceIdentity,
+  ZCODE_PRODUCT_FLAVOR,
   type AppSettings,
   type IPlatformService,
   type UserInfo,
@@ -634,6 +635,40 @@ export function useRootWorkspaceActions({
         // 但 workspaceActionError 无渲染点——toast 让对话框/拖拽/右键入口的用户可见拒绝原因。
         const code = (err as { code?: string } | null)?.code;
         if (code === "omnicode.workspace-locked-by-other") {
+          // [OmniCode] B2-2 全入口锁强制 + 只读观察者（spec §批次2 D8）：omnicode 实例内
+          // 被他实例持锁的工作区不再"toast 后静默放弃"，弹锁冲突对话框提供「只读打开」——
+          // 观察者打开不获取锁、不走 activateOrSetWorkspace（纯查看，关闭即退出，不触碰锁）。
+          // 官方 flavor / 管理器（ConsoleHome 无此流程）保持原 toast 拒绝。
+          const omnicodeInstance =
+            ZCODE_PRODUCT_FLAVOR === "omnicode" && (platform.omnicodeInstanceId ?? null) !== null;
+          if (omnicodeInstance) {
+            const data = (
+              err as { data?: { workspacePath: string; profileId: string; pid: number } } | null
+            )?.data;
+            const holderProfileId = data?.profileId ?? "unknown";
+            const openObserver = await requestConfirmation({
+              title: intl.formatMessage({ id: "omnicode.observer.dialog.title" }),
+              description: intl.formatMessage(
+                { id: "omnicode.observer.dialog.description" },
+                { profileId: holderProfileId, path },
+              ),
+              confirmLabel: intl.formatMessage({ id: "omnicode.observer.dialog.openReadonly" }),
+              cancelLabel: intl.formatMessage({ id: "omnicode.observer.dialog.cancel" }),
+            });
+            if (openObserver && isCurrent()) {
+              addTab(path, { omnicodeObserver: { holderProfileId } });
+              startDraftInWorkspace(path);
+              setWorkspaceActionError(null);
+              toast(
+                intl.formatMessage(
+                  { id: "omnicode.observer.openedToast" },
+                  { profileId: holderProfileId },
+                ),
+                { variant: "info" },
+              );
+            }
+            return;
+          }
           toast(err instanceof Error ? err.message : String(err), { variant: "warning" });
         }
       }

@@ -164,3 +164,35 @@
 **控制台工作区路由（缺陷6 收口）**：桥协议新增 `openWorkspace {path}` 命令（管理器 → 实例；实例侧经官方 `OpenWorkspacePath` 通道走自身打开流程，过 saveProject 锁守卫=尊重工作区锁）。管理器收到"打开工作区"（second-instance 参数 / zcode:// 深链 / 冷启动 argv，统一入口 `openOmnicodeManagerWorkspace`：网络路径早拒 + 目录校验 + 外部来源确认与官方同规）：恰一实例直转；多实例原生选择框（按钮列实例名）；零实例原生引导"新建并打开"——新建 profile 后以 `--omnicode-open-workspace=<path>` argv 启动，实例 bootstrap 搬运到 `OMNICODE_OPEN_WORKSPACE` env，whenReady 后经官方 handleOpenWorkspacePath 队列投递。OAuth 回调维持既有投递文件中继，不动。
 
 **旧控制台数据收养（保登录态）**：profile 记录新增可选 `dataBaseDirOverride`——`.zcode` 数据根（凭据/会话库/setting.json/credential-secret）指向旧 `~/.omnicode/console` 目录，**零拷贝**；electron-userdata/session 仍用 profile 自身目录（auth 分区重建即可）。双端同源：instanceManager.doLaunch 的 spawn env 与 profileBootstrap 的自派生 env 都读同一 profile.json。收养入口：ConsoleHome 列表区一行「将原主实例收养为实例（保留登录与历史）」，仅当旧根存在 credentials.json 且无 profile 已指向（重复收养=两实例写同一会话库，拒绝）；名称自增避让（`实例-收养`/`实例-收养 2`…）。UI 状态与处理函数为可复用导出（`useOmnicodeConsoleAdoption`，B2-3 重做控制台时直接复用）。克隆不携带 override（克隆体已有自身 .zcode 拷贝，共享 override 会复刻串流事故）。
+
+## 批次2 B2-2：工作区锁全入口强制 + 只读观察者模式（D8，2026-11-12）
+
+### 锁强制语义（全入口）
+
+- **守卫门控**：saveProject 打开锁守卫与 `attachWorkspaceLockCoordinator` 仅在 **omnicode flavor ∧ 非管理器模式** 生效（`ZCODE_PRODUCT_FLAVOR === "omnicode" && OMNICODE_CONSOLE_MODE !== "1"`，node.ts）。官方 flavor（production/preview）本批起**不再查锁**——批次1 官方侧随环境共享锁目录的查锁行为收窄为 omnicode 专属（官方构建零影响铁律）；管理器不打开工作区（B2-1 D7 语义保持，双保险）。
+- **saveProject 全形态**：守卫从 `reuseExistingRoot ∧ 单根` 扩展为**全部带本地 roots 的形态**（本地 = 无 hostId 或 hostId==="local"；多根/项目编辑器新建/加根均覆盖）——roots 任一目录被他实例持有即整体抛 `omnicode.workspace-locked-by-other`（进入前拒绝、无半打开）。无 roots 的元数据更新（置顶/改名）不拦；远程 hostId 不锁（M1 范围）。
+- **入口核对表**（全部收敛到 saveProject 守卫或 restore 预检）：
+  - 目录对话框 / Ctrl+O / 拖拽 / 项目根行 / 系统右键 / recent → renderer `handleSelectProject` → `saveProject(reuseExistingRoot)` → 守卫；
+  - 项目编辑器（新建项目/加根，多根形态）→ `saveProject(roots)` → 守卫（本批新增覆盖）；
+  - deep-link / second-instance `OpenWorkspacePath` → `handleSelectProject` → 守卫；
+  - B2-1 桥 `openWorkspace` 命令 → 实例侧官方 `OpenWorkspacePath` 通道 → `handleSelectProject` → 守卫；
+  - 管理器路由的 `--omnicode-open-workspace` 冷启动 → 官方 handleOpenWorkspacePath 队列 → 同上；
+  - **restoreSession（本批补齐的缺口）**：恢复不经 saveProject——Root 的 `restorePersistedSession` 包装层先查锁（数据源 = 既有 `readTree` 的 `omnicodeWorkspaceLocks` 装饰，`ownedBySelf` 以 Host env 身份判定），被他实例持有的本地工作区从恢复集合剔除（lastActiveWorkspace 置 null / lastWorkspaceSession 过滤）+ Toast 拒绝；预检失败 **fail-open**（退回旧"恢复+灰显"软语义，不能因预检故障导致全部工作区打不开）。不新增 RPC 方法（IProjectService 已满 12 方法上限，架构门禁）。
+- **协调器语义不变**：锁获取仍由 `openLocalWorkspaces` 集合对账驱动（新增获取/消失释放/10s 心跳/pid 自愈）；获取判负仍转竞争集合重试（不阻断打开流程本身——阻断在 saveProject 守卫完成），关 tab/切会话锁随集合释放。
+
+### 只读观察者模式（用户拍板"子代理式观察者"）
+
+- **入口**：锁冲突对话框（`handleSelectProject` 捕获结构化错误后，omnicode 实例内弹确认框）提供「只读打开」；官方 flavor / 管理器保持纯 toast 拒绝。
+- **标记传递链路**：`tabStore` 工作区 tab 记录字段 `omnicodeObserver?: { holderProfileId: string }`（addTab options 注入；**不持久化**——`buildPersistedWorkspaceSessionEntries` / `buildRemoteWorkspacePersistPatch`（lastActiveWorkspace）/ `collectOpenLocalWorkspacePaths`（锁集合事实源）三处均排除观察者 tab，重启后由 restore 预检重新裁决）。观察者打开不调 saveProject（被占用工作区必然已在共享注册表/本实例项目库中）、不走 `activateOrSetWorkspace`（纯查看，留在当前窗口）。
+- **受限面（诚实清单）**：观察者 tab 经 `isWorkspaceReadOnly` 进入官方 readOnly 链路（`workspaceReadOnlyReason` → SessionPane `readOnly`），由此获得：①会话输入禁用（composer 不渲染，原输入区显示观察者原因）②agent 命令 / 重试 / 编辑 / 副屏会话 / 文件拖入会话全部禁用 ③新建任务、Git 面板、终端等入口按官方 readOnly IfWritable 拦截 ④文件树本身为只读导航树（open/reveal/copy/另存副本导出，**无新建/重命名/删除/上传操作可禁**——官方桌面 UI 不存在这些操作，如实记录而非虚构禁用面）。
+- **退出语义**：关闭观察者 tab = 纯查看退出，不触碰任何锁（观察者从未持锁、不在锁集合）。
+- **横幅**：SessionPane 顶部常驻琥珀色横幅「观察者模式（只读）— 该工作区正被 <实例 profileId> 使用」（i18n en/zh，`omnicode.observer.*`）。
+
+### 已知缺口（如实记录，不虚报全只读）
+
+1. **持有者展示为 profileId**：锁文件只存 profileId；实例显示名注册表在管理器进程，实例 renderer 无跨 profile 查询通道——横幅/对话框显示 profileId（与批次1 task-row 灰显文案同口径）。ConsoleHome 锁卡片显示实例名归 B2-3。
+2. **观察者的会话列表/任务行仍可点击查看**（读路径）；官方 readOnly 只封写路径——查看是观察者模式的目的，非缺口；但 task-row 的"addToChat"（文件加入会话草稿）在 composer 隐藏后属死按钮，未单独禁用（本地草稿写，不触碰工作区 FS）。
+3. **外部编辑器写**：文件树"用编辑器打开/系统文件管理器"在外部进程写工作区文件——应用内锁无法约束外部进程（与批次1 相同边界）。
+4. **restore 预检路径归一**：Host 锁条目存 resolve 后路径，renderer 以大小写不敏感+去尾分隔符宽松归一比对；跨盘符大小写差异漏筛时退化为旧"恢复+灰显"软语义（fail-open，不产生双开硬拒绝缺口——灰显 tab 本身不可进入）。
+5. **persistSession 窗口期（批次1 已知，保持）**：恢复完成到 renderer 首次写回 `openLocalWorkspaces` 之间，协调器只持 lastActiveWorkspace 单活动锁；全集锁待首次写回补齐（单测锁定该现状语义）。
+6. **task-row 灰显项不提供观察者入口**（点击保持拒绝+提示）；观察者入口只在打开流（对话框/拖拽/recent/deep-link/桥）的锁冲突对话框。
