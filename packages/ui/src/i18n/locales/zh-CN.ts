@@ -2701,7 +2701,7 @@ const zhCN: Record<string, string> = {
   "workspaceSidebar.unavailableLocalDirectory":
     "工作区目录不存在或无法访问，当前仅可查看历史记录。恢复该目录后重启 ZCode 即可继续使用。",
   // [OmniCode] 工作区被其他实例锁定（互斥锁，spec: docs/omnicode/profile-runtime.md）
-  "workspaceSidebar.omnicodeLockedBy": "该工作区正被另一个实例占用（{profileId}），请先在那个实例里关闭它。",
+  "workspaceSidebar.omnicodeLockedBy": "该工作区正被另一个实例（{name}）占用，请先在那个实例里关闭它。",
   "workspaceSidebar.toggleSidebar": "切换侧边栏",
   "workspaceSidebar.resizeSidebar": "调整侧边栏宽度",
   "workspaceSidebar.showFileTree": "查看文件",
@@ -3866,17 +3866,22 @@ const zhCN: Record<string, string> = {
   "console.menuRevealDataDir": "打开数据目录",
   "console.stoppedNoZoom": "已停止的实例没有可放大的实况画面",
   // [OmniCode] B2-2 工作区锁强制 + 只读观察者模式（spec: docs/omnicode/profile-runtime.md §批次2 D8）
-  "omnicode.observer.banner": "观察者模式（只读）— 该工作区正被实例 {profileId} 使用",
+  // B2 评审修复（C5）：插值改为实例名 {name}（锁文件 displayName 优先，缺省回退 profileId）
+  "omnicode.observer.banner": "观察者模式（只读）— 该工作区正被实例 {name} 使用",
   "omnicode.observer.readOnlyReason":
-    "观察者模式（只读）：该工作区正被另一实例（{profileId}）持有，发送消息与文件写入已禁用。",
+    "观察者模式（只读）：该工作区正被另一实例（{name}）持有，发送消息与文件写入已禁用。",
   "omnicode.observer.dialog.title": "工作区被其他实例占用",
   "omnicode.observer.dialog.description":
-    "工作区 {path} 正在实例 {profileId} 中打开。同时在此打开会导致会话数据损坏。可以选择以观察者身份只读打开（仅查看：不获取锁、不可编辑）。",
+    "工作区 {path} 正在实例 {name} 中打开。同时在此打开会导致会话数据损坏。可以选择以观察者身份只读打开（仅查看：不获取锁、不可编辑）。",
   "omnicode.observer.dialog.openReadonly": "只读打开",
   "omnicode.observer.dialog.cancel": "取消",
-  "omnicode.observer.openedToast": "已以观察者模式（只读）打开——持有者：实例 {profileId}。",
+  "omnicode.observer.openedToast": "已以观察者模式（只读）打开——持有者：实例 {name}。",
   "omnicode.observer.restoreRejected":
-    "未恢复工作区 {path}：正被另一实例（{profileId}）占用。",
+    "未恢复工作区 {path}：正被另一实例（{name}）占用。",
+  // [OmniCode] B2 评审修复（P1-4 混部告知层）：官方 ZCode 打开被 OmniCode 实例持锁的
+  // 工作区时的纯告知 Toast（不查锁不拦截，官方零影响铁律不变）
+  "omnicode.mixDeploy.lockedToast":
+    "该工作区正被 OmniCode 实例 {name} 使用，并发写入有导致会话数据损坏的风险，请避免同时编辑。",
   "welcome.omnicodeInstancesHint":
     "创建独立实例并启动并行工作；每个实例有自己的登录态与数据，互不串扰。",
   "welcome.loginToggle": "连接账号以使用主实例（可选）",

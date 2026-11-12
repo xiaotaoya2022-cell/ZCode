@@ -158,9 +158,9 @@ async function filterOmnicodeLockedWorkspacesFromRestore(
   options: {
     isOmnicodeInstance: boolean;
     readLockedWorkspaces?: () => Promise<
-      Array<{ workspacePath: string; profileId: string; ownedBySelf: boolean }>
+      Array<{ workspacePath: string; profileId: string; ownedBySelf: boolean; displayName?: string }>
     >;
-    notifyLocked: (workspacePath: string, ownerProfileId: string) => void;
+    notifyLocked: (workspacePath: string, ownerProfileId: string, ownerDisplayName?: string) => void;
   },
 ): Promise<AppSettings> {
   const { isOmnicodeInstance, readLockedWorkspaces, notifyLocked } = options;
@@ -173,7 +173,12 @@ async function filterOmnicodeLockedWorkspacesFromRestore(
     ),
   ];
   if (localPaths.length === 0) return settings;
-  let lockDecorations: Array<{ workspacePath: string; profileId: string; ownedBySelf: boolean }>;
+  let lockDecorations: Array<{
+    workspacePath: string;
+    profileId: string;
+    ownedBySelf: boolean;
+    displayName?: string;
+  }>;
   try {
     lockDecorations = await readLockedWorkspaces();
   } catch {
@@ -185,7 +190,9 @@ async function filterOmnicodeLockedWorkspacesFromRestore(
     path.replace(/[\\/]+$/, "").toLowerCase();
   const lockedKeys = new Set(lockedByOther.map((entry) => normalizeForCompare(entry.workspacePath)));
   const isLockedPath = (path: string): boolean => lockedKeys.has(normalizeForCompare(path));
-  for (const entry of lockedByOther) notifyLocked(entry.workspacePath, entry.profileId);
+  for (const entry of lockedByOther) {
+    notifyLocked(entry.workspacePath, entry.profileId, entry.displayName);
+  }
   const next = { ...settings };
   if (
     next.lastActiveWorkspace &&
@@ -978,11 +985,14 @@ function RootInner({
           const tree = await services.projectService?.readTree();
           return [...(tree?.omnicodeWorkspaceLocks ?? [])];
         },
-        notifyLocked: (workspacePath, ownerProfileId) => {
+        notifyLocked: (workspacePath, ownerProfileId, ownerDisplayName) => {
           toast(
             intl.formatMessage(
               { id: "omnicode.observer.restoreRejected" },
-              { path: workspacePath, profileId: ownerProfileId },
+              {
+                path: workspacePath,
+                name: ownerDisplayName?.trim() || ownerProfileId,
+              },
             ),
             { variant: "warning" },
           );

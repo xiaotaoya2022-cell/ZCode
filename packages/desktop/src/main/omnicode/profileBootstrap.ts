@@ -71,6 +71,11 @@ function injectIdentityEnv(profileId: string, profileDir: string): void {
   // env 快照设置 document.title）。读不到名称时留空由 renderer 回落 "OmniCode"。
   const displayName = record?.name?.trim();
   process.env.OMNICODE_INSTANCE_TITLE = displayName ? `ZCode [${displayName}]` : "";
+  // [OmniCode] B2 评审修复（C5）：实例显示名单独暴露（Host utilityProcess 经 env 继承），
+  // 工作区锁协调器获取锁时把它写进锁文件——锁提示展示实例名而非 profileId。与
+  // OMNICODE_INSTANCE_TITLE 同源（profile.json 的 name），读不到时留空（锁文件不含
+  // 该字段，消费方回退 profileId）。
+  process.env.OMNICODE_PROFILE_NAME = displayName ?? "";
   // [OmniCode] 凭据密钥固化（环境隔离根治方案）：数据根内固化独立密钥文件并注入
   // ZCODE_CREDENTIAL_SECRET → 凭据加密完全脱离 OS keyring 与 homedir 派生。
   // Profile legacy 密文无缝兼容（fallback 候选仍在 legacyKeyCandidates 列表）；

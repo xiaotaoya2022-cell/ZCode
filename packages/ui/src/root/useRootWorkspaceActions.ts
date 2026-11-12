@@ -548,6 +548,36 @@ export function useRootWorkspaceActions({
     userId,
   ]);
 
+  // [OmniCode] B2 评审修复（P1-4 混部告知层，纯告知不拦截）：官方 ZCode 与 OmniCode 并排
+  // 安装时，官方进程打开一个正被 OmniCode 实例持锁的工作区——官方无锁语义（零影响铁律），
+  // 但并发写会话文件有实害（撕裂/投影不同步）。锁事实复用 readTree 的 omnicodeWorkspaceLocks
+  // 装饰（批次1 既有通道，官方 Host 同样返回；锁目录由 OmniCode 创建，纯官方环境无此目录
+  // → 查询自然为空、零打扰）。查询失败静默（告知层不得影响打开流程）。
+  const notifyOfficialMixDeployLockHint = useCallback(
+    async (path: string) => {
+      try {
+        const tree = await services.projectService?.readTree();
+        const locks = tree?.omnicodeWorkspaceLocks ?? [];
+        const normalized = path.replace(/[\\/]+$/, "").toLowerCase();
+        const held = locks.find(
+          (lock) =>
+            !lock.ownedBySelf &&
+            lock.workspacePath.replace(/[\\/]+$/, "").toLowerCase() === normalized,
+        );
+        if (!held) return;
+        toast(
+          intl.formatMessage({ id: "omnicode.mixDeploy.lockedToast" }, {
+            name: held.displayName?.trim() || held.profileId,
+          }),
+          { variant: "warning" },
+        );
+      } catch {
+        // 告知层失败静默：不能因锁目录读取失败影响官方打开流程
+      }
+    },
+    [intl, services.projectService],
+  );
+
   const handleSelectProject = useCallback(
     async (path: string, activateOtherWindow = true) => {
       logger.info("[Root] handleSelectProject called with path:", path);
@@ -621,12 +651,24 @@ export function useRootWorkspaceActions({
         }
 
         // 新增 tab（如果已在本窗口打开则激活它）
+        // [OmniCode] B2 评审修复（P1-1）：锁守卫已放行 = 本实例将以可写形态持有该工作区。
+        // 若本窗口此前以观察者（只读）打开过同路径 tab，必须先清除观察者标记——
+        // 否则 mergeWorkspaceTabOptions 保留 omnicodeObserver（tab 永远只读），且该
+        // 工作区因观察者标记不进 openLocalWorkspaces 锁集合（第三实例可再打开=双开）。
+        tabStoreApi.getState().clearOmnicodeObserver(path);
         addTab(path);
         // 打开 workspace 是 workspace-only 意图，不是“继续上次会话”。
         // 即使命中已存在 tab，也必须清掉该 workspace 的 activeTaskId 并回到单 pane 草稿。
         startDraftInWorkspace(path, undefined, projectId ? { projectId } : undefined);
         setWorkspaceActionError(null);
         logger.info("[Root] 已打开目录", { path, projectId });
+        // [OmniCode] B2 评审修复（P1-4 混部告知层）：官方 flavor 不查锁不拦截（官方零
+        // 影响铁律），但共享锁目录若显示该工作区正被 OmniCode 实例持有，则 Toast 告知
+        // 并发写入风险（纯只读查询、失败静默）。omnicode flavor 的同场景由上方锁守卫
+        // 结构化拒绝接管，不走此分支。
+        if (ZCODE_PRODUCT_FLAVOR !== "omnicode" && isDesktop) {
+          void notifyOfficialMixDeployLockHint(path);
+        }
       } catch (err) {
         if (!isCurrent()) return;
         logger.error("[Root] handleSelectProject error:", err);
@@ -643,27 +685,37 @@ export function useRootWorkspaceActions({
             ZCODE_PRODUCT_FLAVOR === "omnicode" && (platform.omnicodeInstanceId ?? null) !== null;
           if (omnicodeInstance) {
             const data = (
-              err as { data?: { workspacePath: string; profileId: string; pid: number } } | null
+              err as {
+                data?: { workspacePath: string; profileId: string; pid: number; displayName?: string };
+              } | null
             )?.data;
             const holderProfileId = data?.profileId ?? "unknown";
+            // [OmniCode] B2 评审修复（C5）：锁文件携带持有者显示名，展示优先、缺省回退 profileId
+            const holderDisplayName =
+              typeof data?.displayName === "string" && data.displayName.trim()
+                ? data.displayName.trim()
+                : undefined;
+            const holderLabel = holderDisplayName ?? holderProfileId;
             const openObserver = await requestConfirmation({
               title: intl.formatMessage({ id: "omnicode.observer.dialog.title" }),
               description: intl.formatMessage(
                 { id: "omnicode.observer.dialog.description" },
-                { profileId: holderProfileId, path },
+                { name: holderLabel, path },
               ),
               confirmLabel: intl.formatMessage({ id: "omnicode.observer.dialog.openReadonly" }),
               cancelLabel: intl.formatMessage({ id: "omnicode.observer.dialog.cancel" }),
             });
             if (openObserver && isCurrent()) {
-              addTab(path, { omnicodeObserver: { holderProfileId } });
+              addTab(path, {
+                omnicodeObserver: {
+                  holderProfileId,
+                  ...(holderDisplayName ? { holderDisplayName } : {}),
+                },
+              });
               startDraftInWorkspace(path);
               setWorkspaceActionError(null);
               toast(
-                intl.formatMessage(
-                  { id: "omnicode.observer.openedToast" },
-                  { profileId: holderProfileId },
-                ),
+                intl.formatMessage({ id: "omnicode.observer.openedToast" }, { name: holderLabel }),
                 { variant: "info" },
               );
             }
@@ -676,6 +728,7 @@ export function useRootWorkspaceActions({
     [
       addTab,
       intl,
+      notifyOfficialMixDeployLockHint,
       onOpenRemoteConnection,
       platform,
       requestConfirmation,

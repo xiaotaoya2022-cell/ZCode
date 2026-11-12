@@ -68,9 +68,10 @@ export function useProjectTree(isDesktop = false) {
   // 按 Host 的最近一次项目读取失败；只作展示投影，不落盘，下一次成功读取即清除。
   const [hostReadErrors, setHostReadErrors] = useState<ReadonlyMap<string, string>>(new Map());
   // [OmniCode] 跨实例工作区锁（readTree 装饰，spec: docs/omnicode/profile-runtime.md）；
-  // key = Host 规范化 workspacePath，value = { profileId, ownedBySelf }。
+  // key = Host 规范化 workspacePath，value = { profileId, ownedBySelf, displayName? }。
+  // displayName（B2 评审修复 C5）= 持有者实例显示名，灰显提示优先展示、缺省回退 profileId。
   const [workspaceLocks, setWorkspaceLocks] = useState<
-    ReadonlyMap<string, { profileId: string; ownedBySelf: boolean }>
+    ReadonlyMap<string, { profileId: string; ownedBySelf: boolean; displayName?: string }>
   >(new Map());
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -211,7 +212,11 @@ export function useProjectTree(isDesktop = false) {
             new Map(
               (result.tree.omnicodeWorkspaceLocks ?? []).map((lock) => [
                 lock.workspacePath,
-                { profileId: lock.profileId, ownedBySelf: lock.ownedBySelf },
+                {
+                  profileId: lock.profileId,
+                  ownedBySelf: lock.ownedBySelf,
+                  ...(lock.displayName ? { displayName: lock.displayName } : {}),
+                },
               ]),
             ),
           );

@@ -49,6 +49,11 @@ export interface ProjectTree {
     profileId: string;
     /** 是否被当前实例持有（同实例多窗口不灰显） */
     ownedBySelf: boolean;
+    /**
+     * [OmniCode] B2 评审修复（C5）：持有方实例显示名（锁文件携带）。
+     * 老锁文件缺省 → 消费方回退 profileId 展示。
+     */
+    displayName?: string;
   }>;
 }
 

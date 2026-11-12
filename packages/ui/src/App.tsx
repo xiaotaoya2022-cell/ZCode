@@ -20,7 +20,12 @@ import { useWorkspaceProviderConfigFile } from "@/hooks/useWorkspaceProviderConf
 import { useWorkspaceActiveTaskState } from "@/hooks/useWorkspaceActiveTaskState.js";
 import { useEnsureWorkspaceMcpLoaded } from "@/hooks/useEnsureWorkspaceMcpLoaded.js";
 import { useTabStore, useTabStoreApi } from "@/store/TabStoreProvider.js";
-import { isWorkspaceReadOnly, isWorkspaceTab, findWorkspaceObserverHolder } from "@/store/tabStore.js";
+import {
+  isWorkspaceReadOnly,
+  isWorkspaceTab,
+  findWorkspaceObserverHolder,
+  omnicodeObserverHolderLabel,
+} from "@/store/tabStore.js";
 import type { TaskChatMessage as TestChatMessage } from "@/lib/taskChatMessageTypes.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
@@ -228,7 +233,7 @@ export function App({
     ? omnicodeObserverHolder !== null
       ? intl.formatMessage(
           { id: "omnicode.observer.readOnlyReason" },
-          { profileId: omnicodeObserverHolder },
+          { name: omnicodeObserverHolderLabel(omnicodeObserverHolder) },
         )
       : intl.formatMessage({ id: "workspaceSidebar.unavailableLocalDirectory" })
     : undefined;

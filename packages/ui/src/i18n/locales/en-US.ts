@@ -2912,7 +2912,7 @@ const enUS: Record<string, string> = {
     "The workspace directory does not exist or cannot be accessed. You can only view history for now. Restore the directory and restart ZCode to continue.",
   // [OmniCode] Workspace locked by another instance (mutual exclusion, spec: docs/omnicode/profile-runtime.md)
   "workspaceSidebar.omnicodeLockedBy":
-    "This workspace is currently open in another instance ({profileId}). Close it there first.",
+    "This workspace is currently open in another instance ({name}). Close it there first.",
   "workspaceSidebar.toggleSidebar": "Toggle sidebar",
   "workspaceSidebar.resizeSidebar": "Resize sidebar",
   "workspaceSidebar.showFileTree": "Show files",
@@ -4130,19 +4130,24 @@ const enUS: Record<string, string> = {
   "console.menuRevealDataDir": "Open data directory",
   "console.stoppedNoZoom": "A stopped instance has no live viewport to zoom into",
   // [OmniCode] B2-2 workspace lock enforcement + read-only observer mode (spec: docs/omnicode/profile-runtime.md §批次2 D8)
+  // Review fix (C5): interpolate the instance display name ({name}; falls back to profileId)
   "omnicode.observer.banner":
-    "Observer mode (read-only) — this workspace is in use by instance {profileId}",
+    "Observer mode (read-only) — this workspace is in use by instance {name}",
   "omnicode.observer.readOnlyReason":
-    "Observer mode (read-only): this workspace is currently held by another instance ({profileId}). Sending messages and file writes are disabled.",
+    "Observer mode (read-only): this workspace is currently held by another instance ({name}). Sending messages and file writes are disabled.",
   "omnicode.observer.dialog.title": "Workspace locked by another instance",
   "omnicode.observer.dialog.description":
-    "The workspace {path} is currently open in instance {profileId}. Opening it here at the same time can corrupt session data. You can open it read-only as an observer (view only — no lock is taken, nothing can be edited).",
+    "The workspace {path} is currently open in instance {name}. Opening it here at the same time can corrupt session data. You can open it read-only as an observer (view only — no lock is taken, nothing can be edited).",
   "omnicode.observer.dialog.openReadonly": "Open read-only",
   "omnicode.observer.dialog.cancel": "Cancel",
   "omnicode.observer.openedToast":
-    "Opened in observer mode (read-only) — held by instance {profileId}.",
+    "Opened in observer mode (read-only) — held by instance {name}.",
   "omnicode.observer.restoreRejected":
-    "Workspace {path} was not restored: it is held by another instance ({profileId}).",
+    "Workspace {path} was not restored: it is held by another instance ({name}).",
+  // [OmniCode] Review fix (P1-4 mixed deployment notice): pure informational toast shown by
+  // official ZCode when opening a workspace held by an OmniCode instance (no lock, no block)
+  "omnicode.mixDeploy.lockedToast":
+    "This workspace is in use by OmniCode instance {name}. Concurrent writes can corrupt session data — avoid editing it in both apps at once.",
   "welcome.omnicodeInstancesHint":
     "Create isolated instances and run them in parallel; each has its own login state and data.",
   "welcome.loginToggle": "Sign in to use the main instance (optional)",

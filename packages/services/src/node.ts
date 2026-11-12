@@ -2440,6 +2440,9 @@ export function createLocalServices(options: {
             .flatMap((project) => project.roots.map((root) => root.rootPath));
         },
         profileId: process.env.OMNICODE_PROFILE_ID?.trim() || "default",
+        // [OmniCode] B2 评审修复（C5）：实例显示名（profileBootstrap 注入，spawn env 双保险）
+        // 随锁写入锁文件——锁提示展示实例名，老链路（无该 env）缺省回退 profileId。
+        displayName: process.env.OMNICODE_PROFILE_NAME?.trim() || undefined,
         pid: process.pid,
       });
   const taskGroupService = createTaskGroupService({

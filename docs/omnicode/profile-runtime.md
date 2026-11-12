@@ -183,14 +183,17 @@
 ### 只读观察者模式（用户拍板"子代理式观察者"）
 
 - **入口**：锁冲突对话框（`handleSelectProject` 捕获结构化错误后，omnicode 实例内弹确认框）提供「只读打开」；官方 flavor / 管理器保持纯 toast 拒绝。
-- **标记传递链路**：`tabStore` 工作区 tab 记录字段 `omnicodeObserver?: { holderProfileId: string }`（addTab options 注入；**不持久化**——`buildPersistedWorkspaceSessionEntries` / `buildRemoteWorkspacePersistPatch`（lastActiveWorkspace）/ `collectOpenLocalWorkspacePaths`（锁集合事实源）三处均排除观察者 tab，重启后由 restore 预检重新裁决）。观察者打开不调 saveProject（被占用工作区必然已在共享注册表/本实例项目库中）、不走 `activateOrSetWorkspace`（纯查看，留在当前窗口）。
+- **观察者 → 可写升级（B2 评审修复 P1-1）**：锁释放后同一工作区再走正常打开（saveProject 守卫放行）时，`handleSelectProject` 成功分支先调 `tabStore.clearOmnicodeObserver(path)` 清除观察者标记再 addTab——否则 merge 语义（`options?.omnicodeObserver ?? tab.omnicodeObserver`）会让 tab 永远保持只读，且该工作区因观察者标记不进 `openLocalWorkspaces` 锁集合（第三实例可再打开 = 双开）。清除后锁集合采集（useTabPersistence 300ms debounce 写回）恢复包含该工作区。
+- **标记传递链路**：`tabStore` 工作区 tab 记录字段 `omnicodeObserver?: { holderProfileId: string; holderDisplayName?: string }`（addTab options 注入；**不持久化**——`buildPersistedWorkspaceSessionEntries` / `buildRemoteWorkspacePersistPatch`（lastActiveWorkspace）/ `collectOpenLocalWorkspacePaths`（锁集合事实源）三处均排除观察者 tab，重启后由 restore 预检重新裁决）。观察者打开不调 saveProject（被占用工作区必然已在共享注册表/本实例项目库中）、不走 `activateOrSetWorkspace`（纯查看，留在当前窗口）。
 - **受限面（诚实清单）**：观察者 tab 经 `isWorkspaceReadOnly` 进入官方 readOnly 链路（`workspaceReadOnlyReason` → SessionPane `readOnly`），由此获得：①会话输入禁用（composer 不渲染，原输入区显示观察者原因）②agent 命令 / 重试 / 编辑 / 副屏会话 / 文件拖入会话全部禁用 ③新建任务、Git 面板、终端等入口按官方 readOnly IfWritable 拦截 ④文件树本身为只读导航树（open/reveal/copy/另存副本导出，**无新建/重命名/删除/上传操作可禁**——官方桌面 UI 不存在这些操作，如实记录而非虚构禁用面）。
 - **退出语义**：关闭观察者 tab = 纯查看退出，不触碰任何锁（观察者从未持锁、不在锁集合）。
-- **横幅**：SessionPane 顶部常驻琥珀色横幅「观察者模式（只读）— 该工作区正被 <实例 profileId> 使用」（i18n en/zh，`omnicode.observer.*`）。
+- **持有者展示实例名（B2 评审修复，兑现 C5）**：锁文件携带 `displayName`（实例名）——profileBootstrap 注入 `OMNICODE_PROFILE_NAME` env（与 `OMNICODE_INSTANCE_TITLE` 同源于 profile.json；spawn env 双保险），锁协调器获取锁时写入锁文件；锁查询返回的 owner / readTree 装饰 / `workspace-locked-by-other` 结构化错误 data 均携带。横幅 / 锁冲突对话框 / toast / task-row 灰显 / restore 拒绝全部插值实例名（displayName 优先），老锁文件无该字段回退 profileId（兼容）。
+- **横幅**：SessionPane 顶部常驻琥珀色横幅「观察者模式（只读）— 该工作区正被 <实例名> 使用」（i18n en/zh，`omnicode.observer.*`）。
+- **官方 flavor 混部告知层（B2 评审修复 P1-4）**：官方 ZCode 不查锁不拦截（官方零影响铁律），但打开工作区成功后以 readTree 的 `omnicodeWorkspaceLocks` 装饰做一次**只读查询**——若该工作区正被 OmniCode 实例持有则 Toast 告知并发写入风险（查询失败静默；纯官方环境无共享锁目录，天然零打扰）。边界：告知不改任何官方行为，锁的强制语义仍只在 omnicode 实例内成立。
 
 ### 已知缺口（如实记录，不虚报全只读）
 
-1. **持有者展示为 profileId**：锁文件只存 profileId；实例显示名注册表在管理器进程，实例 renderer 无跨 profile 查询通道——横幅/对话框显示 profileId（与批次1 task-row 灰显文案同口径）。ConsoleHome 锁卡片显示实例名归 B2-3。
+1. ~~**持有者展示为 profileId**~~（B2 评审修复已兑现 C5）：锁文件现携带 displayName（实例名），横幅/对话框/toast/task-row 灰显均展示实例名；老锁文件（无 displayName）回退 profileId。ConsoleHome 锁卡片显示实例名归 B2-3。
 2. **观察者的会话列表/任务行仍可点击查看**（读路径）；官方 readOnly 只封写路径——查看是观察者模式的目的，非缺口；但 task-row 的"addToChat"（文件加入会话草稿）在 composer 隐藏后属死按钮，未单独禁用（本地草稿写，不触碰工作区 FS）。
 3. **外部编辑器写**：文件树"用编辑器打开/系统文件管理器"在外部进程写工作区文件——应用内锁无法约束外部进程（与批次1 相同边界）。
 4. **restore 预检路径归一**：Host 锁条目存 resolve 后路径，renderer 以大小写不敏感+去尾分隔符宽松归一比对；跨盘符大小写差异漏筛时退化为旧"恢复+灰显"软语义（fail-open，不产生双开硬拒绝缺口——灰显 tab 本身不可进入）。

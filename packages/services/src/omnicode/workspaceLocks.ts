@@ -18,12 +18,19 @@ export interface WorkspaceLockEntry {
   pid: number;
   acquiredAt: string;
   heartbeatAt: number;
+  /**
+   * [OmniCode] B2 评审修复（C5）：持有者实例显示名（spawn 时已知，锁获取时写入）。
+   * 老锁文件无此字段 → 消费方回退 profileId 展示（兼容）。
+   */
+  displayName?: string;
 }
 
 export interface WorkspaceLockOwner {
   profileId: string;
   pid: number;
   workspacePath: string;
+  /** 持有者实例显示名；老锁文件缺省为 undefined（UI 回退 profileId）。 */
+  displayName?: string;
 }
 
 const LOCKS_DIRNAME = "workspace-locks";
@@ -83,6 +90,25 @@ function readLockEntry(lockPath: string): WorkspaceLockEntry | undefined {
   }
 }
 
+/** 锁文件 displayName 字段的防御归一（trim + 限长，非法/空值丢弃为 undefined）。 */
+function normalizeLockDisplayName(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 120) return undefined;
+  return trimmed;
+}
+
+function toLockOwner(entry: WorkspaceLockEntry): WorkspaceLockOwner {
+  return {
+    profileId: entry.profileId,
+    pid: entry.pid,
+    workspacePath: entry.workspacePath,
+    ...(normalizeLockDisplayName(entry.displayName)
+      ? { displayName: normalizeLockDisplayName(entry.displayName) }
+      : {}),
+  };
+}
+
 function isLockStale(entry: WorkspaceLockEntry, now: number): boolean {
   if (now - entry.heartbeatAt > LOCK_STALE_MS) return true;
   return !isPidAlive(entry.pid);
@@ -97,7 +123,7 @@ export function readWorkspaceLockOwner(workspacePath: string): WorkspaceLockOwne
     rmSync(lockPath, { force: true });
     return undefined;
   }
-  return { profileId: entry.profileId, pid: entry.pid, workspacePath: entry.workspacePath };
+  return toLockOwner(entry);
 }
 
 /**
@@ -111,6 +137,8 @@ export interface WorkspaceLockedByOtherErrorData {
   workspacePath: string;
   profileId: string;
   pid: number;
+  /** 持有者实例显示名（C5：锁提示显示实例名；老锁缺省 → UI 回退 profileId）。 */
+  displayName?: string;
 }
 
 /**
@@ -148,8 +176,9 @@ export function assertWorkspaceNotLockedByOther(workspacePath: string, profileId
   });
   if (decision.kind !== "reject") return;
   const owner = decision.owner;
+  const ownerLabel = owner.displayName ? `${owner.displayName}（${owner.profileId}）` : owner.profileId;
   const error = new Error(
-    `该工作区正被另一个实例占用（${owner.profileId}），请先在那个实例里关闭它：${owner.workspacePath}`,
+    `该工作区正被另一个实例占用（${ownerLabel}），请先在那个实例里关闭它：${owner.workspacePath}`,
   ) as Error & { code: typeof WORKSPACE_LOCKED_BY_OTHER_ERROR_CODE; data: WorkspaceLockedByOtherErrorData };
   error.name = "WorkspaceLockedByOtherError";
   error.code = WORKSPACE_LOCKED_BY_OTHER_ERROR_CODE;
@@ -157,6 +186,7 @@ export function assertWorkspaceNotLockedByOther(workspacePath: string, profileId
     workspacePath: owner.workspacePath,
     profileId: owner.profileId,
     pid: owner.pid,
+    ...(owner.displayName ? { displayName: owner.displayName } : {}),
   };
   throw error;
 }
@@ -169,11 +199,13 @@ export interface AcquireWorkspaceLockResult {
 /**
  * 原子获取工作区锁：`wx`（CREATE_NEW）保证并发下只有一个写者成功，
  * 判负方从返回值拿到占用方信息用于灰显（spec §并发与竞态）。
+ * displayName（可选）= 持有者实例显示名，写进锁文件供锁提示展示实例名（C5）。
  */
 export function acquireWorkspaceLock(
   workspacePath: string,
   profileId: string,
   pid: number,
+  displayName?: string,
 ): AcquireWorkspaceLockResult {
   const lockHash = getWorkspaceLockHash(workspacePath);
   const lockPath = getLockFilePath(lockHash);
@@ -181,7 +213,7 @@ export function acquireWorkspaceLock(
   // 无主锁懒清理后立即尝试原子创建；清理与创建之间的竞争由 wx 原子性兜底
   const existing = readLockEntry(lockPath);
   if (existing && !isLockStale(existing, Date.now())) {
-    return { ok: false, owner: { profileId: existing.profileId, pid: existing.pid, workspacePath: existing.workspacePath } };
+    return { ok: false, owner: toLockOwner(existing) };
   }
   if (existing) {
     rmSync(lockPath, { force: true });
@@ -193,6 +225,7 @@ export function acquireWorkspaceLock(
     pid,
     acquiredAt: new Date(now).toISOString(),
     heartbeatAt: now,
+    ...(normalizeLockDisplayName(displayName) ? { displayName: normalizeLockDisplayName(displayName) } : {}),
   };
   try {
     const fd = openSync(lockPath, "wx");
@@ -206,7 +239,7 @@ export function acquireWorkspaceLock(
     const owner = readLockEntry(lockPath);
     return {
       ok: false,
-      owner: owner ? { profileId: owner.profileId, pid: owner.pid, workspacePath: owner.workspacePath } : undefined,
+      owner: owner ? toLockOwner(owner) : undefined,
     };
   }
 }
@@ -246,7 +279,7 @@ export function listWorkspaceLocks(): Map<string, WorkspaceLockOwner> {
       rmSync(lockPath, { force: true });
       continue;
     }
-    result.set(lockHash, { profileId: entry.profileId, pid: entry.pid, workspacePath: entry.workspacePath });
+    result.set(lockHash, toLockOwner(entry));
   }
   return result;
 }
@@ -255,6 +288,8 @@ export interface WorkspaceLockDecoration {
   workspacePath: string;
   profileId: string;
   ownedBySelf: boolean;
+  /** 持有者实例显示名（C5：锁提示显示实例名；老锁缺省，UI 回退 profileId）。 */
+  displayName?: string;
 }
 
 /**
@@ -267,5 +302,6 @@ export function listWorkspaceLockDecorations(): WorkspaceLockDecoration[] {
     workspacePath: owner.workspacePath,
     profileId: owner.profileId,
     ownedBySelf: owner.profileId === selfProfileId,
+    ...(owner.displayName ? { displayName: owner.displayName } : {}),
   }));
 }

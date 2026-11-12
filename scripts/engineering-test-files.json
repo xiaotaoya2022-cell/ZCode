@@ -172,5 +172,6 @@
   "packages/zcode-server-cli/test/tsupConfig.test.ts",
   "packages/zcode-server-cli/test/verifyRemoteSshTarget.test.ts",
   "packages/desktop/test/credential-keyring-assets.test.ts",
-  "packages/desktop/test/stdioTapCredentialRedaction.test.ts"
+  "packages/desktop/test/stdioTapCredentialRedaction.test.ts",
+  "packages/desktop/test/omnicodeReviewWorkspaceLock.test.ts"
 ]
