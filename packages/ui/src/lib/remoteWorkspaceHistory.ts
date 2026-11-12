@@ -557,6 +557,12 @@ export function buildPersistedWorkspaceSessionEntries(
       return entries;
     }
 
+    // [OmniCode] B2-2 观察者 tab 是临时只读查看，不持久化（重启后由恢复守卫重新查锁裁决，
+    // spec: docs/omnicode/profile-runtime.md §批次2 D8）。
+    if (tab.omnicodeObserver) {
+      return entries;
+    }
+
     if (hasRemoteWorkspaceIdentity(tab)) {
       const workspaceKey = buildWorkspaceSessionKey(tab);
       const remoteEntry = remoteSessionsByWorkspaceKey.get(workspaceKey);

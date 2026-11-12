@@ -4093,6 +4093,17 @@ const enUS: Record<string, string> = {
   "console.adoptionDefaultName": "Instance (adopted)",
   "console.adoptionToastDone": "Adopted as an instance — launch it from the list above.",
   // [OmniCode] B2-2 workspace lock enforcement + read-only observer mode (spec: docs/omnicode/profile-runtime.md §批次2 D8)
+  "omnicode.observer.banner":
+    "Observer mode (read-only) — this workspace is in use by instance {profileId}",
+  "omnicode.observer.readOnlyReason":
+    "Observer mode (read-only): this workspace is currently held by another instance ({profileId}). Sending messages and file writes are disabled.",
+  "omnicode.observer.dialog.title": "Workspace locked by another instance",
+  "omnicode.observer.dialog.description":
+    "The workspace {path} is currently open in instance {profileId}. Opening it here at the same time can corrupt session data. You can open it read-only as an observer (view only — no lock is taken, nothing can be edited).",
+  "omnicode.observer.dialog.openReadonly": "Open read-only",
+  "omnicode.observer.dialog.cancel": "Cancel",
+  "omnicode.observer.openedToast":
+    "Opened in observer mode (read-only) — held by instance {profileId}.",
   "omnicode.observer.restoreRejected":
     "Workspace {path} was not restored: it is held by another instance ({profileId}).",
   "welcome.omnicodeInstancesHint":

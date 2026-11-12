@@ -47,6 +47,13 @@ export interface WorkspaceTabState extends TabState {
   previousWorkspaceIdentity?: string;
   localWorkspacePath?: string;
   workspacePurpose?: WorkspacePurpose;
+  /**
+   * [OmniCode] B2-2 只读观察者标记（spec: docs/omnicode/profile-runtime.md §批次2 D8）：
+   * 存在 = 该工作区被他实例持锁，本 tab 以观察者（只读）形态打开——不获取工作区锁、
+   * 不进 openLocalWorkspaces 锁集合、不持久化（重启后由恢复守卫重新裁决）。
+   * holderProfileId 用于横幅/提示展示持有者实例。
+   */
+  omnicodeObserver?: { holderProfileId: string };
 }
 
 export interface WorkspaceTabOptions {
@@ -59,6 +66,8 @@ export interface WorkspaceTabOptions {
   previousWorkspaceIdentity?: string;
   localWorkspacePath?: string;
   workspacePurpose?: WorkspacePurpose;
+  /** [OmniCode] B2-2 观察者打开（锁冲突对话框「只读打开」）时携带。 */
+  omnicodeObserver?: { holderProfileId: string };
 }
 
 export interface RestorableWorkspaceTab {
@@ -83,6 +92,28 @@ export function isWorkspaceTabReadOnly(tab: WindowTabState): tab is WorkspaceTab
   return isWorkspaceTab(tab) && tab.availability === "unavailable-local-directory";
 }
 
+/** [OmniCode] B2-2 观察者 tab：工作区被他实例持锁，以只读形态打开（不获取锁）。 */
+export function isWorkspaceTabObserver(tab: WindowTabState): tab is WorkspaceTabState & {
+  omnicodeObserver: { holderProfileId: string };
+} {
+  return isWorkspaceTab(tab) && tab.omnicodeObserver !== undefined;
+}
+
+/** [OmniCode] B2-2 读取某工作区的观察者持有者（非观察者 tab 返回 null），供横幅/原因文案使用。 */
+export function findWorkspaceObserverHolder(
+  state: Pick<TabStoreState, "tabs">,
+  workspacePath: string,
+  workspaceIdentity?: string,
+): string | null {
+  const workspaceKey = workspaceIdentity?.trim() || workspacePath;
+  for (const tab of state.tabs) {
+    if (!isWorkspaceTab(tab)) continue;
+    if ((tab.workspaceIdentity?.trim() || tab.workspacePath) !== workspaceKey) continue;
+    return tab.omnicodeObserver?.holderProfileId ?? null;
+  }
+  return null;
+}
+
 export function isWorkspaceReadOnly(
   state: Pick<TabStoreState, "tabs">,
   workspacePath: string,
@@ -91,7 +122,7 @@ export function isWorkspaceReadOnly(
   const workspaceKey = workspaceIdentity?.trim() || workspacePath;
   return state.tabs.some(
     (tab) =>
-      isWorkspaceTabReadOnly(tab) &&
+      (isWorkspaceTabReadOnly(tab) || isWorkspaceTabObserver(tab)) &&
       (tab.workspaceIdentity?.trim() || tab.workspacePath) === workspaceKey,
   );
 }
@@ -180,6 +211,7 @@ function createWorkspaceTab(
     previousWorkspaceIdentity: options?.previousWorkspaceIdentity,
     localWorkspacePath: options?.localWorkspacePath,
     workspacePurpose: options?.workspacePurpose,
+    omnicodeObserver: options?.omnicodeObserver,
   };
 }
 
@@ -197,6 +229,7 @@ function mergeWorkspaceTabOptions(
     previousWorkspaceIdentity: options?.previousWorkspaceIdentity ?? tab.previousWorkspaceIdentity,
     localWorkspacePath: options?.localWorkspacePath ?? tab.localWorkspacePath,
     workspacePurpose: options?.workspacePurpose ?? tab.workspacePurpose,
+    omnicodeObserver: options?.omnicodeObserver ?? tab.omnicodeObserver,
   };
   // Cmd+N 会复用当前 tab；等值元数据不应制造新引用，导致 App 和整个项目侧栏重渲染。
   return Object.entries(merged).every(([key, value]) =>

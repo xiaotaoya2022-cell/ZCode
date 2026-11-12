@@ -3834,6 +3834,15 @@ const zhCN: Record<string, string> = {
   "console.adoptionDefaultName": "实例-收养",
   "console.adoptionToastDone": "已收养为实例，可在上方列表启动。",
   // [OmniCode] B2-2 工作区锁强制 + 只读观察者模式（spec: docs/omnicode/profile-runtime.md §批次2 D8）
+  "omnicode.observer.banner": "观察者模式（只读）— 该工作区正被实例 {profileId} 使用",
+  "omnicode.observer.readOnlyReason":
+    "观察者模式（只读）：该工作区正被另一实例（{profileId}）持有，发送消息与文件写入已禁用。",
+  "omnicode.observer.dialog.title": "工作区被其他实例占用",
+  "omnicode.observer.dialog.description":
+    "工作区 {path} 正在实例 {profileId} 中打开。同时在此打开会导致会话数据损坏。可以选择以观察者身份只读打开（仅查看：不获取锁、不可编辑）。",
+  "omnicode.observer.dialog.openReadonly": "只读打开",
+  "omnicode.observer.dialog.cancel": "取消",
+  "omnicode.observer.openedToast": "已以观察者模式（只读）打开——持有者：实例 {profileId}。",
   "omnicode.observer.restoreRejected":
     "未恢复工作区 {path}：正被另一实例（{profileId}）占用。",
   "welcome.omnicodeInstancesHint":

@@ -105,7 +105,9 @@ function buildDefaultPersistPatch(state: TabStoreState): Partial<AppSettings> {
 /**
  * [OmniCode] 本实例当前打开的全部本地工作区路径（工作区锁集合化的事实源，
  * spec: docs/omnicode/profile-runtime.md §工作区互斥锁）。
- * 只收集本地 workspace tab：带 remote identity / remoteSessionId 的是远程工作区（M1 不锁）。
+ * 只收集本地 workspace tab：带 remote identity / remoteSessionId 的是远程工作区（M1 不锁）；
+ * [OmniCode] B2-2 观察者 tab（omnicodeObserver）不获取锁，也不得进入锁集合——
+ * 否则 Host 协调器会为只读查看的工作区尝试获取锁（违背"观察者不触碰任何锁"）。
  * 独立于活动 tab 计算——活动 tab 是远程/绑定中时集合仍要如实上报，否则已打开的
  * 本地工作区会在 Host 侧被误判为"已关闭"而提前释放锁。
  */
@@ -114,6 +116,7 @@ function collectOpenLocalWorkspacePaths(state: TabStoreState): string[] {
   for (const tab of state.tabs) {
     if (!isWorkspaceTab(tab)) continue;
     if (tab.workspaceIdentity?.trim() || tab.remoteSessionId) continue;
+    if (tab.omnicodeObserver) continue;
     paths.add(tab.workspacePath);
   }
   return [...paths];

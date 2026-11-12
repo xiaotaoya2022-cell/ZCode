@@ -20,7 +20,7 @@ import { useWorkspaceProviderConfigFile } from "@/hooks/useWorkspaceProviderConf
 import { useWorkspaceActiveTaskState } from "@/hooks/useWorkspaceActiveTaskState.js";
 import { useEnsureWorkspaceMcpLoaded } from "@/hooks/useEnsureWorkspaceMcpLoaded.js";
 import { useTabStore, useTabStoreApi } from "@/store/TabStoreProvider.js";
-import { isWorkspaceReadOnly, isWorkspaceTab } from "@/store/tabStore.js";
+import { isWorkspaceReadOnly, isWorkspaceTab, findWorkspaceObserverHolder } from "@/store/tabStore.js";
 import type { TaskChatMessage as TestChatMessage } from "@/lib/taskChatMessageTypes.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
@@ -218,8 +218,19 @@ export function App({
   const workspaceReadOnly = useTabStore((state) =>
     isWorkspaceReadOnly(state, workspaceAbsPath, workspaceIdentity),
   );
+  // [OmniCode] B2-2 观察者模式：工作区被他实例持锁、以只读形态打开时，readOnly 原因换成
+  // 观察者文案（含持有者实例）。官方 readOnly 机制（会话输入禁用 / Git 与终端入口关闭 /
+  // 建任务与代码写入口 IfWritable 拦截）对观察者 tab 全部生效，spec §批次2 D8。
+  const omnicodeObserverHolder = useTabStore((state) =>
+    findWorkspaceObserverHolder(state, workspaceAbsPath, workspaceIdentity),
+  );
   const workspaceReadOnlyReason = workspaceReadOnly
-    ? intl.formatMessage({ id: "workspaceSidebar.unavailableLocalDirectory" })
+    ? omnicodeObserverHolder !== null
+      ? intl.formatMessage(
+          { id: "omnicode.observer.readOnlyReason" },
+          { profileId: omnicodeObserverHolder },
+        )
+      : intl.formatMessage({ id: "workspaceSidebar.unavailableLocalDirectory" })
     : undefined;
   const { workspaceShellZCodeState, reloadSessionDisabled } = useWorkspaceShellZCodeState(
     workspaceAbsPath,
