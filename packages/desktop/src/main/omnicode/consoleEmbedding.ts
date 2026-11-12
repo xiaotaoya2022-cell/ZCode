@@ -49,6 +49,20 @@ const GWL_HWNDPARENT = -8;
 let managerWindow: BrowserWindow | null = null;
 let embedMode: OmnicodeConsoleMode = "embedded"; // 与 consoleUiState 同源，装配时初始化
 let embedModeInitialized = false;
+/**
+ * [OmniCode] B2 评审修复（P2-6）：模式切换过渡标志。切桌面时先 await 解除全部 owned
+ * （PowerShell 批处理可达秒级），期间尾随节流 timer 的 dispatchEmbedLayout 仍会以
+ * embedded 态重下发 embedLayout 并经 ownInstances 重登记 owned——用本标志在
+ * dispatchEmbedLayout / ownInstances 入口短路，切换落地后才恢复跟随。
+ */
+let switchingMode = false;
+/**
+ * [OmniCode] B2 评审修复（P2-6）：模式切换串行队列。并发双击（desktop→embedded 快速
+ * 往返）时第二个请求在 `embedMode === mode` 早退检查处失步（旧请求未落地、embedMode
+ * 还是旧值）——全部切换请求排队串行执行，各自执行时以最新 embedMode 重判，最终收敛
+ * 到最后一次用户意图。
+ */
+let modeChangeQueue: Promise<void> = Promise.resolve();
 const instanceHwndHexByProfileId = new Map<string, string>();
 const ownedProfileIds = new Set<string>();
 /** 内嵌中但卡片滚出视口被临时隐藏的实例（回视口时 embedLayout 自带 show）。 */
@@ -91,17 +105,21 @@ function buildSetWindowOwnerScript(pairs: readonly WindowOwnerPair[]): string {
   return `Add-Type -TypeDefinition '${source}';${calls}`;
 }
 
-function runSetWindowOwner(pairs: readonly WindowOwnerPair[]): Promise<void> {
-  if (process.platform !== "win32" || pairs.length === 0) return Promise.resolve();
+/**
+ * [OmniCode] B2 评审修复（P1-3）：返回本次批处理是否成功（调用方据此决定 owned 登记）。
+ * spawn 失败/超时/白名单复核不过 → false（调用方不登记、补发 releaseEmbed、下轮重试）。
+ */
+function runSetWindowOwner(pairs: readonly WindowOwnerPair[]): Promise<boolean> {
+  if (process.platform !== "win32" || pairs.length === 0) return Promise.resolve(true);
   // 白名单复核（防御内部调用方）：全部通过才 spawn，任一非法整批放弃。
   for (const pair of pairs) {
     if (!isValidOmnicodeHwndHex(pair.child)) {
       console.warn(`[omnicode] owned 设置放弃：非法子窗口 HWND ${String(pair.child)}`);
-      return Promise.resolve();
+      return Promise.resolve(false);
     }
     if (pair.owner !== null && !isValidOmnicodeHwndHex(pair.owner)) {
       console.warn("[omnicode] owned 设置放弃：非法属主 HWND");
-      return Promise.resolve();
+      return Promise.resolve(false);
     }
   }
   return new Promise((resolve) => {
@@ -112,8 +130,10 @@ function runSetWindowOwner(pairs: readonly WindowOwnerPair[]): Promise<void> {
       (error) => {
         if (error) {
           console.warn("[omnicode] owned 设置/解除 PowerShell 失败（继续流程）:", error.message);
+          resolve(false);
+          return;
         }
-        resolve();
+        resolve(true);
       },
     );
   });
@@ -163,12 +183,32 @@ function setEmbedModeInternal(mode: OmnicodeConsoleMode): void {
   }
 }
 
-/** 模式切换入口（UI 状态 set IPC 调用；持久化由调用方完成）。 */
-export async function applyOmnicodeConsoleModeChange(mode: OmnicodeConsoleMode): Promise<void> {
+/**
+ * 模式切换入口（UI 状态 set IPC 调用；持久化由调用方完成）。
+ * [OmniCode] B2 评审修复（P2-6）：请求串行排队（并发双击失步）+ 过渡标志短路尾随
+ * dispatch（详见 switchingMode 注释）；实际编排见 performModeChange。
+ */
+export function applyOmnicodeConsoleModeChange(mode: OmnicodeConsoleMode): Promise<void> {
+  const run = modeChangeQueue.then(() => performModeChange(mode));
+  // 队列上的失败不阻塞后续切换请求（编排本身不抛，防御性兜底）
+  modeChangeQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+async function performModeChange(mode: OmnicodeConsoleMode): Promise<void> {
   if (embedMode === mode) return;
-  if (mode === "desktop") {
-    // 生命周期红线：切桌面模式先解除全部 owned（幂等、带超时），再改状态。
-    await releaseEmbeddedInstances();
+  switchingMode = true;
+  try {
+    if (mode === "desktop") {
+      // 生命周期红线：切桌面模式先解除全部 owned（幂等、带超时），再改状态。
+      await releaseEmbeddedInstances();
+    }
+  } finally {
+    // 先置回再 setEmbedModeInternal：进入内嵌的 own 链不被过渡标志短路
+    switchingMode = false;
   }
   setEmbedModeInternal(mode);
 }
@@ -193,18 +233,25 @@ export function notifyOmnicodeInstanceDisconnected(profileId: string): void {
   ownedProfileIds.delete(profileId);
   hiddenEmbeddedProfileIds.delete(profileId);
   subscribedByProfileId.delete(profileId);
+  // [OmniCode] B2 评审修复（P1-2）：断开侧同样对账——已连集合变化后把残余期望态
+  //（如断开实例的退订簿记）与桥实际态收敛。
+  reconcilePreviewSubscriptions();
 }
 
-/** 实例回连：内嵌态下索取 HWND（hello 轮询兜底）并补 owned；预览订阅对账。 */
+/**
+ * 实例回连：内嵌态下索取 HWND（hello 轮询兜底）并补 owned；预览订阅对账。
+ * [OmniCode] B2 评审修复（P1-2）：连接路径末尾 reconcilePreviewSubscriptions——
+ * 兑现 spec D9"连接时即时对账"（连接不再等于订阅：总开关∧视口可见才订）。
+ */
 export function notifyOmnicodeInstanceConnected(profileId: string): void {
   if (embedMode === "embedded") {
     sendOmnicodeInstanceCommand(profileId, { type: "requestWindowHandle" });
-    if (!instanceHwndHexByProfileId.has(profileId)) {
-      // 尚无 HWND：实例 hello 上报时经 notifyOmnicodeInstanceHello 自动跟接
-      return;
+    if (instanceHwndHexByProfileId.has(profileId)) {
+      void ownInstances([profileId]).then(() => dispatchEmbedLayout());
     }
-    void ownInstances([profileId]).then(() => dispatchEmbedLayout());
+    // 尚无 HWND：实例 hello 上报时经 notifyOmnicodeInstanceHello 自动跟接
   }
+  reconcilePreviewSubscriptions();
 }
 
 async function ownAllConnectedInstances(): Promise<void> {
@@ -219,22 +266,92 @@ async function ownAllConnectedInstances(): Promise<void> {
   dispatchEmbedLayout();
 }
 
+// ─── owned 登记决策（纯函数，P1-3，单测登记 engineering-test-files.json） ───
+
+/** 本轮需要设置 owned 的实例（child=实例 HWND hex，owner=管理器 HWND hex）。 */
+export interface OmnicodeOwnCandidate {
+  profileId: string;
+  child: string;
+  owner: string;
+}
+
+/**
+ * 候选过滤：非 win32 / 管理器 HWND 缺失 → 空；已登记 owned、尚无 HWND 的实例跳过。
+ * 纯函数（不碰模块状态），ownInstances 组合消费。
+ */
+export function resolveOmnicodeOwnCandidates(input: {
+  platform: string;
+  managerHwndHex: string | null;
+  ownedProfileIds: ReadonlySet<string>;
+  hwndHexByProfileId: ReadonlyMap<string, string>;
+  profileIds: readonly string[];
+}): OmnicodeOwnCandidate[] {
+  if (input.platform !== "win32" || !input.managerHwndHex) return [];
+  const candidates: OmnicodeOwnCandidate[] = [];
+  for (const profileId of input.profileIds) {
+    if (input.ownedProfileIds.has(profileId)) continue;
+    const child = input.hwndHexByProfileId.get(profileId);
+    if (!child) continue;
+    candidates.push({ profileId, child, owner: input.managerHwndHex });
+  }
+  return candidates;
+}
+
+export type OmnicodeOwnedRegistrationOutcome =
+  | { kind: "registered"; profileIds: string[] }
+  | { kind: "retry"; profileIds: string[] };
+
+/**
+ * 登记决策（P1-3 核心）：PowerShell 成功才登记 owned；失败不登记（下轮 ownInstances
+ * 重试）并由调用方给每个实例补发 releaseEmbed（保持桌面态+任务栏可见，窗口不失踪）。
+ */
+export function resolveOmnicodeOwnedRegistrationOutcome(
+  profileIds: readonly string[],
+  setOwnerSucceeded: boolean,
+): OmnicodeOwnedRegistrationOutcome {
+  const list = [...profileIds];
+  return setOwnerSucceeded
+    ? { kind: "registered", profileIds: list }
+    : { kind: "retry", profileIds: list };
+}
+
 async function ownInstances(profileIds: readonly string[]): Promise<void> {
-  if (embedMode !== "embedded" || process.platform !== "win32") return;
+  if (embedMode !== "embedded" || switchingMode || process.platform !== "win32") return;
   const managerHex = getManagerHwndHex();
   if (!managerHex) {
     console.warn("[omnicode] 内嵌 owned 设置跳过：管理器窗口 HWND 不可用");
     return;
   }
-  const pending: WindowOwnerPair[] = [];
-  for (const profileId of profileIds) {
-    if (ownedProfileIds.has(profileId)) continue;
-    const hwndHex = instanceHwndHexByProfileId.get(profileId);
-    if (!hwndHex) continue;
-    pending.push({ child: hwndHex, owner: managerHex });
-    ownedProfileIds.add(profileId); // 乐观登记：PowerShell 失败仅告警，重复设置幂等无害
+  const pending = resolveOmnicodeOwnCandidates({
+    platform: process.platform,
+    managerHwndHex: managerHex,
+    ownedProfileIds,
+    hwndHexByProfileId: instanceHwndHexByProfileId,
+    profileIds,
+  });
+  if (pending.length === 0) return;
+  // [OmniCode] B2 评审修复（P1-3）：登记移到 PowerShell 成功之后——乐观登记会让
+  // 失败的实例永远留在 ownedProfileIds（不重试 → 实例窗口留在桌面，"失踪"于网格）。
+  const setOwnerSucceeded = await runSetWindowOwner(
+    pending.map((candidate) => ({ child: candidate.child, owner: candidate.owner })),
+  );
+  const outcome = resolveOmnicodeOwnedRegistrationOutcome(
+    pending.map((candidate) => candidate.profileId),
+    setOwnerSucceeded,
+  );
+  if (outcome.kind === "registered") {
+    for (const profileId of outcome.profileIds) ownedProfileIds.add(profileId);
+    return;
   }
-  await runSetWindowOwner(pending);
+  // 失败：不登记（下次 ownInstances/dispatch 重试）+ 给实例补发 releaseEmbed——
+  // 实例侧可能已收到 embedLayout 进入内嵌约束（skipTaskbar/冻结尺寸），补发保持
+  // 桌面态 + 任务栏可见，窗口不"失踪"。
+  console.warn(
+    `[omnicode] owned 设置失败，本轮不登记并补发 releaseEmbed（下次重试）: ${outcome.profileIds.join(",")}`,
+  );
+  for (const profileId of outcome.profileIds) {
+    sendOmnicodeInstanceCommand(profileId, { type: "releaseEmbed" });
+  }
 }
 
 /** 内嵌跟随：renderer 上报卡片画面区客户区矩形（CSS px），换算屏幕 DIP 后下发。 */
@@ -285,7 +402,10 @@ function scheduleDispatch(fromWindowEvent: boolean): void {
 }
 
 function dispatchEmbedLayout(): void {
-  if (embedMode !== "embedded" || !managerWindow || managerWindow.isDestroyed()) return;
+  // P2-6：模式切换过渡期（解除 owned 进行中）不重下发 embedLayout/重登记 owned
+  if (embedMode !== "embedded" || switchingMode || !managerWindow || managerWindow.isDestroyed()) {
+    return;
+  }
   const layout = latestClientLayout;
   if (!layout || !Array.isArray(layout.rects)) return;
   const content = managerWindow.getContentBounds();

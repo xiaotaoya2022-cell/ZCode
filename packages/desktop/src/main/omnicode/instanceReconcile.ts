@@ -117,3 +117,34 @@ export async function scanOmnicodeInstanceProcesses(): Promise<
     return undefined;
   }
 }
+
+/**
+ * [OmniCode] B2 评审修复（P2-11②）：运行实例内存占用查询（控制台底栏"内存合计"数据源）。
+ * Windows 单次 tasklist CSV 全量进程表，筛目标 pid——CSV 行形如
+ * `"OmniCode.exe","12345","Console","1","18,692 K"`（内存列带本地化千分位与单位，去非数字
+ * 后为 KB）。非 Windows / 查询失败返回 undefined（调用方按"内存不可得"处理，不显示合计）。
+ */
+export async function readOmnicodeProcessMemoryMBs(
+  pids: readonly number[],
+): Promise<Map<number, number> | undefined> {
+  if (process.platform !== "win32" || pids.length === 0) return undefined;
+  try {
+    const text = await execText("tasklist", ["/NH", "/FO", "CSV"], 10_000);
+    const wanted = new Set(pids.filter((pid) => Number.isInteger(pid) && pid > 0));
+    if (wanted.size === 0) return new Map();
+    const memoryByPid = new Map<number, number>();
+    for (const line of text.split("\n")) {
+      const fields = [...line.matchAll(/"([^"]*)"/g)].map((match) => match[1] ?? "");
+      if (fields.length < 5) continue; // 无匹配时 tasklist 输出本地化 INFO 行（无引号字段）
+      const pid = Number.parseInt(fields[1] ?? "", 10);
+      if (!Number.isInteger(pid) || !wanted.has(pid)) continue;
+      const memoryKB = Number.parseInt((fields[4] ?? "").replace(/[^0-9]/g, ""), 10);
+      if (!Number.isInteger(memoryKB) || memoryKB <= 0) continue;
+      memoryByPid.set(pid, Math.round(memoryKB / 1024));
+    }
+    return memoryByPid;
+  } catch (error) {
+    console.warn("[omnicode] 实例内存查询失败（底栏不显示合计）:", error);
+    return undefined;
+  }
+}

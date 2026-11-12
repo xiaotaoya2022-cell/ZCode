@@ -207,6 +207,10 @@
 ### 内嵌模式语义（owned-window）
 
 - **机制**：运行实例窗口经 Win32 `SetWindowLongPtr(GWL_HWNDPARENT, consoleHwnd)` 成为管理器窗口的 owned window（自动置顶于管理器、随管理器最小化/恢复）+ `skipTaskbar(true)` + 冻结 resizable/最低尺寸（内嵌下限 160×96，低于 arrange 的 200×150——格子由网格 minmax 与真实宽高比决定，21:9 卡片画面区高度会低于 150px）。
+- **owned 登记以 PowerShell 成功为准（B2 评审修复 P1-3）**：`ownInstances` 登记移到 `runSetWindowOwner` 成功之后（返回布尔）；失败不登记 ownedProfileIds（下轮 own/dispatch 自动重试）并给该实例补发 `releaseEmbed`（实例可能已进入内嵌约束，补发保持桌面态+任务栏可见，窗口不"失踪"于网格）。候选过滤/登记决策为纯函数（`resolveOmnicodeOwnCandidates` / `resolveOmnicodeOwnedRegistrationOutcome`）。
+- **模式切换串行化（B2 评审修复 P2-6）**：切换请求经队列串行执行（并发双击时各自以最新 embedMode 重判，最终收敛到最后一次用户意图）；切换过渡期（`switchingMode`，解除 owned 的 await 窗口）dispatchEmbedLayout/ownInstances 入口短路——尾随节流 timer 不再以 embedded 态重下发布局/重登记 owned。
+- **内嵌卡片比例冻结（B2 评审修复 P2-7）**：内嵌模式下卡片画面区 aspect 冻结为进入内嵌后首帧比例——帧尺寸→卡片高→embedLayout 矩形→实例窗口尺寸→下一帧尺寸是闭环，动态比例会微抖；桌面模式恢复动态（真窗口不贴卡片，无环）。
+- **桥连接唯一性（B2 评审修复 P2-10）**：一个 profileId 同时只允许一条连接（后连踢前连）；被顶替的旧连接 close 不触发 disconnected 通知（只有当前登记连接的 close 才代表实例真正断开），避免假断开清掉内嵌/订阅簿记。
 - **owned 设置/解除 = 一次性 PowerShell**（`-NoProfile -NonInteractive -Command`，argv 数组直传、禁 shell 拼接）：Add-Type P/Invoke `SetWindowLongPtr`；全部 HWND 经 `^0x[0-9a-f]{1,16}$` 白名单后才可进字面量（`[Convert]::ToInt64('<hex>',16)`）。不长驻任何脚本进程；单次批处理硬超时 5s，失败仅告警（重复设置幂等无害）。
 - **HWND 获取**：实例桥新增 `hello` 消息（实例侧 1s 轮询主窗口 `getNativeWindowHandle`，变化即上报；管理器兜底命令 `requestWindowHandle` 强制重报）。
 - **布局跟随**：renderer 上报卡片画面区矩形（**窗口客户区 CSS 像素** + 视口尺寸，rAF+~60ms 节流；管理器窗口 move/resize 再兜一层同规格节流）→ main 经 `contentBounds/viewport` 比例换算屏幕 DIP（对任意 zoomFactor 成立，换算收口在 main）→ 桥命令 `embedLayout {rects[]}`（全量矩形广播，实例按自身 profileId 滤出并独立校验——最低规格内联在 `embedLayoutMath`，双端共用纯函数）。卡片顶条约 28-32px 留给管理器自绘控制钮（实例窗口贴画面区，不含顶条）。
@@ -226,7 +230,9 @@ Win32 owned window 随 owner 销毁——管理器窗口直接销毁会**连带�
 ### 预览管线升级（{w,h} 帧协议 + 视口订阅）
 
 - 桥 `thumbnail` 帧可选附 `width/height`（实例侧 capturePage 同刻 `getContentSize`，DIP）——卡片按真实宽高比 letterbox（修"显示不完整"）；缺省回退默认比例（旧实例兼容）。
-- **订阅状态化**：管理器侧期望订阅 = `previewEnabled ∧ 卡片在视口内`（renderer IntersectionObserver 上报可见集合；`resolveOmnicodePreviewSubscriptions` 纯函数决策 + 与桥实际态 diff 后增减 `subscribeThumbnails/unsubscribeThumbnails`）。实例连接时即時对账。总开关关闭 = 全部退订，卡片停留最后一帧灰暗化 + 角标（不再是"连上即订阅"的粗放行为；官方 flavor 桥服务保持自动订阅不变）。
+- **订阅状态化**：管理器侧期望订阅 = `previewEnabled ∧ 卡片在视口内`（renderer IntersectionObserver 上报可见集合；`resolveOmnicodePreviewSubscriptions` 纯函数决策 + 与桥实际态 diff 后增减 `subscribeThumbnails/unsubscribeThumbnails`）。总开关关闭 = 全部退订，卡片停留最后一帧灰暗化 + 角标（不再是"连上即订阅"的粗放行为）。
+- **连接/断开即时对账（B2 评审修复 P1-2 兑现）**：`notifyOmnicodeInstanceConnected/Disconnected` 路径末尾 `reconcilePreviewSubscriptions()`——连接不再隐含订阅；v0"连上即订阅"收窄为**官方 flavor 专属**（`shouldAutoSubscribeThumbnailsOnConnect`：官方进程无订阅编排且实际无实例回连，零影响保持），omnicode 管理器完全按 总开关∧可见 对账（预览关时实例连接不产生订阅，且会补发退订纠正 v0 残余状态）。
+- **卡片帧清理（B2 评审修复 P2-8）**：实例断开（disconnected 事件）即清该实例最后一帧——已停止实例卡片显示停止占位（▶启动），不残留旧帧伪装"还有画面"；profiles 列表刷新时兜底清全部非 running 实例的帧。
 - 实例侧最小化/隐藏跳帧策略保持（隐藏窗口停留最后一帧）。
 
 ### console-ui.json 状态落盘
@@ -246,3 +252,11 @@ Win32 owned window 随 owner 销毁——管理器窗口直接销毁会**连带�
 2. 管理器崩溃未解除 owned → 内嵌实例连坐销毁（上述红线只覆盖正常退出路径）。
 3. 多显示器/高 DPI 缩放差异下的换算精度依赖 `contentBounds/viewport` 比例假设（单显示器 100%/200% 缩放推演正确；未做全 DPI 矩阵实测）。
 4. 内嵌实例的 alt-tab/任务栏入口消失（skipTaskbar），只能经管理器卡片管理——切桌面模式或停止实例恢复。
+
+### B2 评审修复补充记录（P2 杂项与决策）
+
+1. **视口换算分母（P2-9 勘误）**：embed 上报的视口分母必须是**整窗 CSS 视口**（`window.innerWidth/innerHeight`）——main 侧 scale = getContentBounds(DIP)/viewport(CSS px) = zoomFactor，卡片 rect（getBoundingClientRect）与 innerWidth 同处窗口视口坐标系。评审建议的"网格容器 clientWidth 作分母"不成立：容器不含工具行/边距，比例会被放大导致实例窗口整体错位；容器自身滚动条不影响全局比例（分母与内容位置无关）。已在 ConsoleInstanceGrid 代码注释记录该结论。
+2. **底栏内存合计（P2-11②，兑现设计 §4.1）**：数据源 = Profile 列表 IPC 聚合的 `memoryMB`（Windows 单次 tasklist CSV 全量进程表筛 pid，千分位/单位剥离后 KB→MB；非 Windows/查询失败缺省）。任一运行实例内存不可得时底栏不显示合计（不编造部分和）。
+3. **收养兜底名语言无关（P2-11①）**：main 侧无 i18n 机制，畸形入参兜底名改为 `instance-adopted`（正常路径 renderer 始终传本地化名称 `console.adoptionDefaultName`）。
+4. **主窗口重建重挂（P2-11③）**：主窗口存在销毁重建路径（renderer 崩溃自愈 discard→重建 / macOS activate 重建），`createWindowInstance` 内每次创建后重挂 `setOmnicodeEmbedManagerWindow`（原先仅 app-ready 挂一次，重建后内嵌跟随失效）。
+5. **帧比例冻结的边界**：冻结发生在"进入内嵌后收到首帧"——该帧通常是 embedLayout 生效前的桌面基线比例，作为反馈环的稳定起点；实例窗口真实比例与冻结值差异由 letterbox 兜住（object-contain 不裁切）。

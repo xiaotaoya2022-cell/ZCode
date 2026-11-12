@@ -56,6 +56,16 @@ export function ConsoleInstanceGrid() {
     handleArrange,
     handleRemove,
   } = useOmnicodeConsoleInstances();
+  // [OmniCode] B2 评审修复（P2-11②）：底栏内存合计（设计 §4.1 承诺）。数据源 = Profile
+  // 列表携带的实例内存占用（main 侧 tasklist 聚合，Windows）；任一运行实例内存不可得
+  // 时不显示（不编造部分和）。
+  const totalMemoryMB = (() => {
+    const running = profiles.filter((profile) => profile.running);
+    if (running.length === 0 || running.some((profile) => profile.memoryMB === undefined)) {
+      return null;
+    }
+    return running.reduce((sum, profile) => sum + (profile.memoryMB ?? 0), 0);
+  })();
 
   // ─── UI 状态（内嵌/桌面模式 + 实时预览总开关，持久化于 main 的 console-ui.json） ───
   const [uiState, setUiState] = useState<OmnicodeConsoleUiState>({
@@ -145,6 +155,12 @@ export function ConsoleInstanceGrid() {
   const reportPendingRef = useRef(false);
 
   const collectAndReportEmbedLayout = useCallback(() => {
+    // [OmniCode] B2 评审修复（P2-9 勘误记录）：视口分母必须用整窗 CSS 视口
+    //（window.innerWidth/innerHeight）而非网格容器 clientWidth——main 侧换算
+    // scale = getContentBounds(DIP) / viewport(CSS px) = zoomFactor，卡片 rect
+    //（getBoundingClientRect）与 innerWidth 同处窗口视口坐标系；网格容器不含
+    // 工具行/边距，作分母会放大比例导致实例窗口整体错位。容器自身滚动条不影响：
+    // 卡片坐标天然落在滚动条左侧，分母是全局比例与内容位置无关。
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
     const runningIds = new Set(profiles.filter((profile) => profile.running).map((p) => p.id));
@@ -471,7 +487,7 @@ export function ConsoleInstanceGrid() {
         )}
       </div>
 
-      {/* 底栏 */}
+      {/* 底栏（B2 评审修复 P2-11②：补设计 §4.1 承诺的内存合计） */}
       <div className="flex items-center gap-4 border-t border-border pt-2 text-ui-xs text-foreground-subtlest">
         <span className="flex items-center gap-1.5">
           <span
@@ -485,6 +501,14 @@ export function ConsoleInstanceGrid() {
             { running: String(runningCount), total: String(profiles.length) },
           )}
         </span>
+        {totalMemoryMB !== null ? (
+          <span className="shrink-0">
+            {intl.formatMessage(
+              { id: "console.statusMemory" },
+              { memory: String(totalMemoryMB) },
+            )}
+          </span>
+        ) : null}
         <span className="min-w-0 truncate">
           {intl.formatMessage({
             id: uiState.mode === "embedded" ? "console.gridHintEmbedded" : "console.gridHintDesktop",

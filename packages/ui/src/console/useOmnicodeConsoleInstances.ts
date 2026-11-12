@@ -60,11 +60,37 @@ export function useOmnicodeConsoleInstances() {
         });
       }
       if (payload.type === "disconnected") {
+        // [OmniCode] B2 评审修复（P2-8）：断开实例的最后一帧不再保留——已停止实例
+        // 的卡片应显示停止占位（▶启动），残留旧帧会伪装成"还有画面"。
+        setFrames((previous) => {
+          if (!previous.has(payload.profileId)) return previous;
+          const next = new Map(previous);
+          next.delete(payload.profileId);
+          return next;
+        });
         void refresh();
       }
     });
     return unsubscribe ?? (() => {});
   }, [platform, refresh]);
+
+  // [OmniCode] B2 评审修复（P2-8 兜底）：实例停止/删除后清非 running 实例的帧
+  //（disconnected 事件之外的停止路径——如管理器重启后的列表重建）。
+  useEffect(() => {
+    setFrames((previous) => {
+      if (previous.size === 0) return previous;
+      const runningIds = new Set(profiles.filter((profile) => profile.running).map((p) => p.id));
+      let changed = false;
+      const next = new Map(previous);
+      for (const profileId of next.keys()) {
+        if (!runningIds.has(profileId)) {
+          next.delete(profileId);
+          changed = true;
+        }
+      }
+      return changed ? next : previous;
+    });
+  }, [profiles]);
 
   const runAction = useCallback(
     async (action: () => Promise<unknown>, successMessageId: string | null) => {
