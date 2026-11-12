@@ -25,6 +25,11 @@ const CONSOLE_FLAG = "--omnicode-console";
 const RETIRED_HANDOFF_FLAG = "--omnicode-handoff";
 const PROFILE_ROOT_ENV = "OMNICODE_PROFILE_ROOT";
 const PROFILE_ID_PATTERN = /^p[0-9a-z]{8,20}$/u;
+// [OmniCode] 批次2 B2-1（T4）：`--omnicode-open-workspace=<path>` —— 管理器"新建并打开"
+// 路径把工作区目录经 argv 传给实例，实例就绪后走自身正常打开流程（尊重工作区锁）。
+// 这里只搬运到 env（index.ts whenReady 消费）；路径合法性由消费端校验，bootstrap 不
+// 做文件系统探测（保持"只做同步小 IO"的约束）。
+const OPEN_WORKSPACE_FLAG = "--omnicode-open-workspace=";
 
 function resolveProfileRoot(): string {
   const override = process.env[PROFILE_ROOT_ENV]?.trim();
@@ -39,30 +44,68 @@ function resolveProfileIdFromArgv(): { hasFlag: boolean; profileId?: string } {
 }
 
 function injectIdentityEnv(profileId: string, profileDir: string): void {
+  // 批次2 B2-1（T5 收养）：数据根支持 profile 记录的 dataBaseDirOverride（指向旧控制台
+  // 数据根等外部目录，零拷贝收养）；electron-userdata/session 仍用 profile 自身目录。
+  const record = readProfileRecordSync(profileDir, profileId);
+  const dataBaseDir = record?.dataBaseDirOverride?.trim() || profileDir;
   // profile 是身份唯一事实源：直接赋值（非 ??=），覆盖继承自控制台的任何同名 env
   process.env.ZCODE_DESKTOP_APPLICATION_NAME = `OmniCode-${profileId}`;
   process.env.ZCODE_DESKTOP_USER_DATA_DIR = join(profileDir, "electron-userdata");
   process.env.ZCODE_DESKTOP_SESSION_DATA_DIR = join(profileDir, "electron-session");
-  process.env.ZCODE_DATA_BASE_DIR = profileDir;
-  // [OmniCode] 第五件套（D6 修订）：ZCODE_DESKTOP_HOME_DIR = profileDir。
+  process.env.ZCODE_DATA_BASE_DIR = dataBaseDir;
+  // [OmniCode] 第五件套（D6 修订）：ZCODE_DESKTOP_HOME_DIR = 数据根（默认 profileDir；
+  // 收养实例指向 override 目录——setting.json/凭据等 .zcode 数据随数据根走）。
   // 消费面 1：services/settingService.resolveUserHomeDir 优先读该 env → 实例的
-  //   setting.json 落 <profileDir>/.zcode/v2/setting.json（官方 lastActiveWorkspace
+  //   setting.json 落 <dataBaseDir>/.zcode/v2/setting.json（官方 lastActiveWorkspace
   //   等 settings 在实例间按实例隔离，消除与官方安装版共享 setting.json 的串流通道）。
   // 消费面 2：desktopRuntimeEnv.runtimeHomePath → index.ts app.setPath("home")，
-  //   实例的 Electron home 概念指向 profileDir（预期行为：home 级别的默认目录也按
+  //   实例的 Electron home 概念指向数据根（预期行为：home 级别的默认目录也按
   //   实例隔离，与 Cockpit env 清单对齐——Cockpit 注入 ZCODE_DESKTOP_HOME_DIR=<root>/data）。
   // 不受影响：services 的 resolveAgentUserInstructionsHomeDir（AGENTS.md 位置）只认
   //   HOME/USERPROFILE 不认该 env → AGENTS.md 保持全局共享（合理语义）。
-  process.env.ZCODE_DESKTOP_HOME_DIR = profileDir;
+  process.env.ZCODE_DESKTOP_HOME_DIR = dataBaseDir;
   // 实例自声明（供 Host 侧锁服务识别"本实例占用"）；由本进程自己设置，与 spawn
   // 注入的值一致（双保险）
   process.env.OMNICODE_PROFILE_ID = profileId;
-  // [OmniCode] 凭据密钥固化（环境隔离根治方案）：Profile 数据根内固化独立密钥文件
-  // 并注入 ZCODE_CREDENTIAL_SECRET → 凭据加密完全脱离 OS keyring 与 homedir 派生。
-  // Profile legacy 密文无缝兼容（fallback 候选仍在 legacyKeyCandidates 列表）。
-  const credentialSecret = ensureOmnicodeCredentialSecret(profileDir);
+  // [OmniCode] 批次2 B2-1（T1）：实例窗口标题 "ZCode [实例名]"（renderer 入口按该
+  // env 快照设置 document.title）。读不到名称时留空由 renderer 回落 "OmniCode"。
+  const displayName = record?.name?.trim();
+  process.env.OMNICODE_INSTANCE_TITLE = displayName ? `ZCode [${displayName}]` : "";
+  // [OmniCode] 凭据密钥固化（环境隔离根治方案）：数据根内固化独立密钥文件并注入
+  // ZCODE_CREDENTIAL_SECRET → 凭据加密完全脱离 OS keyring 与 homedir 派生。
+  // Profile legacy 密文无缝兼容（fallback 候选仍在 legacyKeyCandidates 列表）；
+  // 收养实例的数据根（旧控制台根）已有管理器固化的密钥文件，天然可解密旧凭据。
+  const credentialSecret = ensureOmnicodeCredentialSecret(dataBaseDir);
   if (credentialSecret) {
     process.env.ZCODE_CREDENTIAL_SECRET = credentialSecret;
+  }
+}
+
+/**
+ * 同步读取 profile 记录（bootstrap 约束：只做同步小 IO；文件 <10KB 且由
+ * writeJsonAtomic 原子写）。任何失败 fail-open 返回 undefined——env 注入以
+ * profileDir 默认值为兜底事实源，坏档不让实例起不来。
+ */
+function readProfileRecordSync(
+  profileDir: string,
+  profileId: string,
+): { name?: string; dataBaseDirOverride?: string } | undefined {
+  try {
+    const raw = readFileSync(join(profileDir, "profile.json"), "utf8");
+    const parsed = JSON.parse(raw) as {
+      id?: unknown;
+      name?: unknown;
+      dataBaseDirOverride?: unknown;
+    };
+    if (parsed.id !== profileId) return undefined;
+    const name = typeof parsed.name === "string" ? parsed.name : undefined;
+    const dataBaseDirOverride =
+      typeof parsed.dataBaseDirOverride === "string" && parsed.dataBaseDirOverride.trim()
+        ? parsed.dataBaseDirOverride
+        : undefined;
+    return { name, dataBaseDirOverride };
+  } catch {
+    return undefined;
   }
 }
 
@@ -72,10 +115,11 @@ function injectIdentityEnv(profileId: string, profileDir: string): void {
  * 共享目录（拷贝来的/官方 UI 写入的都可能含该键）。实例数据根由五件套 env 唯一决定，
  * 任何配置文件都不得覆盖（Cockpit 同名不变量 + 单测锁定）。
  * 同步小 IO（文件 <100KB）；任何失败 fail-open（env 注入已是兜底事实源）。
+ * 批次2 B2-1（T5）：setting.json 随数据根走（默认 profileDir；收养实例为 override 目录）。
  */
-function sanitizeInstanceSetting(profileDir: string): void {
+function sanitizeInstanceSetting(dataBaseDir: string): void {
   try {
-    const settingPath = join(profileDir, ".zcode", "v2", "setting.json");
+    const settingPath = join(dataBaseDir, ".zcode", "v2", "setting.json");
     if (!existsSync(settingPath)) return;
     const parsed = JSON.parse(readFileSync(settingPath, "utf8")) as Record<string, unknown>;
     if (parsed.dataBaseDir === undefined) return;
@@ -109,7 +153,15 @@ if (argvProfileId && hasConsoleFlag) {
 if (argvProfileId) {
   const profileDir = join(resolveProfileRoot(), argvProfileId);
   injectIdentityEnv(argvProfileId, profileDir);
-  sanitizeInstanceSetting(profileDir);
+  // sanitize 跟数据根走：收养实例的 setting.json 在 override 目录（旧控制台根）
+  sanitizeInstanceSetting(process.env.ZCODE_DATA_BASE_DIR ?? profileDir);
+  // [OmniCode] 批次2 B2-1（T4）：搬运管理器下发的工作区打开请求（就绪后由 index.ts
+  // 消费；此 env 不参与身份判定，缺失/空值即无请求）
+  const openWorkspaceArg = process.argv.find((entry) => entry.startsWith(OPEN_WORKSPACE_FLAG));
+  const openWorkspacePath = openWorkspaceArg?.slice(OPEN_WORKSPACE_FLAG.length).trim();
+  if (openWorkspacePath) {
+    process.env.OMNICODE_OPEN_WORKSPACE = openWorkspacePath;
+  }
   console.info(`[omnicode] profile 身份注入完成: ${argvProfileId}`);
 } else if (hasConsoleFlag) {
   // 控制台身份：与官方安装版、Profile 实例的 userData 三方互斥（spec §产品规则 3）

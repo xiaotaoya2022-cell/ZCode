@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Copy, LayoutGrid, Maximize2, Play, RefreshCw, Square, Trash2, Undo2 } from "lucide-react";
+import { Download } from "lucide-react";
 import type { OmnicodeProfileSummaryInfo } from "@zcode/shared";
 import { Button } from "@/components/ui/button.js";
 import { Input } from "@/components/ui/input.js";
@@ -8,6 +9,67 @@ import { useConfirmDialogStore } from "@/store/confirmDialogStore.js";
 import { usePlatform } from "@/hooks/usePlatform.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
+
+/**
+ * [OmniCode] 批次2 B2-1（T5）：旧控制台收养状态与处理（可复用导出——B2-3 控制台
+ * 重做时直接复用本 hook，不重写检测/确认/执行链）。
+ * available 仅当管理器数据根存在凭据文件且未被收养（main 侧判定；实例/官方平台
+ * 该方法缺席 → 恒 false，行不渲染）。
+ */
+export function useOmnicodeConsoleAdoption(options?: { onAdopted?: () => void }) {
+  const platform = usePlatform();
+  const { intl } = useZCodeIntl();
+  const requestConfirmation = useConfirmDialogStore((state) => state.requestConfirmation);
+  const [available, setAvailable] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let disposed = false;
+    void platform
+      .checkOmnicodeConsoleAdoption?.()
+      .then((result) => {
+        if (!disposed) setAvailable(Boolean(result?.available));
+      })
+      .catch((error) => {
+        logger.warn("[omnicode] 收养可用性检测失败", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [platform]);
+
+  const adopt = useCallback(() => {
+    void (async () => {
+      const confirmed = await requestConfirmation({
+        title: intl.formatMessage({ id: "console.adoptionConfirmTitle" }),
+        description: intl.formatMessage({ id: "console.adoptionConfirmDescription" }),
+      });
+      if (!confirmed) return;
+      setBusy(true);
+      try {
+        await platform.adoptOmnicodeConsole!({
+          name: intl.formatMessage({ id: "console.adoptionDefaultName" }),
+        });
+        toast(intl.formatMessage({ id: "console.adoptionToastDone" }), { variant: "success" });
+        setAvailable(false);
+        options?.onAdopted?.();
+      } catch (error) {
+        toast(
+          `${intl.formatMessage({ id: "settings.omnicodeProfiles.actionFailed" })}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          { variant: "warning" },
+        );
+      } finally {
+        setBusy(false);
+      }
+    })();
+  }, [intl, options, platform, requestConfirmation]);
+
+  return { available, busy, adopt };
+}
 
 /**
  * OmniCode Profile 多实例管理分区（desktop-only，spec: docs/omnicode/profile-runtime.md）。
@@ -221,6 +283,15 @@ export function ProfileMultiInstanceSection() {
 
   const runningCount = profiles.filter((profile) => profile.running).length;
 
+  // [OmniCode] 批次2 B2-1（T5）：旧控制台收养行——仅当旧数据根有凭据且未被收养时显示
+  //（检测在 main；收养=新建零拷贝指向旧根的 profile，保留登录态与历史会话）。
+  const adoption = useOmnicodeConsoleAdoption({ onAdopted: () => void refresh() });
+
+  // [OmniCode] 批次2 B2-1（T3 嵌套封死）：实例 renderer 不呈现 Profile 管理面——实例的
+  // preload 已按身份裁剪掉管理 API（window.zcode 缺席这些方法），设置页的这个分区在
+  // 实例内直接不渲染（所有 hooks 已在上方无条件执行，此处 early-return 合法）。
+  if (platform.omnicodeInstanceId != null) return null;
+
   return (
     <div className="flex flex-col gap-4">
       <p className="text-ui-base text-foreground-subtle">
@@ -252,6 +323,22 @@ export function ProfileMultiInstanceSection() {
       </div>
 
       <div className="flex flex-col gap-2">
+        {adoption.available ? (
+          <div className="flex items-center justify-between gap-3 rounded-md border border-dashed border-border px-3 py-2">
+            <span className="min-w-0 text-ui-sm text-foreground-subtle">
+              {intl.formatMessage({ id: "console.adoptionTitle" })}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={adoption.adopt}
+              disabled={adoption.busy || busy}
+            >
+              <Download className="size-3.5" />
+              {intl.formatMessage({ id: "console.adoptionAction" })}
+            </Button>
+          </div>
+        ) : null}
         <div className="flex items-center gap-2">
           <Input
             value={newName}

@@ -9,24 +9,38 @@ export {
   clearProfileLaunched,
   cloneOmnicodeProfile,
   createOmnicodeProfile,
+  getOmnicodeConsoleDataBaseDir,
   getOmnicodeProfileDir,
+  getOmnicodeProfileRecord,
   getOmnicodeProfileRoot,
+  hasOmnicodeConsoleCredentials,
+  isOmnicodeDataBaseDirAdopted,
   listOmnicodeProfiles,
+  nextOmnicodeAdoptionProfileName,
   recordProfileLaunched,
   removeOmnicodeProfile,
+  resolveOmnicodeConsoleAdoptionAvailable,
+  resolveOmnicodeWorkspaceOpenRoute,
+  adoptOmnicodeConsoleAsProfile,
 } from "./profileRuntime.js";
-export type { OmnicodeProfileRecord, OmnicodeProfileSummary } from "./profileRuntime.js";
+export type {
+  OmnicodeProfileRecord,
+  OmnicodeProfileSummary,
+  OmnicodeWorkspaceOpenRoute,
+} from "./profileRuntime.js";
 export {
   buildOmnicodeInstanceRelaunchArgs,
   isOmnicodeProfileRunning,
   listOmnicodeRunningInstances,
   launchOmnicodeProfile,
   reconcileOmnicodeRunningInstances,
+  routeOmnicodeWorkspaceOpenFromManager,
+  sendOmnicodeOpenWorkspace,
   stopOmnicodeProfile,
   arrangeOmnicodeInstances,
   restoreOmnicodeInstances,
 } from "./instanceManager.js";
-export type { OmnicodeRunningInstance } from "./instanceManager.js";
+export type { OmnicodeRunningInstance, OmnicodeWorkspaceRouteDeps } from "./instanceManager.js";
 export { scanOmnicodeInstanceProcesses } from "./instanceReconcile.js";
 export {
   ensureOmnicodeInstanceBridgeServerStarted,
@@ -43,6 +57,7 @@ export {
   backupAllOmnicodeCredentials,
   backupCredentialFile,
   startOmnicodeCredentialBackupScheduler,
+  startOmnicodeInstanceSelfCredentialBackupScheduler,
 } from "./credentialBackups.js";
 export { openOmnicodeInstanceAuthWindow } from "./instanceAuthWindow.js";
 export type {

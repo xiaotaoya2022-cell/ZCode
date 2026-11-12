@@ -40,6 +40,14 @@ export const desktopOmnicodePlatformBridge = {
     requireBridge(window.zcode.arrangeOmnicodeInstances?.()),
   restoreOmnicodeInstances: (): Promise<{ delivered: string[] }> =>
     requireBridge(window.zcode.restoreOmnicodeInstances?.()),
+  // [OmniCode] 批次2 B2-1（T5）：旧控制台收养（检测/执行；handler 仅管理器注册——
+  // 实例 preload 不暴露这两个方法，兜底返回"不可收养"）。
+  checkOmnicodeConsoleAdoption: (): Promise<{ available: boolean }> =>
+    window.zcode.checkOmnicodeConsoleAdoption?.() ?? Promise.resolve({ available: false }),
+  adoptOmnicodeConsole: (
+    payload: { name: string },
+  ): Promise<{ profile: OmnicodeProfileSummaryInfo }> =>
+    requireBridge(window.zcode.adoptOmnicodeConsole?.(payload)),
   // [OmniCode] 失败态恢复入口：手动粘贴完整 OAuth 回调 URL（spec: docs/omnicode/instance-login-browser.md）。
   // 与 printPageToPdf 同模式：底层桥缺席（旧 preload）时保持 undefined——
   // IPlatformService 上为可选方法，UI 侧据此隐藏“高级恢复”入口，而非提交时报错。

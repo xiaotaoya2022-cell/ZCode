@@ -23,9 +23,14 @@ export interface OmnicodeInstanceBridgeCommand {
     | "restore"
     // M2 v1 平铺编排（spec §实时视窗）：arrange 带目标矩形，restoreBounds 按实例侧基线回位
     | "arrange"
-    | "restoreBounds";
+    | "restoreBounds"
+    // [OmniCode] 批次2 B2-1（T4）：管理器把"打开工作区"请求直转实例（实例走自身
+    // 正常打开流程，尊重工作区锁）；path 为本地目录绝对路径
+    | "openWorkspace";
   /** arrange 命令的目标矩形（父进程由 workArea 计算后下发）。 */
   bounds?: { x: number; y: number; width: number; height: number };
+  /** openWorkspace 命令的工作区目录路径。 */
+  path?: string;
 }
 
 export interface OmnicodeInstanceBridgeListeners {
