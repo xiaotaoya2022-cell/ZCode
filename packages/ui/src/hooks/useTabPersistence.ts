@@ -111,7 +111,7 @@ function buildDefaultPersistPatch(state: TabStoreState): Partial<AppSettings> {
  * 独立于活动 tab 计算——活动 tab 是远程/绑定中时集合仍要如实上报，否则已打开的
  * 本地工作区会在 Host 侧被误判为"已关闭"而提前释放锁。
  */
-function collectOpenLocalWorkspacePaths(state: TabStoreState): string[] {
+export function collectOpenLocalWorkspacePaths(state: TabStoreState): string[] {
   const paths = new Set<string>();
   for (const tab of state.tabs) {
     if (!isWorkspaceTab(tab)) continue;

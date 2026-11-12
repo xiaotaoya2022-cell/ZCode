@@ -107,7 +107,8 @@ function GroupedTaskRowComponent({
   const workspaceLockedReason = lockedByOther
     ? intl.formatMessage(
         { id: "workspaceSidebar.omnicodeLockedBy" },
-        { profileId: lockedByOther.profileId },
+        // [OmniCode] B2 评审修复（C5）：展示持有者实例名（displayName 优先，缺省回退 profileId）
+        { name: lockedByOther.displayName?.trim() || lockedByOther.profileId },
       )
     : undefined;
   const workspaceActionsDisabledReason = workspaceActionsDisabled

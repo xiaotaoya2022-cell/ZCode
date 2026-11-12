@@ -51,9 +51,10 @@ export interface WorkspaceTabState extends TabState {
    * [OmniCode] B2-2 只读观察者标记（spec: docs/omnicode/profile-runtime.md §批次2 D8）：
    * 存在 = 该工作区被他实例持锁，本 tab 以观察者（只读）形态打开——不获取工作区锁、
    * 不进 openLocalWorkspaces 锁集合、不持久化（重启后由恢复守卫重新裁决）。
-   * holderProfileId 用于横幅/提示展示持有者实例。
+   * holderProfileId 用于横幅/提示展示持有者实例；holderDisplayName（B2 评审修复 C5）
+   * = 持有者实例显示名，展示时优先、缺省回退 profileId（老锁文件兼容）。
    */
-  omnicodeObserver?: { holderProfileId: string };
+  omnicodeObserver?: { holderProfileId: string; holderDisplayName?: string };
 }
 
 export interface WorkspaceTabOptions {
@@ -67,7 +68,7 @@ export interface WorkspaceTabOptions {
   localWorkspacePath?: string;
   workspacePurpose?: WorkspacePurpose;
   /** [OmniCode] B2-2 观察者打开（锁冲突对话框「只读打开」）时携带。 */
-  omnicodeObserver?: { holderProfileId: string };
+  omnicodeObserver?: { holderProfileId: string; holderDisplayName?: string };
 }
 
 export interface RestorableWorkspaceTab {
@@ -94,9 +95,20 @@ export function isWorkspaceTabReadOnly(tab: WindowTabState): tab is WorkspaceTab
 
 /** [OmniCode] B2-2 观察者 tab：工作区被他实例持锁，以只读形态打开（不获取锁）。 */
 export function isWorkspaceTabObserver(tab: WindowTabState): tab is WorkspaceTabState & {
-  omnicodeObserver: { holderProfileId: string };
+  omnicodeObserver: { holderProfileId: string; holderDisplayName?: string };
 } {
   return isWorkspaceTab(tab) && tab.omnicodeObserver !== undefined;
+}
+
+/**
+ * [OmniCode] B2 评审修复（C5）：持有者展示名——优先 displayName，缺省回退 profileId
+ * （老锁文件/未知持有者兼容）。横幅、锁冲突对话框、toast 统一经此归一。
+ */
+export function omnicodeObserverHolderLabel(holder: {
+  holderProfileId: string;
+  holderDisplayName?: string;
+}): string {
+  return holder.holderDisplayName?.trim() || holder.holderProfileId;
 }
 
 /** [OmniCode] B2-2 读取某工作区的观察者持有者（非观察者 tab 返回 null），供横幅/原因文案使用。 */
@@ -104,12 +116,12 @@ export function findWorkspaceObserverHolder(
   state: Pick<TabStoreState, "tabs">,
   workspacePath: string,
   workspaceIdentity?: string,
-): string | null {
+): { holderProfileId: string; holderDisplayName?: string } | null {
   const workspaceKey = workspaceIdentity?.trim() || workspacePath;
   for (const tab of state.tabs) {
     if (!isWorkspaceTab(tab)) continue;
     if ((tab.workspaceIdentity?.trim() || tab.workspacePath) !== workspaceKey) continue;
-    return tab.omnicodeObserver?.holderProfileId ?? null;
+    return tab.omnicodeObserver ?? null;
   }
   return null;
 }
@@ -182,6 +194,14 @@ export interface TabStoreState {
   restoreTabs: (tabs: Array<string | RestorableWorkspaceTab>, activeIndex: number) => void;
   /** 启动首帧后补齐持久化标签页；保留当前 active identity 和用户在此期间新增的标签页。 */
   completeTabRestore: (tabs: Array<string | RestorableWorkspaceTab>) => void;
+  /**
+   * [OmniCode] B2 评审修复（P1-1）：清除某工作区 tab 的观察者标记。
+   * 正常打开路径（saveProject 锁守卫放行后）调用——否则 mergeWorkspaceTabOptions 的
+   * `options?.omnicodeObserver ?? tab.omnicodeObserver` 会让观察者 tab 在正常打开后
+   * 永远保持只读，且该工作区因观察者标记不进 openLocalWorkspaces 锁集合（第三实例
+   * 可再打开 = 双开）。清除后锁集合采集恢复包含该工作区。
+   */
+  clearOmnicodeObserver: (workspacePath: string) => void;
 }
 
 // ============================================================================
@@ -779,6 +799,20 @@ export function createTabStore(storage: StorageLike | null | undefined = undefin
             expansionState,
           ),
         };
+      });
+    },
+
+    clearOmnicodeObserver: (workspacePath) => {
+      set((state) => {
+        let changed = false;
+        const tabs = state.tabs.map((tab) => {
+          if (!isWorkspaceTab(tab) || tab.workspacePath !== workspacePath) return tab;
+          if (tab.omnicodeObserver === undefined) return tab;
+          changed = true;
+          const { omnicodeObserver: _omnicodeObserver, ...rest } = tab;
+          return rest as WorkspaceTabState;
+        });
+        return changed ? { tabs } : state;
       });
     },
   }));

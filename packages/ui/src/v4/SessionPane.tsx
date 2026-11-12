@@ -354,8 +354,9 @@ import { isProviderNotReadyError } from "@/lib/chatPrepareError.js";
 import { useOptionalCodingPlanUpgradeDialog } from "@/settings/CodingPlanUpgradeDialogProvider.js";
 import { setPendingSettingsSectionIntent } from "@/lib/settingsNavigation.js";
 import { useOptionalTabStore } from "@/store/TabStoreProvider.js";
-// [OmniCode] B2-2 观察者横幅：读取观察者 tab 持有者（只读打开，spec §批次2 D8）
-import { findWorkspaceObserverHolder } from "@/store/tabStore.js";
+// [OmniCode] B2-2 观察者横幅：读取观察者 tab 持有者（只读打开，spec §批次2 D8）；
+// B2 评审修复（C5）：展示持有者实例名（displayName 优先，缺省回退 profileId）
+import { findWorkspaceObserverHolder, omnicodeObserverHolderLabel } from "@/store/tabStore.js";
 import { useIsMobileTextInputViewport } from "@/lib/mobileTextInput.js";
 import type {
   OpenPlanDetailSideTabRequest,
@@ -6684,7 +6685,7 @@ export function SessionPane({
             <span className="min-w-0 truncate">
               {intl.formatMessage(
                 { id: "omnicode.observer.banner" },
-                { profileId: omnicodeObserverHolder },
+                { name: omnicodeObserverHolderLabel(omnicodeObserverHolder) },
               )}
             </span>
           </div>

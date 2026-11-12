@@ -33,6 +33,12 @@ export interface WorkspaceLockCoordinatorOptions {
   readLocalProjectPaths: () => Promise<string[]>;
   /** 当前实例身份（实例进程由 profileBootstrap 注入 OMNICODE_PROFILE_ID；默认实例为 "default"） */
   profileId: string;
+  /**
+   * [OmniCode] B2 评审修复（C5）：持有者实例显示名（profileBootstrap 注入
+   * OMNICODE_PROFILE_NAME，与锁身份同源）——写入锁文件，锁提示展示实例名而非 profileId。
+   * 缺省时锁文件不含该字段，消费方回退 profileId（老链路兼容）。
+   */
+  displayName?: string;
   /** 锁持有者 pid = Host 进程 pid：窗口/Host 退出 → 锁靠存活检查自愈 */
   pid: number;
   log?: (message: string, error?: unknown) => void;
@@ -70,7 +76,7 @@ function readLegacyActiveWorkspaceLockPaths(settings: AppSettings): string[] {
 export function attachWorkspaceLockCoordinator(
   options: WorkspaceLockCoordinatorOptions,
 ): WorkspaceLockCoordinator {
-  const { settingService, projectService, readLocalProjectPaths, profileId, pid } = options;
+  const { settingService, projectService, readLocalProjectPaths, profileId, displayName, pid } = options;
   const log = (message: string, error?: unknown): void => {
     if (error) console.warn(message, error);
     else console.warn(message);
@@ -84,7 +90,7 @@ export function attachWorkspaceLockCoordinator(
   function acquireHeldOrContended(path: string): void {
     let result: ReturnType<typeof acquireWorkspaceLock>;
     try {
-      result = acquireWorkspaceLock(path, profileId, pid);
+      result = acquireWorkspaceLock(path, profileId, pid, displayName);
     } catch (error) {
       log("[omnicode] 获取工作区锁失败:", error);
       return;
@@ -99,7 +105,9 @@ export function attachWorkspaceLockCoordinator(
     // 灰显由 readTree 装饰（ownedBySelf=false）呈现，心跳期重试直至对方释放或本集合移除。
     if (!contendedLockPaths.has(path)) {
       log(
-        `[omnicode] 工作区锁被占用: ${result.owner?.workspacePath ?? path}（实例 ${result.owner?.profileId ?? "unknown"}）`,
+        `[omnicode] 工作区锁被占用: ${result.owner?.workspacePath ?? path}（实例 ${
+          result.owner?.displayName ?? result.owner?.profileId ?? "unknown"
+        }）`,
       );
     }
     contendedLockPaths.add(path);

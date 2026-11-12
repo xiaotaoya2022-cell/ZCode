@@ -226,6 +226,9 @@ async function doLaunch(
     env: {
       ...process.env,
       OMNICODE_PROFILE_ID: profileId,
+      // [OmniCode] B2 评审修复（C5）：实例显示名随身份同源注入（spawn 时管理器已知名）——
+      // 实例 bootstrap 自派生时读同一 profile.json，双保险同值；锁获取时写进锁文件。
+      OMNICODE_PROFILE_NAME: record?.name?.trim() ?? "",
       ZCODE_DESKTOP_USER_DATA_DIR: join(profileDir, "electron-userdata"),
       ZCODE_DESKTOP_SESSION_DATA_DIR: join(profileDir, "electron-session"),
       // 批次2 B2-1（T5 收养）：数据根五件套中的两件随 dataBaseDirOverride 指向旧根；
