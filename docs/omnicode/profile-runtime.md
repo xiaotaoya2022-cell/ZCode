@@ -148,3 +148,19 @@
 - `zcode://` OS 注册仍是全局单点：M1 期间实例内 OAuth 登录建议使用控制台所在实例或延至 M1.5 路由方案。（记录于 M1.5 todo）
 - dev 态实例 = `node_modules/electron/dist/electron.exe` 拉起，窗口标题与正式版无差异，靠 `OmniCode-<profileId>` 应用名与日志 pid 区分。
 - （2026-11-12 已由三段式优雅停收口，原"直接 /T /F"建议废止）`closeToTrayOnWindows=true` 的实例在第一段 WM_CLOSE 会转为隐藏而非退出 → 第二段超时后自动 `/T /F` 强杀，停机语义闭环。
+
+## 批次2：进程模式与身份（D7，2026-11-12 B2-1）
+
+同一可执行体的互斥双模式（判据唯一化，纯函数见 `packages/shared/src/omnicodeAuth.ts`）：
+
+- **管理器模式** = `ZCODE_PRODUCT_FLAVOR === "omnicode" ∧ env 无 OMNICODE_PROFILE_ID`（`isOmnicodeManagerProcess`）。渲染 ConsoleHome（唯一屏）；不恢复会话、不预热 agent、不跑 cron 调度器、不装工作区锁协调器（host 侧按 `OMNICODE_CONSOLE_MODE=1` 跳过，env 经 buildHostProcessEnv 继承）、退出确认换为"有 N 个实例正在运行…实例将独立存活"的原生框。**保留每窗 local Host 进程**——renderer 的 DatabaseStartupAdmission（main.tsx）以 host 的 ServicePort+startup state 为挂载前置，完全跳过会让管理器卡在启动 loading（设计 §2.2"不起 host"在 renderer 启动契约下的落地修正，见 B2-1-NOTES 决策记录）。
+- **实例模式** = argv `--omnicode-profile=<id>`（仅管理器可 spawn）。完整 ZCode 会话栈，永不渲染 ConsoleHome；启动时自带数据根的凭据备份调度（`startOmnicodeInstanceSelfCredentialBackupScheduler`，管理器关闭后独立存活的兜底）。
+- 官方 flavor（production/preview）恒不落入两种模式——本批全部改动以 flavor 判据为前置，官方行为零影响。
+
+**renderer 身份通道**：preload 暴露 `omnicodeInstanceId: string | null`（env 快照，非 IPC）与 `omnicodeInstanceTitle`（"ZCode [实例名]"，profileBootstrap 注入 env，renderer 入口据此设 document.title）。Root.tsx 早返回条件收紧为 `flavor==="omnicode" && omnicodeInstanceId==null`——实例窗口恢复官方渲染路径（工作台/欢迎登录屏），这是"点击启动实例打开了另一个管理器"根因（批次2a 只判编译期 flavor）的修复。
+
+**嵌套管理器封死（三层）**：① `registerDesktopOmnicodeProfileIpcHandlers` 在 omnicode 实例进程整体跳过（桥 server、reconcile、Profile IPC、全量凭据备份调度都不装配；官方 flavor 保持装配不变）；② 实例 preload 按 identity 裁剪 contextBridge 面（profile 管理 API 不暴露，`submitOmnicodeCallback` 保留——实例自身的 OAuth 恢复通道）；③ 实例 renderer 的设置页 Profile 分区不渲染（`ProfileMultiInstanceSection` early-return）。
+
+**控制台工作区路由（缺陷6 收口）**：桥协议新增 `openWorkspace {path}` 命令（管理器 → 实例；实例侧经官方 `OpenWorkspacePath` 通道走自身打开流程，过 saveProject 锁守卫=尊重工作区锁）。管理器收到"打开工作区"（second-instance 参数 / zcode:// 深链 / 冷启动 argv，统一入口 `openOmnicodeManagerWorkspace`：网络路径早拒 + 目录校验 + 外部来源确认与官方同规）：恰一实例直转；多实例原生选择框（按钮列实例名）；零实例原生引导"新建并打开"——新建 profile 后以 `--omnicode-open-workspace=<path>` argv 启动，实例 bootstrap 搬运到 `OMNICODE_OPEN_WORKSPACE` env，whenReady 后经官方 handleOpenWorkspacePath 队列投递。OAuth 回调维持既有投递文件中继，不动。
+
+**旧控制台数据收养（保登录态）**：profile 记录新增可选 `dataBaseDirOverride`——`.zcode` 数据根（凭据/会话库/setting.json/credential-secret）指向旧 `~/.omnicode/console` 目录，**零拷贝**；electron-userdata/session 仍用 profile 自身目录（auth 分区重建即可）。双端同源：instanceManager.doLaunch 的 spawn env 与 profileBootstrap 的自派生 env 都读同一 profile.json。收养入口：ConsoleHome 列表区一行「将原主实例收养为实例（保留登录与历史）」，仅当旧根存在 credentials.json 且无 profile 已指向（重复收养=两实例写同一会话库，拒绝）；名称自增避让（`实例-收养`/`实例-收养 2`…）。UI 状态与处理函数为可复用导出（`useOmnicodeConsoleAdoption`，B2-3 重做控制台时直接复用）。克隆不携带 override（克隆体已有自身 .zcode 拷贝，共享 override 会复刻串流事故）。

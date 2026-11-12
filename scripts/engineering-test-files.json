@@ -35,6 +35,7 @@
   "packages/desktop/test/download-native-search-tools.test.ts",
   "packages/desktop/test/dynamicWorkflowConfigMockServer.test.ts",
   "packages/desktop/test/e2eAllCoverageRunner.test.ts",
+  "packages/desktop/test/omnicodeBatch2ProcessMode.test.ts",
   "packages/desktop/test/e2eAppOutputStage.test.ts",
   "packages/desktop/test/e2eAtomicJsonFile.test.ts",
   "packages/desktop/test/e2eBashPrefixPermissionShim.test.ts",

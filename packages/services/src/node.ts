@@ -2383,6 +2383,12 @@ export function createLocalServices(options: {
       }),
     },
   });
+  // [OmniCode] 批次2 B2-1（T2 管理器瘦身）：管理器（控制台）进程不装工作区锁面——
+  // 管理器不打开工作区、不参与实例互斥（协调器心跳/获取全部跳过；saveProject 打开
+  // 锁守卫对无工作区的管理器是纯开销）。门控 env 由 main 在管理器身份确立时注入
+  // （OMNICODE_CONSOLE_MODE=1），host utilityProcess 经 buildHostProcessEnv 继承。
+  // 官方 flavor / Profile 实例路径完全不受影响。
+  const omnicodeConsoleMode = process.env.OMNICODE_CONSOLE_MODE === "1";
   // [OmniCode] 锁下沉（spec §工作区互斥锁）：saveProject(reuseExistingRoot) 是全部目录打开入口
   // （对话框 / 拖拽 / 项目根行 / 系统右键 / 快捷键）的 Host 侧原子必经点——renderer 各入口先经它
   // 登记项目，失败即整体中止，不会进入 activateOrSetWorkspace/addTab，保证"进入前拒绝"、
@@ -2392,35 +2398,41 @@ export function createLocalServices(options: {
   // 注意：装配在工作区锁协调器的共享表合并之前，合并调用必须走下方原始 projectService 绕过守卫
   // （登记进项目库不是"打开工作区"，被占用的工作区也必须能进共享池开箱）。
   const selfProfileId = process.env.OMNICODE_PROFILE_ID?.trim() || "default";
-  const projectServiceWithOpenLockGuard: IProjectService = {
-    ...projectService,
-    saveProject: (input: SaveProjectInput) => {
-      if (
-        input.reuseExistingRoot &&
-        (!input.hostId || input.hostId === "local") &&
-        input.roots?.length === 1
-      ) {
-        assertWorkspaceNotLockedByOther(input.roots[0]!, selfProfileId);
-      }
-      return projectService.saveProject(input);
-    },
-  };
+  const projectServiceWithOpenLockGuard: IProjectService = omnicodeConsoleMode
+    ? projectService
+    : {
+        ...projectService,
+        saveProject: (input: SaveProjectInput) => {
+          if (
+            input.reuseExistingRoot &&
+            (!input.hostId || input.hostId === "local") &&
+            input.roots?.length === 1
+          ) {
+            assertWorkspaceNotLockedByOther(input.roots[0]!, selfProfileId);
+          }
+          return projectService.saveProject(input);
+        },
+      };
   // [OmniCode] 装配工作区锁协调器：openLocalWorkspaces 打开集合变更 → 集合对账获取/释放 + 10s 全量心跳；
   // 装配时把共享工作区表缺失项 saveProject 进本实例项目库（新实例开箱自带全部工作区；
   // 此处传原始 projectService——合并登记绕过打开锁守卫）。
-  omnicodeWorkspaceLockCoordinator = attachWorkspaceLockCoordinator({
-    settingService,
-    projectService,
-    readLocalProjectPaths: async () => {
-      const repository = await taskIndexRepo.getProjectRepository();
-      return repository
-        .readTree({ includeTasks: false })
-        .projects.filter((project) => !project.deleted)
-        .flatMap((project) => project.roots.map((root) => root.rootPath));
-    },
-    profileId: process.env.OMNICODE_PROFILE_ID?.trim() || "default",
-    pid: process.pid,
-  });
+  // 管理器模式跳过装配（无工作区可锁；也不把共享表登记进管理器项目库——管理器不再
+  // 把 console 数据根当自己的会话数据，spec §批次2：旧控制台数据收养）。
+  omnicodeWorkspaceLockCoordinator = omnicodeConsoleMode
+    ? undefined
+    : attachWorkspaceLockCoordinator({
+        settingService,
+        projectService,
+        readLocalProjectPaths: async () => {
+          const repository = await taskIndexRepo.getProjectRepository();
+          return repository
+            .readTree({ includeTasks: false })
+            .projects.filter((project) => !project.deleted)
+            .flatMap((project) => project.roots.map((root) => root.rootPath));
+        },
+        profileId: process.env.OMNICODE_PROFILE_ID?.trim() || "default",
+        pid: process.pid,
+      });
   const taskGroupService = createTaskGroupService({
     database: () => taskIndexRepo.getOrganizationDatabase(),
     resolveTasks: async (refs) => {

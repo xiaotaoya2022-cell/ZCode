@@ -12,6 +12,12 @@ import { startOmnicodeInstanceBridgeClient } from "./omnicode/instanceBridgeClie
 import "./omnicode/profileBootstrap.js";
 // [OmniCode] 实例 relaunch 身份续接（spec §产品规则 1 / D6）；置于 profileBootstrap 之后
 import { buildOmnicodeInstanceRelaunchArgs } from "./omnicode/contract.js";
+// [OmniCode] 批次2 B2-1：管理器/实例双模式分流（T2 瘦身 + T4 工作区路由）
+import {
+  listOmnicodeRunningInstances,
+  routeOmnicodeWorkspaceOpenFromManager,
+  startOmnicodeInstanceSelfCredentialBackupScheduler,
+} from "./omnicode/contract.js";
 import "./desktopEarlyDataBaseDirBootstrap.js";
 import "./desktopEarlyChromiumHardwareAccelerationBootstrap.js";
 import { powerMonitor, powerSaveBlocker } from "electron";
@@ -91,6 +97,8 @@ import {
   PlatformChannels,
   ZCODE_ENV,
   ZCODE_PRODUCT_FLAVOR,
+  isOmnicodeManagerProcess,
+  isOmnicodeProfileInstanceEnv,
   ZCODE_AUTO_UPDATE_ENABLED,
   DEFAULT_ZCODE_ENDPOINT_ORIGIN,
   DEFAULT_LOCALE,
@@ -215,8 +223,11 @@ import { spawnCronScheduler, type CronSchedulerHandle } from "./desktopCronSched
 import { createExtensionHostSupervisor } from "#src/main/extensionHostSupervisor.js";
 import {
   clearOAuthRoutesForWindow,
+  confirmExternalWorkspaceOpen,
   handleDeepLink,
   handleOpenWorkspacePath,
+  isNetworkWorkspacePath,
+  isValidLocalWorkspaceDirectory,
   registerDeepLinkProtocol,
   resolveExternalWorkspaceOpenDialogCopy,
 } from "./desktopOAuthDeepLink.js";
@@ -227,7 +238,9 @@ import {
   createDeepLinkSingleInstanceData,
   extractWorkspaceOpenPath,
   extractDeepLinkUrlFromArgs,
+  extractDeepLinkUrlFromSingleInstanceData,
   extractOpenWorkspacePathFromArgs,
+  extractOpenWorkspacePathFromSingleInstanceData,
   isWorkspaceOpenUrl,
 } from "./desktopDeepLinkUrl.js";
 import { createRemoteWorkspaceSessionManager } from "./desktopRemoteSessions.js";
@@ -995,6 +1008,63 @@ let startupOpenWorkspaceRequest: ExplicitStartupWorkspaceRequest | null =
       ? { path: startupDeepLinkWorkspacePath, source: "deep-link" }
       : null;
 
+// ─── [OmniCode] 批次2 B2-1：管理器/实例双模式分流（spec profile-runtime.md D7） ───
+// 判据唯一化：管理器 = omnicode flavor ∧ env 无 OMNICODE_PROFILE_ID（profileBootstrap
+// 作为首个副作用导入已在此之前完成身份注入）。官方 flavor 恒为 false——本批所有
+// 管理器分流都以它为前置条件，官方行为零影响。
+const isOmnicodeManagerMain = isOmnicodeManagerProcess(ZCODE_PRODUCT_FLAVOR);
+if (isOmnicodeManagerMain) {
+  // 供 host utilityProcess 继承（services/node.ts 据此跳过工作区锁协调器装配）；
+  // 读 ??= 不覆盖用户显式同名 env（该命名空间归 OmniCode 所有）。
+  process.env.OMNICODE_CONSOLE_MODE ??= "1";
+}
+// 管理器模式下待路由的"打开工作区"请求（冷启动 argv/deep-link/open-url 在窗口
+// 创建前到达时先入队，whenReady 后统一路由到实例）。
+let pendingOmnicodeManagerWorkspaceOpen: { path: string; confirmExternal: boolean } | null = null;
+
+/**
+ * [OmniCode] 批次2 B2-1（T4）：管理器收到"打开工作区"类请求的统一入口（second-instance
+ * 参数 / zcode:// 深链 / 冷启动 argv）。校验与外部确认沿用官方 deep-link 同一规则，
+ * 之后路由：恰一实例直转 / 多实例原生选择 / 零实例引导"新建并打开"。
+ */
+async function openOmnicodeManagerWorkspace(
+  workspacePath: string,
+  options: { confirmExternal: boolean },
+): Promise<void> {
+  if (isNetworkWorkspacePath(workspacePath)) {
+    logger.warn("[omnicode] 已拒绝网络工作区路径（管理器路由）", { path: workspacePath });
+    return;
+  }
+  if (!isValidLocalWorkspaceDirectory(workspacePath)) {
+    logger.warn("[omnicode] 打开工作区路径无效（管理器路由）", { path: workspacePath });
+    return;
+  }
+  if (options.confirmExternal) {
+    const parentWindow = getApplicationWindowsExcludingCuaIndicator()[0] ?? null;
+    if (
+      !confirmExternalWorkspaceOpen(
+        workspacePath,
+        logger,
+        parentWindow,
+        resolveExternalWorkspaceConfirmationCopy(),
+      )
+    ) {
+      return;
+    }
+  }
+  try {
+    await routeOmnicodeWorkspaceOpenFromManager(workspacePath, {
+      isZh: currentApplicationLocale === "zh-CN",
+      resolveNewProfileName: () =>
+        currentApplicationLocale === "zh-CN" ? "实例" : "Instance",
+      parentWindow: getApplicationWindowsExcludingCuaIndicator()[0] ?? null,
+      logger,
+    });
+  } catch (error) {
+    logger.warn("[omnicode] 工作区路由到实例失败:", error);
+  }
+}
+
 // 手机实时日志落盘目录：放在 logs/ 下，「导出日志」打包时自动带上。
 function getMobileRealtimeLogDir(): string {
   return join(getAppConfigDir(), "logs", "mobile");
@@ -1169,6 +1239,21 @@ function focusForceUpdateGateWindow() {
 const primaryWindowCoordinator = createPrimaryWindowCoordinator({
   listWindows: getApplicationWindowsExcludingCuaIndicator,
   resolveStartupWindowBootstrap: () => {
+    // [OmniCode] 批次2 B2-1（T2）：管理器不恢复会话/不预热 agent——restoreSession=false
+    // 且不解析 lastActiveWorkspace（startupWorkspace 的会话恢复链对控制台无意义）。
+    // 冷启动"打开工作区"请求转存路由队列（T4），不进主窗口 bootstrap。
+    if (isOmnicodeManagerMain) {
+      if (startupOpenWorkspaceRequest) {
+        const request = startupOpenWorkspaceRequest;
+        startupOpenWorkspaceRequest = null;
+        startupDeepLinkConsumptionGate.markStartupRequestConsumed(request);
+        pendingOmnicodeManagerWorkspaceOpen ??= {
+          path: request.path,
+          confirmExternal: request.source === "deep-link",
+        };
+      }
+      return Promise.resolve({ restoreSession: false });
+    }
     if (startupOpenWorkspaceRequest) {
       const request = startupOpenWorkspaceRequest;
       startupOpenWorkspaceRequest = null;
@@ -1610,6 +1695,11 @@ function getCreatingWorktreeCount(
 }
 
 function shouldConfirmAppQuit() {
+  // [OmniCode] 批次2 B2-1（T2 管理器关闭语义）：管理器没有会话/worktree 退出阻塞，
+  // 只在有运行实例时确认一次（"关闭不影响实例"的知情确认）；实例进程独立存活。
+  if (isOmnicodeManagerMain) {
+    return listOmnicodeRunningInstances().length > 0;
+  }
   // 开发环境里的普通会话经常需要重启 Electron，只在 production 下拦截，避免打断调试。
   // 正在创建的 worktree 关闭后无法恢复，任何环境都要确认。
   return (
@@ -1648,6 +1738,37 @@ function confirmAppQuit(originWindow?: BrowserWindow | null) {
   if (!shouldConfirmAppQuit()) {
     logger.info(`[app-quit] quit confirmation skipped in ${ZCODE_ENV}`);
     return true;
+  }
+
+  // [OmniCode] 批次2 B2-1（T2 管理器关闭语义）：有运行实例时原生确认"关闭管理器不影
+  // 响实例"；确认退出后实例进程独立存活（spawn 子进程默认不随父进程退出，代码无
+  // 父退出联动 kill，验证见 B2-1-NOTES）。取消则不退出。
+  if (isOmnicodeManagerMain) {
+    const managerIsZh = currentApplicationLocale === "zh-CN";
+    const runningCount = listOmnicodeRunningInstances().length;
+    if (runningCount === 0) return true;
+    const managerTargetWindow =
+      originWindow && !originWindow.isDestroyed()
+        ? originWindow
+        : (BrowserWindow.getFocusedWindow() ??
+          getApplicationWindowsExcludingCuaIndicator()[0] ??
+          null);
+    const managerDialogOptions = {
+      type: "question" as const,
+      buttons: managerIsZh ? ["退出管理器", "取消"] : ["Quit Console", "Cancel"],
+      defaultId: 1,
+      cancelId: 1,
+      title: managerIsZh ? "退出管理器" : "Quit OmniCode Console",
+      message: managerIsZh ? "确认退出管理器？" : "Quit the OmniCode console?",
+      detail: managerIsZh
+        ? `有 ${runningCount} 个实例正在运行。关闭管理器不影响它们，实例将独立存活。`
+        : `${runningCount} instance(s) are running. Closing the console does not affect them; they keep running independently.`,
+      icon: nativeImage.createFromPath(iconPath),
+    };
+    const managerResult = managerTargetWindow
+      ? dialog.showMessageBoxSync(managerTargetWindow, managerDialogOptions)
+      : dialog.showMessageBoxSync(managerDialogOptions);
+    return managerResult === 0;
   }
 
   const isZh = currentApplicationLocale === "zh-CN";
@@ -2189,6 +2310,18 @@ app.on("open-url", (event, url) => {
     focusForceUpdateGateWindow();
     return;
   }
+  // [OmniCode] 批次2 B2-1（T4）：管理器不自己打开工作区——冷启动入队，热态直接路由
+  // 到实例（恰一直转/多实例选择/零实例引导新建）。外部来源确认在路由入口统一处理。
+  if (isOmnicodeManagerMain && workspacePath) {
+    if (getApplicationWindowsExcludingCuaIndicator().length === 0 && !app.isReady()) {
+      pendingOmnicodeManagerWorkspaceOpen ??= { path: workspacePath, confirmExternal: true };
+      return;
+    }
+    void primaryWindowCoordinator
+      .ensurePrimaryWindow("omnicode-open-url-workspace")
+      .then(() => openOmnicodeManagerWorkspace(workspacePath, { confirmExternal: true }));
+    return;
+  }
   if (workspacePath && getApplicationWindowsExcludingCuaIndicator().length === 0) {
     // macOS 冷启动 Finder Service 会先触发 open-url，再创建首窗。
     // 把目标目录按 deep link 来源记录，首窗 bootstrap 前仍要走确认 gate。
@@ -2208,6 +2341,35 @@ if (!gotTheLock) {
   app.quit();
 }
 app.on("second-instance", (_event, argv, _workingDirectory, additionalData) => {
+  // [OmniCode] 批次2 B2-1（T4）：管理器把"打开工作区"请求路由到实例，不落自身 renderer
+  //（此前控制台静默丢弃该类请求，spec §批次2 缺陷6）。OAuth 回调等非工作区深链照旧走
+  // 官方 handleDeepLink（跨实例投递文件中继不受影响）。
+  if (isOmnicodeManagerMain) {
+    const managerUrl =
+      extractDeepLinkUrlFromSingleInstanceData(additionalData) ??
+      extractDeepLinkUrlFromArgs(argv);
+    const managerUrlWorkspacePath = managerUrl
+      ? extractOpenWorkspacePathFromDeepLinkUrl(managerUrl)
+      : null;
+    const managerWorkspacePath =
+      extractOpenWorkspacePathFromSingleInstanceData(additionalData) ??
+      extractOpenWorkspacePathFromArgs(argv) ??
+      managerUrlWorkspacePath;
+    if (managerWorkspacePath && !forceUpdateMainWindowCreationBlocked) {
+      void openOmnicodeManagerWorkspace(managerWorkspacePath, {
+        confirmExternal: managerUrlWorkspacePath === managerWorkspacePath,
+      });
+      return;
+    }
+    if (managerUrl && !forceUpdateMainWindowCreationBlocked) {
+      handleDeepLink(managerUrl, logger, {
+        confirmationCopy: resolveExternalWorkspaceConfirmationCopy(),
+        resolveApplicationWindow: () => getApplicationWindowsExcludingCuaIndicator()[0] ?? null,
+      });
+      return;
+    }
+    // 强制升级期或无深链：落回下方官方聚焦/忽略行为
+  }
   if (
     handleSecondInstanceWorkspaceRequest({
       additionalData,
@@ -2334,6 +2496,12 @@ app.whenReady().then(async () => {
     app.quit();
   });
   onLocalDatabaseStartupReady(() => {
+    // [OmniCode] 批次2 B2-1（T2）：管理器不跑 cron 调度器（管理器无任务/会话，调度
+    // 语义只属于实例；省一个常驻 utilityProcess）。实例进程照常装配。
+    if (isOmnicodeManagerMain) {
+      logger.info("[omnicode] 管理器模式：跳过 cron 调度器装配");
+      return;
+    }
     try {
       cronScheduler = spawnCronScheduler({
         hostProcessLocalEnv,
@@ -2755,6 +2923,40 @@ app.whenReady().then(async () => {
   await primaryWindowCoordinator.ensurePrimaryWindow("app-ready");
   // [OmniCode] Profile 实例回连控制台桥接（仅实例身份启动时激活；控制台/官方身份为 no-op）
   startOmnicodeInstanceBridgeClient();
+  // [OmniCode] 批次2 B2-1（T2）：实例进程自带数据根的凭据备份调度（管理器关闭后实例
+  // 独立存活的兜底；管理器的全量调度器不随 T3 门控丢实例侧覆盖）
+  if (isOmnicodeProfileInstanceEnv()) {
+    startOmnicodeInstanceSelfCredentialBackupScheduler();
+  }
+  // [OmniCode] 批次2 B2-1（T4）：实例带工作区启动（管理器"新建并打开"经 argv 下发）→
+  // 走官方打开通道（pendingOpenWorkspaceRequest 队列等 renderer ready；打开动作经
+  // saveProject 锁守卫，尊重工作区锁）。路径非法/网络路径静默忽略并告警。
+  if (isOmnicodeProfileInstanceEnv()) {
+    const instanceOpenWorkspacePath = process.env.OMNICODE_OPEN_WORKSPACE?.trim() ?? "";
+    if (instanceOpenWorkspacePath) {
+      if (
+        !isNetworkWorkspacePath(instanceOpenWorkspacePath) &&
+        isValidLocalWorkspaceDirectory(instanceOpenWorkspacePath)
+      ) {
+        handleOpenWorkspacePath(instanceOpenWorkspacePath, logger, {
+          allowWithoutReadyWindow: true,
+          resolveApplicationWindow: () => getApplicationWindowsExcludingCuaIndicator()[0] ?? null,
+        });
+      } else {
+        logger.warn("[omnicode] 实例启动工作区路径无效，已忽略", {
+          path: instanceOpenWorkspacePath,
+        });
+      }
+    }
+  }
+  // [OmniCode] 批次2 B2-1（T4）：管理器冷启动期间入队的"打开工作区"请求统一路由到实例
+  if (isOmnicodeManagerMain && pendingOmnicodeManagerWorkspaceOpen) {
+    const pending = pendingOmnicodeManagerWorkspaceOpen;
+    pendingOmnicodeManagerWorkspaceOpen = null;
+    void openOmnicodeManagerWorkspace(pending.path, {
+      confirmExternal: pending.confirmExternal,
+    });
+  }
 
   const primaryWindow = getApplicationWindowsExcludingCuaIndicator()[0];
   if (primaryWindow) {
