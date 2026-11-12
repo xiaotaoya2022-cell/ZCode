@@ -233,6 +233,7 @@ Win32 owned window 随 owner 销毁——管理器窗口直接销毁会**连带�
 - **订阅状态化**：管理器侧期望订阅 = `previewEnabled ∧ 卡片在视口内`（renderer IntersectionObserver 上报可见集合；`resolveOmnicodePreviewSubscriptions` 纯函数决策 + 与桥实际态 diff 后增减 `subscribeThumbnails/unsubscribeThumbnails`）。总开关关闭 = 全部退订，卡片停留最后一帧灰暗化 + 角标（不再是"连上即订阅"的粗放行为）。
 - **连接/断开即时对账（B2 评审修复 P1-2 兑现）**：`notifyOmnicodeInstanceConnected/Disconnected` 路径末尾 `reconcilePreviewSubscriptions()`——连接不再隐含订阅；v0"连上即订阅"收窄为**官方 flavor 专属**（`shouldAutoSubscribeThumbnailsOnConnect`：官方进程无订阅编排且实际无实例回连，零影响保持），omnicode 管理器完全按 总开关∧可见 对账（预览关时实例连接不产生订阅，且会补发退订纠正 v0 残余状态）。
 - **卡片帧清理（B2 评审修复 P2-8）**：实例断开（disconnected 事件）即清该实例最后一帧——已停止实例卡片显示停止占位（▶启动），不残留旧帧伪装"还有画面"；profiles 列表刷新时兜底清全部非 running 实例的帧。
+- **owned 设置/解除失败退避（B2 复审修复 N1/N2）**：PowerShell 批处理失败（被禁/超时等病态环境）时，涉事实例记 5s 退避窗口（`resolveOmnicodeOwnBackoffFilter` 纯函数决策）——退避期内跳过该实例的 own 重试与 `embedLayout` 下发，实例稳定保持桌面态（补发过 `releaseEmbed`）；杜绝 60ms 节流每轮重跑注定失败的批处理（拖动期间进程放大）与实例窗口"内嵌约束↔桌面态"来回跳。解除失败（N2）同样记退避；解除侧簿记**保持提前删**（决策记录：批处理失败可能假阴性——"成功后才删"在假阴性下簿记永久残留 owned，后续 dispatch 跳过重 own 导致窗口不跟随且无自愈；提前删 + 残留 owned 关系由下次进入内嵌时幂等重设自愈）。
 - 实例侧最小化/隐藏跳帧策略保持（隐藏窗口停留最后一帧）。
 
 ### console-ui.json 状态落盘

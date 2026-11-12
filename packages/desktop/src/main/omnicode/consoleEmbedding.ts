@@ -67,6 +67,15 @@ const instanceHwndHexByProfileId = new Map<string, string>();
 const ownedProfileIds = new Set<string>();
 /** 内嵌中但卡片滚出视口被临时隐藏的实例（回视口时 embedLayout 自带 show）。 */
 const hiddenEmbeddedProfileIds = new Set<string>();
+/**
+ * [OmniCode] B2 评审复审修复（N1/N2）：owned 设置/解除失败的每实例退避窗口
+ * （profileId → 退避截止 epoch ms）。PowerShell 病态环境（被禁/卡死超时）下，
+ * 若无退避，60ms 节流的每轮 dispatch 都会重跑注定失败的批处理（拖动期间并发
+ * 数十个待超时进程），且实例反复收 embedLayout→releaseEmbed 来回跳。退避期内
+ * 跳过该实例的 own 重试与 embedLayout 下发，实例稳定保持桌面态。
+ */
+const ownBackoffUntilByProfileId = new Map<string, number>();
+const OWN_RETRY_BACKOFF_MS = 5000;
 let latestClientLayout: OmnicodeConsoleEmbedLayoutInput | null = null;
 let managerWindowMoveListenersAttached = false;
 let dispatchTrailingTimer: NodeJS.Timeout | null = null;
@@ -315,6 +324,35 @@ export function resolveOmnicodeOwnedRegistrationOutcome(
     : { kind: "retry", profileIds: list };
 }
 
+/**
+ * [OmniCode] B2 评审复审修复（N1）：退避过滤决策（纯函数，供单测）。返回仍可尝试
+ * own 的实例与仍在退避期内的实例。now 由调用方传入（测试可注入时钟）。
+ */
+export function resolveOmnicodeOwnBackoffFilter(
+  profileIds: readonly string[],
+  ownBackoffUntilByProfileId: ReadonlyMap<string, number>,
+  now: number,
+): { eligible: string[]; backedOff: string[] } {
+  const eligible: string[] = [];
+  const backedOff: string[] = [];
+  for (const profileId of profileIds) {
+    const until = ownBackoffUntilByProfileId.get(profileId);
+    if (until !== undefined && until > now) backedOff.push(profileId);
+    else eligible.push(profileId);
+  }
+  return { eligible, backedOff };
+}
+
+function recordOwnBackoff(profileIds: readonly string[], now: number): void {
+  for (const profileId of profileIds) {
+    ownBackoffUntilByProfileId.set(profileId, now + OWN_RETRY_BACKOFF_MS);
+  }
+}
+
+function clearOwnBackoff(profileIds: readonly string[]): void {
+  for (const profileId of profileIds) ownBackoffUntilByProfileId.delete(profileId);
+}
+
 async function ownInstances(profileIds: readonly string[]): Promise<void> {
   if (embedMode !== "embedded" || switchingMode || process.platform !== "win32") return;
   const managerHex = getManagerHwndHex();
@@ -322,12 +360,19 @@ async function ownInstances(profileIds: readonly string[]): Promise<void> {
     console.warn("[omnicode] 内嵌 owned 设置跳过：管理器窗口 HWND 不可用");
     return;
   }
+  // [OmniCode] B2 评审复审修复（N1）：退避期内的实例跳过 own 重试（PowerShell 病态
+  // 环境下避免每轮 60ms 节流重跑注定失败的批处理——进程放大 + 窗口来回跳）。
+  const { eligible } = resolveOmnicodeOwnBackoffFilter(
+    profileIds,
+    ownBackoffUntilByProfileId,
+    Date.now(),
+  );
   const pending = resolveOmnicodeOwnCandidates({
     platform: process.platform,
     managerHwndHex: managerHex,
     ownedProfileIds,
     hwndHexByProfileId: instanceHwndHexByProfileId,
-    profileIds,
+    profileIds: eligible,
   });
   if (pending.length === 0) return;
   // [OmniCode] B2 评审修复（P1-3）：登记移到 PowerShell 成功之后——乐观登记会让
@@ -341,14 +386,16 @@ async function ownInstances(profileIds: readonly string[]): Promise<void> {
   );
   if (outcome.kind === "registered") {
     for (const profileId of outcome.profileIds) ownedProfileIds.add(profileId);
+    clearOwnBackoff(outcome.profileIds);
     return;
   }
-  // 失败：不登记（下次 ownInstances/dispatch 重试）+ 给实例补发 releaseEmbed——
-  // 实例侧可能已收到 embedLayout 进入内嵌约束（skipTaskbar/冻结尺寸），补发保持
-  // 桌面态 + 任务栏可见，窗口不"失踪"。
+  // 失败：不登记 + 给实例补发 releaseEmbed（实例侧可能已收到 embedLayout 进入内嵌
+  // 约束 skipTaskbar/冻结尺寸，补发保持桌面态 + 任务栏可见，窗口不"失踪"）；
+  // 并记退避（N1）——退避期内不再向该实例下发 embedLayout/own 重试。
   console.warn(
-    `[omnicode] owned 设置失败，本轮不登记并补发 releaseEmbed（下次重试）: ${outcome.profileIds.join(",")}`,
+    `[omnicode] owned 设置失败，本轮不登记并补发 releaseEmbed（${OWN_RETRY_BACKOFF_MS}ms 后重试）: ${outcome.profileIds.join(",")}`,
   );
+  recordOwnBackoff(outcome.profileIds, Date.now());
   for (const profileId of outcome.profileIds) {
     sendOmnicodeInstanceCommand(profileId, { type: "releaseEmbed" });
   }
@@ -441,7 +488,16 @@ function dispatchEmbedLayout(): void {
     }
   }
   if (screenRects.length === 0) return;
+  // [OmniCode] B2 评审复审修复（N1）：退避期内的实例不下发 embedLayout——own 失败
+  // 刚补发过 releaseEmbed（桌面态），立刻再发 embedLayout 会让窗口在两种约束间跳动。
+  const { backedOff } = resolveOmnicodeOwnBackoffFilter(
+    [...inLayout],
+    ownBackoffUntilByProfileId,
+    Date.now(),
+  );
+  const backedOffSet = new Set(backedOff);
   for (const profileId of inLayout) {
+    if (backedOffSet.has(profileId)) continue;
     sendOmnicodeInstanceCommand(profileId, { type: "embedLayout", rects: screenRects });
   }
   // 新进矩形但尚未 owned 的实例（如刚回连）补 owned（下次布局起生效）
@@ -461,11 +517,24 @@ export async function releaseEmbeddedInstances(profileIds?: readonly string[]): 
   for (const profileId of targets) {
     const hwndHex = instanceHwndHexByProfileId.get(profileId);
     if (hwndHex) pairs.push({ child: hwndHex, owner: null });
+    // [OmniCode] N2 决策：簿记仍提前删（而非"PowerShell 成功后才删"）。理由：解除
+    // 批处理的失败可能是假阴性（超时但部分/全部已解除）——提前删后，若残留 owned
+    // 关系，下次进入 embedded 时 ownInstances 会幂等重设自愈；反之"成功后才删"在
+    // 假阴性下簿记永久残留 owned → 后续 dispatch 跳过该实例的 own → 窗口不跟随
+    // 且无自愈路径。病态重试由退避（N1）统一抑制，见下方失败分支。
     ownedProfileIds.delete(profileId);
     hiddenEmbeddedProfileIds.delete(profileId);
     sendOmnicodeInstanceCommand(profileId, { type: "releaseEmbed" });
   }
-  await runSetWindowOwner(pairs);
+  const released = await runSetWindowOwner(pairs);
+  if (released) {
+    clearOwnBackoff(targets);
+  } else {
+    // [OmniCode] N2（配 N1 退避）：解除失败同样记退避——PowerShell 病态环境下，切到
+    // 桌面模式后 dispatch 已不再跑（embedMode=desktop），但切回 embedded 的第一轮
+    // own 重试也会被退避挡住 5s，避免立即再撞同一堵墙。
+    recordOwnBackoff(targets, Date.now());
+  }
 }
 
 /**
