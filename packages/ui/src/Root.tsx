@@ -24,6 +24,7 @@ import {
   DesktopCommandIds,
   ZCODE_PRODUCT_FLAVOR,
   appRuntimePreferencesChangedBroadcastPayloadSchema,
+  type AppSettings,
 } from "@zcode/shared";
 import { ConsoleHome } from "@/console/ConsoleHome.js";
 import { TooltipProvider } from "@/components/ui/tooltip.js";
@@ -138,6 +139,70 @@ import type {
   RemoteConnectionOpenPreference,
 } from "@/app-shell/types.js";
 import { DEFAULT_LUCIDE_STROKE_WIDTH } from "@/components/icons/windowIcons.js";
+import { toast } from "@/components/ui/toast.js";
+import { readPersistedWorkspaceSessionEntries } from "@/lib/remoteWorkspaceHistory.js";
+
+/**
+ * [OmniCode] B2-2 restoreSession 锁预检（spec: docs/omnicode/profile-runtime.md §批次2 D8）：
+ * 会话恢复不经 saveProject 打开守卫，是全入口强制的最后一块缺口——恢复前查锁，
+ * 被他实例持有的本地工作区从恢复集合剔除（lastActiveWorkspace 置 null / 过滤
+ * lastWorkspaceSession 旧字段），并以 Toast 明确拒绝（不静默恢复、不静默双开）。
+ * 锁态数据源 = readTree 的 omnicodeWorkspaceLocks 装饰（既有通道，ownedBySelf 以 Host
+ * env 身份判定，与本 renderer 同实例）。查锁失败（RPC 不可用/异常）fail-open 放行：
+ * 落回"恢复后协调器软语义 + 灰显"的旧行为，不能因预检故障导致所有工作区都打不开。
+ * 路径比较用大小写不敏感 + 去尾分隔符的宽松归一（Host 锁条目存 resolve 后路径；
+ * 跨 Windows 盘符大小写差异时漏筛仅退化为旧灰显行为）。
+ */
+async function filterOmnicodeLockedWorkspacesFromRestore(
+  settings: AppSettings,
+  options: {
+    isOmnicodeInstance: boolean;
+    readLockedWorkspaces?: () => Promise<
+      Array<{ workspacePath: string; profileId: string; ownedBySelf: boolean }>
+    >;
+    notifyLocked: (workspacePath: string, ownerProfileId: string) => void;
+  },
+): Promise<AppSettings> {
+  const { isOmnicodeInstance, readLockedWorkspaces, notifyLocked } = options;
+  if (!isOmnicodeInstance || !readLockedWorkspaces) return settings;
+  const localPaths = [
+    ...new Set(
+      readPersistedWorkspaceSessionEntries(settings)
+        .filter((entry) => entry.kind === "local")
+        .map((entry) => entry.workspacePath),
+    ),
+  ];
+  if (localPaths.length === 0) return settings;
+  let lockDecorations: Array<{ workspacePath: string; profileId: string; ownedBySelf: boolean }>;
+  try {
+    lockDecorations = await readLockedWorkspaces();
+  } catch {
+    return settings;
+  }
+  const lockedByOther = lockDecorations.filter((entry) => !entry.ownedBySelf);
+  if (lockedByOther.length === 0) return settings;
+  const normalizeForCompare = (path: string): string =>
+    path.replace(/[\\/]+$/, "").toLowerCase();
+  const lockedKeys = new Set(lockedByOther.map((entry) => normalizeForCompare(entry.workspacePath)));
+  const isLockedPath = (path: string): boolean => lockedKeys.has(normalizeForCompare(path));
+  for (const entry of lockedByOther) notifyLocked(entry.workspacePath, entry.profileId);
+  const next = { ...settings };
+  if (
+    next.lastActiveWorkspace &&
+    next.lastActiveWorkspace.kind === "local" &&
+    isLockedPath(next.lastActiveWorkspace.workspacePath)
+  ) {
+    // 置 null（而非 undefined）：readPersistedWorkspaceSessionEntries 对 null 早退空集合，
+    // 下游 restore 不再恢复该工作区；undefined 会落入 lastWorkspaceSession 旧字段路径。
+    next.lastActiveWorkspace = null;
+  }
+  if (next.lastWorkspaceSession) {
+    next.lastWorkspaceSession = next.lastWorkspaceSession.filter(
+      (entry) => !(entry.kind === "local" && isLockedPath(entry.workspacePath)),
+    );
+  }
+  return next;
+}
 
 type WelcomeScreenOpenReason =
   | "startup-provider-required"
@@ -902,9 +967,32 @@ function RootInner({
   }, [activeWorkspacePath, setWorkspaceActionError]);
 
   const composerClientNamespace = useComposerClientNamespace();
+  // [OmniCode] B2-2 restoreSession 锁强制（spec §批次2 D8）：恢复前批量预检本地工作区锁，
+  // 被他实例持有的路径不恢复（拒绝 + Toast），不让"上次会话"绕过打开守卫变成静默双开。
+  const omnicodeRestoreLockFilter = useMemo(
+    () => (settings: Parameters<typeof restoreWorkspaceTabs>[0]) =>
+      filterOmnicodeLockedWorkspacesFromRestore(settings, {
+        isOmnicodeInstance:
+          ZCODE_PRODUCT_FLAVOR === "omnicode" && (platform.omnicodeInstanceId ?? null) !== null,
+        readLockedWorkspaces: async () => {
+          const tree = await services.projectService?.readTree();
+          return [...(tree?.omnicodeWorkspaceLocks ?? [])];
+        },
+        notifyLocked: (workspacePath, ownerProfileId) => {
+          toast(
+            intl.formatMessage(
+              { id: "omnicode.observer.restoreRejected" },
+              { path: workspacePath, profileId: ownerProfileId },
+            ),
+            { variant: "warning" },
+          );
+        },
+      }),
+    [intl, platform, services.projectService],
+  );
   const restorePersistedSession = useCallback(
     async (...args: Parameters<typeof restoreWorkspaceTabs>) => {
-      const restored = await restoreWorkspaceTabs(...args);
+      const restored = await restoreWorkspaceTabs(await omnicodeRestoreLockFilter(args[0]));
       const restoreDraftIntents = () => {
         // 桌面刷新通过历史 tab 恢复，不经过 initialWorkspace 入口。先恢复项目意图，
         // 再打开首屏门禁，避免 Composer 按未归类范围读取并预热同目录的项目草稿。
@@ -952,7 +1040,7 @@ function RootInner({
           : {}),
       };
     },
-    [restoreWorkspaceTabs, composerClientNamespace, tabStoreApi],
+    [omnicodeRestoreLockFilter, restoreWorkspaceTabs, composerClientNamespace, tabStoreApi],
   );
 
   const { isRestoring, hasCompletedInitialRestore, hasCompletedFullRestore } = useTabPersistence({

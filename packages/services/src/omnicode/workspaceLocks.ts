@@ -113,10 +113,41 @@ export interface WorkspaceLockedByOtherErrorData {
   pid: number;
 }
 
-/** 打开工作区前的强制查锁。同 profileId（含同实例其他窗口）幂等放行；被其他实例占用即拒绝。 */
+/**
+ * [OmniCode] B2-2 打开守卫判定（纯函数，spec: docs/omnicode/profile-runtime.md §批次2 D8）：
+ * 输入某工作区的锁占用事实 + 本实例身份 + 用户是否选择「只读打开」，输出打开决策——
+ * - 无锁 / 自持（同 profileId，含同实例多窗口）→ open：正常打开，锁仍由协调器按打开集合对账获取；
+ * - 被他实例持有 → reject：拒绝可写打开（saveProject 守卫抛结构化错误冒泡，UI 弹锁冲突对话框）；
+ * - 被他实例持有且 observerRequested → observer：只读观察者打开（不获取锁、不进锁集合）。
+ */
+export type WorkspaceOpenGuardDecision =
+  | { kind: "open" }
+  | { kind: "reject"; owner: WorkspaceLockOwner }
+  | { kind: "observer"; owner: WorkspaceLockOwner };
+
+export function resolveWorkspaceOpenGuardDecision(input: {
+  lockOwner: WorkspaceLockOwner | undefined;
+  selfProfileId: string;
+  observerRequested?: boolean;
+}): WorkspaceOpenGuardDecision {
+  const { lockOwner, selfProfileId, observerRequested } = input;
+  if (!lockOwner || lockOwner.profileId === selfProfileId) return { kind: "open" };
+  return observerRequested
+    ? { kind: "observer", owner: lockOwner }
+    : { kind: "reject", owner: lockOwner };
+}
+
+/**
+ * 打开工作区前的强制查锁（B2-2：判定走 resolveWorkspaceOpenGuardDecision 单一事实源）。
+ * 同 profileId（含同实例其他窗口）幂等放行；被其他实例占用即拒绝。
+ */
 export function assertWorkspaceNotLockedByOther(workspacePath: string, profileId: string): void {
-  const owner = readWorkspaceLockOwner(workspacePath);
-  if (!owner || owner.profileId === profileId) return;
+  const decision = resolveWorkspaceOpenGuardDecision({
+    lockOwner: readWorkspaceLockOwner(workspacePath),
+    selfProfileId: profileId,
+  });
+  if (decision.kind !== "reject") return;
+  const owner = decision.owner;
   const error = new Error(
     `该工作区正被另一个实例占用（${owner.profileId}），请先在那个实例里关闭它：${owner.workspacePath}`,
   ) as Error & { code: typeof WORKSPACE_LOCKED_BY_OTHER_ERROR_CODE; data: WorkspaceLockedByOtherErrorData };
