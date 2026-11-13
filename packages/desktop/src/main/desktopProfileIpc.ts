@@ -52,6 +52,7 @@ import {
   resolveOmnicodeConsoleModeTransition,
 } from "./omnicode/consoleUiState.js";
 import { setOmnicodeInstanceBridgeManagerHooks } from "./omnicode/instanceBridgeServer.js";
+import { readOmnicodeLoginHealths } from "./omnicode/loginHealth.js";
 import { applyOmnicodePerfPanelState } from "./omnicode/perfMonitor.js";
 import { assertValidProfileId } from "./omnicode/contract.js";
 
@@ -79,6 +80,9 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
     // [OmniCode] B2 评审修复（P2-11②）：运行实例内存占用（Windows tasklist 单次查询；
     // 失败/非 Windows 返回 undefined → memoryMB 缺省，控制台底栏不显示合计）
     const memoryByPid = await readOmnicodeProcessMemoryMBs([...pidByProfileId.values()]);
+    // [OmniCode] 批次2.5 X2：登录态健康度（管理器直读凭据快照 expiresAt 分级；
+    // 任何读失败=unknown 静默，spec: docs/omnicode/console-extras.md §X2）
+    const loginHealthByProfileId = await readOmnicodeLoginHealths(profiles);
     const infos: OmnicodeProfileSummaryInfo[] = profiles.map((profile) => {
       const pid = pidByProfileId.get(profile.id);
       return {
@@ -88,6 +92,7 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
         ...(pid !== undefined && memoryByPid?.has(pid)
           ? { memoryMB: memoryByPid.get(pid) }
           : {}),
+        loginHealth: loginHealthByProfileId.get(profile.id) ?? { status: "unknown" },
       };
     });
     return { profiles: infos };
