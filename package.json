@@ -1,6 +1,6 @@
 {
   "name": "zcode",
-  "version": "3.18.0-omni.3",
+  "version": "3.18.0-omni.4",
   "private": true,
   "type": "module",
   "scripts": {
