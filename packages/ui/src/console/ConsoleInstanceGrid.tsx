@@ -514,6 +514,24 @@ export function ConsoleInstanceGrid() {
           </p>
         ) : profiles.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
+            {/* [OmniCode] 批次2.5 X4：空状态引导插画（纯 SVG：堆叠实例卡片 + 播放符，
+                无新依赖；复用既有 i18n 键，spec: docs/omnicode/console-extras.md §X4） */}
+            <svg
+              width="140"
+              height="88"
+              viewBox="0 0 140 88"
+              aria-hidden="true"
+              className="text-foreground-subtlest"
+            >
+              <rect x="18" y="22" width="76" height="52" rx="6" className="fill-transparent stroke-current" strokeWidth="1.5" opacity="0.35" />
+              <rect x="26" y="14" width="76" height="52" rx="6" className="fill-transparent stroke-current" strokeWidth="1.5" opacity="0.55" />
+              <rect x="34" y="6" width="76" height="52" rx="6" className="fill-popover stroke-border" strokeWidth="1.5" />
+              <circle cx="56" cy="32" r="10" className="fill-primary/15 stroke-primary" strokeWidth="1.5" />
+              <path d="M52.5 27.5 L61 32 L52.5 36.5 Z" className="fill-primary" />
+              <line x1="76" y1="26" x2="100" y2="26" className="stroke-current" strokeWidth="2.5" strokeLinecap="round" opacity="0.4" />
+              <line x1="76" y1="32" x2="96" y2="32" className="stroke-current" strokeWidth="2.5" strokeLinecap="round" opacity="0.3" />
+              <line x1="76" y1="38" x2="92" y2="38" className="stroke-current" strokeWidth="2.5" strokeLinecap="round" opacity="0.2" />
+            </svg>
             <h2 className="text-ui-lg text-foreground">
               {intl.formatMessage({ id: "console.emptyTitle" })}
             </h2>
@@ -553,7 +571,7 @@ export function ConsoleInstanceGrid() {
               <button
                 type="button"
                 onClick={() => setCreateOpen(true)}
-                className="flex aspect-[16/10] min-h-40 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border text-foreground-subtlest transition-colors hover:border-foreground-subtle hover:text-foreground-subtle"
+                className="flex aspect-[16/10] min-h-40 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border text-foreground-subtlest transition-[border-color,color,box-shadow] duration-200 ease-out hover:border-foreground-subtle hover:text-foreground-subtle hover:shadow-sm"
               >
                 <Plus className="size-6" />
                 <span className="text-ui-sm">
