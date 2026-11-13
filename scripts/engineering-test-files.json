@@ -36,6 +36,7 @@
   "packages/desktop/test/dynamicWorkflowConfigMockServer.test.ts",
   "packages/desktop/test/e2eAllCoverageRunner.test.ts",
   "packages/desktop/test/omnicodeBatch2ProcessMode.test.ts",
+  "packages/desktop/test/omnicodeBatch25Extras.test.ts",
   "packages/desktop/test/omnicodeBatch2ConsoleViewport.test.ts",
   "packages/desktop/test/e2eAppOutputStage.test.ts",
   "packages/desktop/test/omnicodeBatch2WorkspaceLock.test.ts",
