@@ -52,6 +52,7 @@ import {
   resolveOmnicodeConsoleModeTransition,
 } from "./omnicode/consoleUiState.js";
 import { setOmnicodeInstanceBridgeManagerHooks } from "./omnicode/instanceBridgeServer.js";
+import { applyOmnicodePerfPanelState } from "./omnicode/perfMonitor.js";
 import { assertValidProfileId } from "./omnicode/contract.js";
 
 export function registerDesktopOmnicodeProfileIpcHandlers(): void {
@@ -157,6 +158,7 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
  * - EmbedLayout：renderer 卡片画面区客户区矩形上报（换算/下发在 consoleEmbedding）。
  * - PreviewState：总开关 + 视口内卡片集合 → 桥订阅对账。
  * - RevealDataDir：系统文件管理器打开实例数据目录。
+ * - PerfState：性能面板采样开关（批次2.5 X1，spec: docs/omnicode/console-extras.md §X1）。
  */
 function registerDesktopOmnicodeConsoleViewportIpcHandlers(): void {
   ipcMain.handle(PlatformChannels.OmnicodeConsoleUiStateGet, async (): Promise<OmnicodeConsoleUiState> => {
@@ -203,6 +205,14 @@ function registerDesktopOmnicodeConsoleViewportIpcHandlers(): void {
       return { ok: false };
     }
     await shell.openPath(getOmnicodeProfileDir(input.id));
+    return { ok: true };
+  });
+
+  // [OmniCode] 批次2.5 X1：性能面板采样开关（面板开=main 周期采样并广播 OmnicodePerfEvent；
+  // 降级语义/生命周期见 spec: docs/omnicode/console-extras.md §X1 与 perfMonitor.ts 注释）
+  ipcMain.handle(PlatformChannels.OmnicodePerfState, async (_event, input: unknown) => {
+    const normalized = (input ?? {}) as { enabled?: unknown };
+    applyOmnicodePerfPanelState(normalized.enabled === true);
     return { ok: true };
   });
 }

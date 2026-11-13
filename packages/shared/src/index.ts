@@ -272,6 +272,10 @@ export type {
   OmnicodeConsoleEmbedLayoutInput,
   OmnicodeConsoleEmbedRect,
   OmnicodeConsolePreviewStateInput,
+  // [OmniCode] 批次2.5 X1/X2：性能面板契约 + 登录态健康度（spec: docs/omnicode/console-extras.md）
+  OmnicodePerfPanelStateInput,
+  OmnicodePerfEventPayload,
+  OmnicodeLoginHealthInfo,
   DesktopCloseToTrayCapability,
   DesktopCommandId,
   CuaOsSupport,

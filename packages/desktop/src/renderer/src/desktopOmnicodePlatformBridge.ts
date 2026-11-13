@@ -7,6 +7,8 @@ import type {
   OmnicodeConsoleUiState,
   OmnicodeConsoleUiStatePatch,
   OmnicodeInstanceEventPayload,
+  OmnicodePerfEventPayload,
+  OmnicodePerfPanelStateInput,
   OmnicodeProfileCloneInput,
   OmnicodeProfileCreateInput,
   OmnicodeProfileIdInput,
@@ -80,4 +82,10 @@ export const desktopOmnicodePlatformBridge = {
     window.zcode.setOmnicodePreviewState?.(payload) ?? Promise.resolve({ ok: false }),
   revealOmnicodeProfileDataDir: (payload: OmnicodeProfileIdInput): Promise<{ ok: boolean }> =>
     window.zcode.revealOmnicodeProfileDataDir?.(payload) ?? Promise.resolve({ ok: false }),
+  // [OmniCode] 批次2.5 X1：性能面板（spec: docs/omnicode/console-extras.md §X1；缺席=
+  // 官方 flavor 或旧 preload——性能入口不渲染）
+  setOmnicodePerfPanelState: (payload: OmnicodePerfPanelStateInput): Promise<{ ok: boolean }> =>
+    window.zcode.setOmnicodePerfPanelState?.(payload) ?? Promise.resolve({ ok: false }),
+  onOmnicodePerfEvent: (handler: (payload: OmnicodePerfEventPayload) => void): (() => void) =>
+    window.zcode.onOmnicodePerfEvent?.(handler) ?? (() => {}),
 };
