@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>OmniCode — Monolithic Aperture Concept 01</title>
+  <desc>Black monolithic architectural aperture centered on a white rounded-square app tile, with transparent space outside the tile.</desc>
+  <rect x="77" y="77" width="870" height="870" rx="190" fill="#FFFFFF"/>
+  <!-- A single continuous silhouette: an asymmetric, chamfered portal with one broad open aperture. -->
+  <path fill="#080808" fill-rule="evenodd" d="
+    M 278 746
+    L 278 466
+    Q 278 386 348 352
+    L 512 270
+    L 676 352
+    Q 746 386 746 466
+    L 746 746
+    L 590 746
+    L 590 466
+    Q 590 430 554 430
+    L 470 430
+    Q 434 430 434 466
+    L 434 746
+    Z
+  "/>
+</svg>
