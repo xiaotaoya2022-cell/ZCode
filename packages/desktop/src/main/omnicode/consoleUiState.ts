@@ -18,6 +18,8 @@ export const DEFAULT_OMNICODE_CONSOLE_UI_STATE: OmnicodeConsoleUiState = {
 /**
  * UI 状态部分合并（纯函数）：仅接受已知字段且值域合法；未知/非法字段被丢弃
  * （落盘值永远收敛到合法形态）。mode 相同 / previewEnabled 相同的字段写不写等价。
+ * [OmniCode] 批次2.5 X1：perfPanelOpen 为可选布尔（旧档缺省=关；spec:
+ * docs/omnicode/console-extras.md §X1）——只有显式布尔才写入，避免旧档被动携带该字段。
  */
 export function mergeOmnicodeConsoleUiState(
   current: OmnicodeConsoleUiState,
@@ -30,6 +32,9 @@ export function mergeOmnicodeConsoleUiState(
   }
   if (typeof patch.previewEnabled === "boolean") {
     next.previewEnabled = patch.previewEnabled;
+  }
+  if (typeof patch.perfPanelOpen === "boolean") {
+    next.perfPanelOpen = patch.perfPanelOpen;
   }
   return next;
 }

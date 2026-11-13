@@ -427,6 +427,24 @@ export interface OmnicodeProfileSummaryInfo {
    * 聚合，控制台底栏"内存合计"数据源）。查询失败/非 Windows 时缺省（UI 不显示合计）。
    */
   memoryMB?: number;
+  /**
+   * [OmniCode] 批次2.5 X2：登录态健康度（管理器直读 profile 凭据快照的 expiresAt
+   * 分级，spec: docs/omnicode/console-extras.md §X2）。读失败/未登录 = unknown（静默）；
+   * 官方 flavor / 旧 main 不填充。
+   */
+  loginHealth?: OmnicodeLoginHealthInfo;
+}
+
+/**
+ * [OmniCode] 批次2.5 X2：登录态健康度分级（spec: docs/omnicode/console-extras.md §X2）。
+ * status：healthy（剩 >7 天）/ expiring（≤7 天）/ expired（已过期）/ unknown（未登录或读不到）。
+ */
+export interface OmnicodeLoginHealthInfo {
+  status: "healthy" | "expiring" | "expired" | "unknown";
+  /** status≠unknown 时的剩余整天数（毫秒差值向上取整）。 */
+  daysRemaining?: number;
+  /** 登录态过期时刻（epoch ms）。 */
+  expiresAt?: number;
 }
 
 export interface OmnicodeProfileCreateInput {
@@ -459,7 +477,7 @@ export interface OmnicodeConsoleAdoptInput {
 /** [OmniCode] 控制台 main → renderer 的实例事件（缩略图帧 / 连接态）。 */
 export interface OmnicodeInstanceEventPayload {
   profileId: string;
-  type: "thumbnail" | "connected" | "disconnected";
+  type: "thumbnail" | "connected" | "disconnected" | "focusRequested";
   /** type=thumbnail 时的 JPEG base64 */
   frame?: string;
   /**
@@ -473,16 +491,20 @@ export interface OmnicodeInstanceEventPayload {
 /**
  * [OmniCode] 批次2 B2-3：控制台 UI 状态（管理器持久化 console-ui.json，spec §批次2 D9）。
  * mode 为全局开关：内嵌=实例窗口 owned 进卡片画面区；桌面=独立窗口+模糊预览。
+ * [OmniCode] 批次2.5 X1：perfPanelOpen（性能面板开关记忆，可选字段——旧档缺省=关，
+ * spec: docs/omnicode/console-extras.md §X1）。
  */
 export interface OmnicodeConsoleUiState {
   mode: "embedded" | "desktop";
   previewEnabled: boolean;
+  perfPanelOpen?: boolean;
 }
 
 /** UI 状态部分更新（字段缺省=不变；非法值在 main 侧归一后落盘）。 */
 export interface OmnicodeConsoleUiStatePatch {
   mode?: "embedded" | "desktop";
   previewEnabled?: boolean;
+  perfPanelOpen?: boolean;
 }
 
 /** 内嵌跟随：renderer 上报的卡片画面区矩形（窗口客户区 CSS 像素）。 */
@@ -506,6 +528,31 @@ export interface OmnicodeConsolePreviewStateInput {
   previewEnabled: boolean;
   visibleProfileIds: string[];
 }
+
+/**
+ * [OmniCode] 批次2.5 X1：性能面板采样开关（renderer → main；面板开=采样、关=停采，
+ * 语义与 OmnicodeConsolePreviewStateInput 同构，spec: docs/omnicode/console-extras.md §X1）。
+ */
+export interface OmnicodePerfPanelStateInput {
+  enabled: boolean;
+}
+
+/**
+ * [OmniCode] 批次2.5 X1：性能采样事件（main → renderer 广播）。
+ * sample：本轮按实例的内存快照（零运行实例时 samples 为空数组）；
+ * unavailable：降级（整面板隐藏，不空转）——platform=非 Windows、probe=tasklist 连续失败。
+ */
+export type OmnicodePerfEventPayload =
+  | {
+      type: "sample";
+      /** 本轮采样时刻（epoch ms）。 */
+      at: number;
+      samples: { profileId: string; memoryMB: number }[];
+    }
+  | {
+      type: "unavailable";
+      reason: "platform" | "probe";
+    };
 
 export function createOpenInEditorRemoteTarget(
   target: RemoteTarget,
@@ -1060,6 +1107,13 @@ export interface IPlatformService {
   setOmnicodePreviewState?(input: OmnicodeConsolePreviewStateInput): Promise<{ ok: boolean }>;
   /** [OmniCode] 批次2 B2-3：在系统文件管理器中打开实例数据目录。仅管理器 Desktop。 */
   revealOmnicodeProfileDataDir?(input: OmnicodeProfileIdInput): Promise<{ ok: boolean }>;
+  /**
+   * [OmniCode] 批次2.5 X1：性能面板采样开关（面板开=main 启动 5s 周期采样并广播事件；
+   * 关=停采。降级语义见 spec: docs/omnicode/console-extras.md §X1）。仅管理器 Desktop。
+   */
+  setOmnicodePerfPanelState?(input: OmnicodePerfPanelStateInput): Promise<{ ok: boolean }>;
+  /** [OmniCode] 批次2.5 X1：订阅性能采样事件（sample/unavailable），返回 disposer。仅管理器 Desktop。 */
+  onOmnicodePerfEvent?(handler: (payload: OmnicodePerfEventPayload) => void): () => void;
 
   // [OmniCode] 实例专属登录浏览器：失败态恢复入口（手动粘贴完整 OAuth 回调 URL，spec:
   // docs/omnicode/instance-login-browser.md）。accepted=false 表示回调未被接收

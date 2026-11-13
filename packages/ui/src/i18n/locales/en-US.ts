@@ -4131,6 +4131,21 @@ const enUS: Record<string, string> = {
   "console.menuClone": "Clone instance",
   "console.menuRevealDataDir": "Open data directory",
   "console.stoppedNoZoom": "A stopped instance has no live viewport to zoom into",
+  // [OmniCode] Batch 2.5 X1: performance panel (spec: docs/omnicode/console-extras.md §X1)
+  "console.perfToggleLabel": "Performance",
+  "console.perfToggleTitle": "Toggle the performance panel",
+  "console.perfPanelTitle": "Performance",
+  "console.perfTotalMemory": "Total memory {memory}",
+  "console.perfWaiting": "Waiting for samples…",
+  "console.perfNoRunning": "No running instances",
+  "console.perfCpuPlaceholder": "Memory trend · 5s sampling · CPU not available yet",
+  "console.perfUnavailable": "Performance monitoring is unavailable on this machine",
+  // [OmniCode] Batch 2.5 X2: login health badge (spec: docs/omnicode/console-extras.md §X2)
+  "console.loginHealthyDays": "Signed in · {days}d left",
+  "console.loginExpiringDays": "Expiring in {days}d",
+  "console.loginExpired": "Sign-in expired",
+  "console.loginUnknown": "Not signed in",
+  "console.loginRemainingTitle": "Sign-in valid for {days}d {hours}h",
   // [OmniCode] B2-2 workspace lock enforcement + read-only observer mode (spec: docs/omnicode/profile-runtime.md §批次2 D8)
   // Review fix (C5): interpolate the instance display name ({name}; falls back to profileId)
   "omnicode.observer.banner":

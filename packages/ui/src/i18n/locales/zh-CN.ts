@@ -3867,6 +3867,21 @@ const zhCN: Record<string, string> = {
   "console.menuClone": "克隆实例",
   "console.menuRevealDataDir": "打开数据目录",
   "console.stoppedNoZoom": "已停止的实例没有可放大的实况画面",
+  // [OmniCode] 批次2.5 X1：性能监控面板（spec: docs/omnicode/console-extras.md §X1）
+  "console.perfToggleLabel": "性能",
+  "console.perfToggleTitle": "打开/关闭性能监控面板",
+  "console.perfPanelTitle": "性能监控",
+  "console.perfTotalMemory": "内存合计 {memory}",
+  "console.perfWaiting": "等待采样…",
+  "console.perfNoRunning": "暂无运行实例",
+  "console.perfCpuPlaceholder": "内存走势 · 5s 采样 · CPU 暂不可用",
+  "console.perfUnavailable": "当前环境性能监控不可用",
+  // [OmniCode] 批次2.5 X2：登录态健康度徽标（spec: docs/omnicode/console-extras.md §X2）
+  "console.loginHealthyDays": "已登录 · 剩 {days} 天",
+  "console.loginExpiringDays": "即将到期 · 剩 {days} 天",
+  "console.loginExpired": "登录已过期",
+  "console.loginUnknown": "未登录",
+  "console.loginRemainingTitle": "登录态剩余 {days} 天 {hours} 小时",
   // [OmniCode] B2-2 工作区锁强制 + 只读观察者模式（spec: docs/omnicode/profile-runtime.md §批次2 D8）
   // B2 评审修复（C5）：插值改为实例名 {name}（锁文件 displayName 优先，缺省回退 profileId）
   "omnicode.observer.banner": "观察者模式（只读）— 该工作区正被实例 {name} 使用",

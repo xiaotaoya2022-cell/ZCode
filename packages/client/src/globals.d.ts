@@ -200,6 +200,14 @@ declare global {
       revealOmnicodeProfileDataDir?(
         payload: import("@zcode/shared").OmnicodeProfileIdInput,
       ): Promise<{ ok: boolean }>;
+      /** [OmniCode] 批次2.5 X1：性能面板采样开关（面板开=main 周期采样） */
+      setOmnicodePerfPanelState?(
+        payload: import("@zcode/shared").OmnicodePerfPanelStateInput,
+      ): Promise<{ ok: boolean }>;
+      /** [OmniCode] 批次2.5 X1：订阅性能采样事件（sample/unavailable），返回 disposer */
+      onOmnicodePerfEvent?(
+        handler: (payload: import("@zcode/shared").OmnicodePerfEventPayload) => void,
+      ): () => void;
       /** 从系统拖拽/文件输入得到的 Web File 解析真实本地路径 */
       getPathForFile?(file: File): string | null;
       /** dwf 产物「作为文件打开」：把某一版的字节落成本机副本，返回其路径 */

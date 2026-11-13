@@ -109,6 +109,8 @@ import type {
   OmnicodeConsoleUiStatePatch,
   OmnicodeConsoleEmbedLayoutInput,
   OmnicodeConsolePreviewStateInput,
+  OmnicodePerfPanelStateInput,
+  OmnicodePerfEventPayload,
   SSHConfigAliasOption,
   WebRemoteControlContext,
   WebRemoteControlReconnectWorkspaceRequest,
@@ -446,6 +448,15 @@ contextBridge.exposeInMainWorld("zcode", {
           ipcRenderer.invoke(PlatformChannels.OmnicodeConsolePreviewState, payload),
         revealOmnicodeProfileDataDir: (payload: OmnicodeProfileIdInput): Promise<{ ok: boolean }> =>
           ipcRenderer.invoke(PlatformChannels.OmnicodeProfileRevealDataDir, payload),
+        // [OmniCode] 批次2.5 X1：性能面板（spec: docs/omnicode/console-extras.md §X1）
+        setOmnicodePerfPanelState: (payload: OmnicodePerfPanelStateInput): Promise<{ ok: boolean }> =>
+          ipcRenderer.invoke(PlatformChannels.OmnicodePerfState, payload),
+        onOmnicodePerfEvent: (callback: (payload: OmnicodePerfEventPayload) => void) => {
+          const handler = (_event: unknown, payload: unknown) =>
+            callback(payload as OmnicodePerfEventPayload);
+          ipcRenderer.on(PlatformChannels.OmnicodePerfEvent, handler);
+          return () => ipcRenderer.removeListener(PlatformChannels.OmnicodePerfEvent, handler);
+        },
       }
     : {}),
   // [OmniCode] 失败态恢复入口：手动粘贴完整 OAuth 回调 URL，main 复用 handleDeepLink 路由

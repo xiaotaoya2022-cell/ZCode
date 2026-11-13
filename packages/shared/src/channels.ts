@@ -86,6 +86,8 @@ import type {
   OmnicodeConsoleUiStatePatch,
   OmnicodeConsoleEmbedLayoutInput,
   OmnicodeConsolePreviewStateInput,
+  OmnicodePerfPanelStateInput,
+  OmnicodePerfEventPayload,
   OmnicodeProfileIdInput,
   OpenInEditorOptions,
   PostUpdateReleaseNotesPayload,
@@ -291,6 +293,11 @@ export const PlatformChannels = {
   OmnicodeConsolePreviewState: "zcode:omnicode-console-preview-state",
   // [OmniCode] 批次2 B2-3：在系统文件管理器中打开实例数据目录
   OmnicodeProfileRevealDataDir: "zcode:omnicode-profile-reveal-data-dir",
+  // [OmniCode] 批次2.5 X1：性能面板采样开关（renderer → main；面板开=采样，spec:
+  // docs/omnicode/console-extras.md §X1）
+  OmnicodePerfState: "zcode:omnicode-perf-state",
+  // [OmniCode] 批次2.5 X1：性能采样事件广播（main → renderer；sample 快照 / unavailable 降级）
+  OmnicodePerfEvent: "zcode:omnicode-perf-event",
   /** Renderer → Main：用 Chromium 打印引擎把当前页面 print 媒体版面导出为 PDF */
   PrintToPdf: "zcode:print-to-pdf",
   /** Renderer → Main：检查并按需请求系统麦克风权限 */
@@ -1000,6 +1007,16 @@ export interface PlatformChannelMap {
   [PlatformChannels.OmnicodeProfileRevealDataDir]: {
     request: OmnicodeProfileIdInput;
     response: { ok: boolean };
+  };
+  // [OmniCode] 批次2.5 X1：性能面板采样开关（spec: docs/omnicode/console-extras.md §X1）
+  [PlatformChannels.OmnicodePerfState]: {
+    request: OmnicodePerfPanelStateInput;
+    response: { ok: boolean };
+  };
+  // [OmniCode] 批次2.5 X1：性能采样事件广播（main → renderer）
+  [PlatformChannels.OmnicodePerfEvent]: {
+    request: OmnicodePerfEventPayload;
+    response: void;
   };
   [PlatformChannels.PrintToPdf]: {
     request: void;
