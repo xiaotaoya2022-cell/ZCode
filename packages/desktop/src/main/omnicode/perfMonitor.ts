@@ -7,8 +7,13 @@
 // - 仅面板打开时采样：renderer 上报 OmnicodePerfState {enabled}，enabled=false 停 timer；
 //   重新 enable 重置失败计数并立即采一轮（给降级后的显式重试留出口）。
 // - 任一环节不可得整面板降级隐藏、绝不空转：非 win32 即刻 unavailable(platform)；tasklist
-//   连续失败 ≥2 次 unavailable(probe) 并停 timer。renderer 收到 unavailable 隐藏「性能」入口。
+//   连续失败 ≥2 次 unavailable(probe) 并停 timer。renderer 收到 unavailable 隐藏「性能」入口
+//   （R1 P2-1：入口保留可点击，显式点击=一次重探，失败回落 unavailable，无自动循环重试）。
 // - 零运行实例：广播空 samples（面板显示"无运行实例"），不 spawn tasklist。
+// - [R1 P1-1 评审修复] 无可见窗口（主窗口 hide 进托盘等）→ pause-invisible：本轮不 spawn、
+//   不广播、不推进任何状态机决策，仅保留 unref timer 等下一 tick 复查——窗口重新 show 后
+//   自动恢复采样（无需 renderer 重发 enable）；停采的是子进程与广播，不是 tick 心跳本身
+//   （无观察者时空 tick 成本 ≈ 一次 setTimeout 回调，非"空转"红线所指的 spawn 轮询）。
 import process from "node:process";
 import { BrowserWindow } from "electron";
 import { PlatformChannels, type OmnicodePerfEventPayload } from "@zcode/shared";
@@ -23,20 +28,30 @@ export const PERF_DEGRADE_FAILURE_THRESHOLD = 2;
 // ─── tick 决策（纯函数，单测登记 engineering-test-files.json） ───
 
 /**
- * 单轮采样决策：面板关/未启用 → stop；非 win32 → degrade(platform)；零运行实例 → empty
- * （广播空 samples，不 spawn）；连续失败达阈值 → degrade(probe)；否则 sample。
+ * 单轮采样决策：面板关/未启用 → stop；非 win32 → degrade(platform)；无可见窗口 →
+ * pause-invisible（不 spawn 不广播不决策，保 tick 等可见性恢复，先于 probe 判定——
+ * 无观察者时不推进失败计数也不广播）；连续失败达阈值 → degrade(probe)；零运行实例 →
+ * empty（广播空 samples，不 spawn）；否则 sample。
  */
 export function resolveOmnicodePerfTickAction(input: {
   enabled: boolean;
   platform: string;
   runningCount: number;
   consecutiveFailures: number;
-}): "sample" | "empty" | "degrade-platform" | "degrade-probe" | "stop" {
+  visibleWindowCount: number;
+}): "sample" | "empty" | "pause-invisible" | "degrade-platform" | "degrade-probe" | "stop" {
   if (!input.enabled) return "stop";
   if (input.platform !== "win32") return "degrade-platform";
+  if (input.visibleWindowCount <= 0) return "pause-invisible";
   if (input.consecutiveFailures >= PERF_DEGRADE_FAILURE_THRESHOLD) return "degrade-probe";
   if (input.runningCount === 0) return "empty";
   return "sample";
+}
+
+/** [R1 P1-1] 当前可见窗口数（hide-to-tray 的窗口 isVisible()=false；最小化仍算可见）。 */
+function countVisiblePerfWindows(): number {
+  return BrowserWindow.getAllWindows().filter((win) => !win.isDestroyed() && win.isVisible())
+    .length;
 }
 
 // ─── 采样器（模块态） ───
@@ -78,9 +93,16 @@ async function runPerfTick(): Promise<void> {
     platform: process.platform,
     runningCount: running.length,
     consecutiveFailures,
+    visibleWindowCount: countVisiblePerfWindows(),
   });
   if (action === "stop") {
     stopSampler();
+    return;
+  }
+  if (action === "pause-invisible") {
+    // [R1 P1-1] 全部窗口隐藏（主窗口 hide 进托盘等）：无人可见 → 本轮不 spawn、不广播、
+    // 失败计数不动；仅保留 unref timer，窗口重新可见后下一 tick 自动恢复采样。
+    if (panelEnabled) scheduleNextTick(PERF_SAMPLE_INTERVAL_MS);
     return;
   }
   if (action === "degrade-platform" || action === "degrade-probe") {
@@ -146,7 +168,10 @@ export function applyOmnicodePerfPanelState(enabled: boolean): void {
   void runPerfTick();
 }
 
-/** 退出收尾（幂等；timer 已 unref，仅防御性清理）。 */
+/**
+ * 退出收尾（幂等；timer 已 unref，仅防御性清理）。[R1 P1-1] 由 main index.ts 的
+ * prepareAppQuit 屏障调用（与 releaseOmnicodeEmbedForQuit 同屏障模式），消除死代码。
+ */
 export function shutdownOmnicodePerfSampler(): void {
   panelEnabled = false;
   stopSampler();

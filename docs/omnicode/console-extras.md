@@ -19,22 +19,36 @@
   各角色（chromium/renderer heap/cli）的进程内指标，不是按外部 pid 的跨进程采样——实例是
   独立进程树，管理器无法从这些 source 拿到实例数据；tasklist 管线已是现存跨进程事实源。
 
-### 采样生命周期（仅面板打开时采样）
+### 采样生命周期（仅面板打开且有人可见时采样）
 
 - renderer 上报 `OmnicodePerfState {enabled}`（面板开关 = console-ui.json 持久化的
   `perfPanelOpen`，语义与 PreviewState 同构）；`enabled=true` 即启动采样 timer（unref），
   `enabled=false` 停止。重新 enable 会重置失败计数并立即采一轮（给降级后的重试留出口）。
+  renderer 上报 effect 带 cleanup：组件卸载/开关切换时兜底补发 `enabled=false`，窗口销毁
+  或离开控制台页不留采样尾巴（R1 P1-1）。
+- **窗口可见性自愈（R1 P1-1）**：主窗口默认 hide-to-tray，隐藏后 renderer 存活但无人可见——
+  main 侧每轮 tick 检查可见窗口数（`BrowserWindow.isVisible()`，最小化仍算可见），全部隐藏
+  时本轮 **pause-invisible**：不 spawn tasklist、不广播、失败计数不推进，仅保留 unref timer
+  等下一 tick 复查；窗口重新 show 后**自动恢复采样**（无需 renderer 重发 enable）。停采的是
+  子进程与广播，不是 tick 心跳（无观察者时空 tick 成本 ≈ 一次 setTimeout 回调）。
+- **退出收尾（R1 P1-1）**：`shutdownOmnicodePerfSampler()`（幂等）接入 main `prepareAppQuit`
+  屏障（与 `releaseOmnicodeEmbedForQuit` 同屏障模式），退出时停采并复位 panelEnabled。
 - 每轮 tick：取 `listOmnicodeRunningInstances()` 的 pid 集合 → 单次 tasklist → 按实例广播
   `OmnicodePerfEvent {type:"sample", samples:[{profileId,memoryMB}]}`；**零运行实例时广播空
-  samples**（面板显示"无运行实例"，不 spawn tasklist）。
-- **降级语义（任一环节不可得整面板隐藏，绝不空转）**：
+  samples**（面板显示"无运行实例"，不 spawn tasklist）；上一轮 tasklist 未返回时本轮跳过
+  （sampling 防并发，不叠加 spawn）。
+- **降级语义（任一环节不可得整面板降级，绝不空转）**：
   - 非 win32 平台：首次 enable 即广播 `{type:"unavailable", reason:"platform"}` 并不启动 timer；
   - tasklist 查询失败（`readOmnicodeProcessMemoryMBs` 返回 undefined）连续 ≥2 次（阈值
     `PERF_DEGRADE_FAILURE_THRESHOLD`）：广播 `{type:"unavailable", reason:"probe"}`、停 timer；
-  - renderer 收到 unavailable 即隐藏「性能」入口（面板 UI 整体不可见，不空转重试）。
-    用户下次显式开关面板（或重启后 `perfPanelOpen=true`）会重新走一次 enable 全流程。
+  - renderer 收到 unavailable 即本地关闭面板并 toast，但**「性能」入口保留可点击**（R1 P2-1）：
+    显式点击 = 一次重探（重发 enabled=true → main 重置失败计数立即采一轮）；再失败再次收到
+    unavailable 广播回落，一次点击只重探一次，**无自动循环重试**。重启后
+    `perfPanelOpen=true`（持久化值未被降级翻转）同样自动走一次 enable 全流程。
 - tick 决策纯函数 `resolveOmnicodePerfTickAction({enabled, platform, runningCount,
-  consecutiveFailures})` → `"sample" | "empty" | "degrade" | "stop"`（单测锁定）。
+  consecutiveFailures, visibleWindowCount})` →
+  `"sample" | "empty" | "pause-invisible" | "degrade-platform" | "degrade-probe" | "stop"`
+  （分支序 stop > platform > pause-invisible > probe > empty > sample，单测锁定）。
 
 ### UI
 
@@ -61,6 +75,14 @@
   `@zcode/shared/credential-security` 导入先例）。
 - 兼容面：`enc:v2:env:` 与 legacy `enc:v1:` 均可解（legacy 候选密钥表含注入密钥）；
   收养根的 `enc:v2:os:` 旧密文 source 不匹配 → 解密抛错 → 未知态（如实降级）。
+- **密钥文件空白/长度语义与实例侧 canonical 对齐（R1 P2-2）**：跟随实例侧
+  `systemCredentialCipher.resolveManagedSecret` ——原样读取**不 trim**，按
+  `Buffer.byteLength` 判界（32..4096 字节）。手工编辑过的密钥文件带尾随空白时，
+  实例照常用含空白的原始字节解密，管理器侧同字节判定/解密，两侧结论不分叉。
+- **文件读有界防御（R1 P2-6）**：node 同步 IO 语义下无真超时可用，读前 `stat` 校验
+  常规文件且不超上限（`credential-secret` ≤4096 字节；`credentials.json` ≤256 KiB，
+  真实快照为 KB 量级）——越界/读失败一律归 unknown 静默，Profile 列表不被病态大文件
+  拖长；`credentials.json` 必须为 JSON **对象**（数组等其它合法 JSON 同样归 unknown）。
 
 ### 分级语义（纯函数 `resolveOmnicodeLoginHealth`，单测锁定）
 
@@ -73,7 +95,8 @@
 ### 呈现
 
 - Profile 列表 IPC（`OmnicodeProfileList`）每项附 `loginHealth?: {status, daysRemaining?,
-  expiresAt?}`（shared 契约可选字段，官方 flavor 不填充不受影响）。
+  expiresAt?}`（shared 契约可选字段；填充方为管理器进程的列表 handler（与 flavor 无关走同一
+  代码），官方 flavor 无 omnicode profile（列表为空）故实际不出现，R1 P2-5 勘误对齐）。
 - 卡片徽标：● 健康（剩 N 天，绿）/ ⚠ 即将到期（黄）/ ✕ 已过期（红）/ ○ 未知（灰），
   `title` 提示精确剩余时间（天+小时）；i18n 中英。**停止实例但登录态健康 = 黄色调**
   （"仅剩登录态"语义：实例没跑，登录态还活着）。
@@ -83,7 +106,8 @@
 - **扩展现有 desktopTray**（不新建第二个 Tray）：`createDesktopTray` 新增可选
   `buildOmnicodeSection`（仅 omnicode 管理器主进程注入），插在「打开」与既有菜单项之间。
 - 菜单结构：运行实例区（每实例一项，label=状态点+实例名，点击=**聚焦该实例**）+
-  「启动全部」（有停止实例才可用）/「停止全部」（有运行实例才可用）+ 既有「打开/退出」
+  「启动全部」（有停止实例才可用；**0 profile 时禁用**，R1 P2-3——判据为名称缓存条目数，
+  不再 max(...,1) 兜底）/「停止全部」（有运行实例才可用）+ 既有「打开/退出」
   （退出走既有 quitApp → markExplicitQuit → prepareAppQuit 屏障，屏障内已 await
   `releaseOmnicodeEmbedForQuit`，无新增退出路径）。菜单模型纯函数
   `buildOmnicodeTraySectionModel`（单测锁定）。

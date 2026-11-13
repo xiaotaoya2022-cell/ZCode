@@ -10,7 +10,7 @@
 // 兼容：enc:v2:env: 与 legacy enc:v1: 均可解；收养根的 enc:v2:os: 旧密文 source 不匹配
 // → 解密抛错 → 未知态（如实降级，spec 已知限制 3）。
 // 任何读失败 = unknown 静默（不告警、不阻塞列表）。
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { createSystemCredentialCipher } from "@zcode/shared/credential-security";
 import {
@@ -35,6 +35,17 @@ export const OMNICODE_LOGIN_HEALTH_PROVIDERS = [
 const CREDENTIALS_FILE_NAME = "credentials.json";
 const CREDENTIAL_SECRET_FILE_NAME = "credential-secret";
 const ACTIVE_PROVIDER_KEY = "oauth:active_provider";
+/**
+ * [R1 P2-6] credentials.json 大小上限（字节）。真实快照为少量密文字段（数 KB 量级），
+ * 256 KiB 已极宽裕；超限（收养根指向异常大文件/符号链接到巨型文件等病态场景）直接归
+ * unknown，避免 Profile 列表被巨型文件读取拖长。credential-secret 上限跟随实例侧
+ * canonical 语义（systemCredentialCipher.resolveManagedSecret：32..4096 字节）。
+ * 注：node fs 同步语义下没有真超时可用，此处以「读前 stat 大小上限」做有界防御——
+ * stat 是仅元数据的单次系统调用，不受文件内容规模影响；越界/读取失败一律归 unknown。
+ */
+export const OMNICODE_LOGIN_CREDENTIALS_MAX_BYTES = 262_144;
+/** 实例侧 canonical 密钥字节长度界（resolveManagedSecret 同值：≥32、≤4096）。 */
+export const OMNICODE_LOGIN_SECRET_MAX_BYTES = 4_096;
 
 function expiresAtKey(provider: string): string {
   return `oauth:${provider}:expires_at`;
@@ -98,8 +109,20 @@ async function decryptSnapshotValue(
 }
 
 /**
+ * [R1 P2-6] 读前有界防御：stat 校验为常规文件且 ≤ maxBytes 再读取（越界抛错 → 调用方归
+ * unknown）。同步 IO 无真超时，以大小上限约束最坏读取成本（stat 只取元数据，开销恒定）。
+ */
+async function readBoundedTextFile(path: string, maxBytes: number): Promise<string> {
+  const metadata = await stat(path);
+  if (!metadata.isFile() || metadata.size > maxBytes) {
+    throw new Error(`[omnicode] loginHealth 拒读越界文件 size=${metadata.size} max=${maxBytes}`);
+  }
+  return readFile(path, "utf8");
+}
+
+/**
  * 从单个数据根读取登录态健康度（测试可注入 now）。文件缺失/JSON 损坏/密钥缺失/
- * 解密失败全部 → unknown（静默；spec §分级语义"任何读失败=未知态静默"）。
+ * 解密失败/文件越界全部 → unknown（静默；spec §分级语义"任何读失败=未知态静默"）。
  */
 export async function readOmnicodeLoginHealthFromDataRoot(
   dataRoot: string,
@@ -109,11 +132,19 @@ export async function readOmnicodeLoginHealthFromDataRoot(
   let secret: string;
   let snapshot: Record<string, unknown>;
   try {
-    secret = (await readFile(join(dataRoot, ".zcode", "v2", CREDENTIAL_SECRET_FILE_NAME), "utf8")).trim();
-    if (secret.length < 32 || secret.length > 4096) return { status: "unknown" };
-    const raw = await readFile(credentialsPath, "utf8");
+    // [R1 P2-2] 与实例侧 canonical 读取（systemCredentialCipher.resolveManagedSecret）
+    // 对齐：原样读取不 trim，按 Buffer.byteLength 判界——手工编辑过的密钥文件若带
+    // 尾随空白，实例照常用含空白的原始字节解密，管理器侧同字节判定/解密，两侧不分叉。
+    const secretRaw = await readBoundedTextFile(
+      join(dataRoot, ".zcode", "v2", CREDENTIAL_SECRET_FILE_NAME),
+      OMNICODE_LOGIN_SECRET_MAX_BYTES,
+    );
+    const secretBytes = Buffer.byteLength(secretRaw, "utf8");
+    if (secretBytes < 32 || secretBytes > OMNICODE_LOGIN_SECRET_MAX_BYTES) return { status: "unknown" };
+    secret = secretRaw;
+    const raw = await readBoundedTextFile(credentialsPath, OMNICODE_LOGIN_CREDENTIALS_MAX_BYTES);
     const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return { status: "unknown" };
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { status: "unknown" };
     snapshot = parsed as Record<string, unknown>;
   } catch {
     return { status: "unknown" };

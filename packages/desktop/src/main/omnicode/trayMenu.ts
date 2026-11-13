@@ -106,7 +106,11 @@ export function buildOmnicodeTrayMenuSection(): MenuItemConstructorOptions[] {
   if (!wired) return [];
   const model = buildOmnicodeTraySectionModel({
     instances: currentTrayInstances(),
-    profileCount: Math.max(nameByProfileId.size, 1),
+    // [R1 P2-3] profileCount 直接用名称缓存条目数（不再 max(...,1)）：0 profile 时
+    // 「启动全部」禁用（0<0 不成立）、「停止全部」因无运行实例同样禁用——与菜单既有
+    // "无操作对象即禁用"语义一致。取舍：名称缓存刷新失败保留旧值（refreshNameCache
+    // catch 语义），极端情况下计数可能滞后一轮重建，接受（下次成功刷新即对齐）。
+    profileCount: nameByProfileId.size,
     isZh: isZhReader?.() === true,
   });
   const items: MenuItemConstructorOptions[] = [];
