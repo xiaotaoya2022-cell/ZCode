@@ -18,6 +18,8 @@ import {
 
 interface FakeWindow {
   isDestroyed(): boolean;
+  /** [R1 P1-1] perfMonitor 的无可见窗口自愈依赖 isVisible()（hide-to-tray = false）。 */
+  isVisible(): boolean;
   webContents: { send(channel: string, payload: unknown): void };
 }
 
@@ -41,7 +43,8 @@ vi.mock("../src/main/omnicode/instanceManager.js", () => ({
 }));
 
 const reconcileState = vi.hoisted(() => ({
-  memoryByPid: undefined as Map<number, number> | undefined,
+  // 允许挂起 Promise（R1 评审补测：sampling 防并发分支需要"永不返回"的慢轮）
+  memoryByPid: undefined as Map<number, number> | undefined | Promise<Map<number, number> | undefined>,
   spawnCalls: 0,
 }));
 vi.mock("../src/main/omnicode/instanceReconcile.js", () => ({
@@ -80,6 +83,8 @@ vi.mock("../src/main/omnicode/profileRuntime.js", () => ({
   listOmnicodeProfiles: async () => profileState.profiles,
   getOmnicodeProfileRecord: async (id: string) => profileState.records[id],
   getOmnicodeProfileDir: (id: string) => profileState.dirs[id] ?? `/virtual/omnicode/${id}`,
+  // consoleUiState（mergeOmnicodeConsoleUiState 测试引入）依赖；纯函数测试不触盘
+  getOmnicodeConsoleDataBaseDir: () => "/virtual/omnicode-console-data",
 }));
 
 import {
@@ -95,11 +100,14 @@ import {
   setupOmnicodeConsoleTray,
 } from "../src/main/omnicode/trayMenu.js";
 import {
+  OMNICODE_LOGIN_CREDENTIALS_MAX_BYTES,
   OMNICODE_LOGIN_EXPIRING_THRESHOLD_DAYS,
+  OMNICODE_LOGIN_SECRET_MAX_BYTES,
   readOmnicodeLoginHealthFromDataRoot,
   readOmnicodeLoginHealths,
   resolveOmnicodeLoginHealth,
 } from "../src/main/omnicode/loginHealth.js";
+import { mergeOmnicodeConsoleUiState } from "../src/main/omnicode/consoleUiState.js";
 import {
   buildOmnicodeSparklinePoints,
   formatOmnicodeMemoryMB,
@@ -111,11 +119,21 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 // ═══ X1：perfMonitor（采样决策 + 降级状态机） ═══
 
-function createFakeWindow(): FakeWindow & { sent: { channel: string; payload: unknown }[] } {
+function createFakeWindow(
+  visible = true,
+): FakeWindow & {
+  sent: { channel: string; payload: unknown }[];
+  setVisible(next: boolean): void;
+} {
   const sent: { channel: string; payload: unknown }[] = [];
+  let visibleNow = visible;
   return {
     sent,
     isDestroyed: () => false,
+    isVisible: () => visibleNow,
+    setVisible: (next: boolean) => {
+      visibleNow = next;
+    },
     webContents: { send: (channel: string, payload: unknown) => sent.push({ channel, payload }) },
   };
 }
@@ -141,25 +159,64 @@ function perfEvents(win: ReturnType<typeof createFakeWindow>): OmnicodePerfEvent
 }
 
 describe("omnicode batch2.5 X1: perfMonitor tick decision (pure)", () => {
-  it("resolveOmnicodePerfTickAction：五分支全锁（stop/degrade-platform/degrade-probe/empty/sample）", () => {
-    // 面板关：无论其余输入一律 stop（优先级最高）
+  it("resolveOmnicodePerfTickAction：六分支全锁（stop/degrade-platform/pause-invisible/degrade-probe/empty/sample）", () => {
+    // 面板关：无论其余输入一律 stop（优先级最高，含无可见窗口）
     expect(
-      resolveOmnicodePerfTickAction({ enabled: false, platform: "win32", runningCount: 3, consecutiveFailures: 9 }),
+      resolveOmnicodePerfTickAction({
+        enabled: false,
+        platform: "win32",
+        runningCount: 3,
+        consecutiveFailures: 9,
+        visibleWindowCount: 0,
+      }),
     ).toBe("stop");
-    // 非 win32：即刻平台降级（先于失败阈值判定）
+    // 非 win32：即刻平台降级（先于可见性与失败阈值判定）
     expect(
-      resolveOmnicodePerfTickAction({ enabled: true, platform: "linux", runningCount: 3, consecutiveFailures: 0 }),
+      resolveOmnicodePerfTickAction({
+        enabled: true,
+        platform: "linux",
+        runningCount: 3,
+        consecutiveFailures: 0,
+        visibleWindowCount: 0,
+      }),
     ).toBe("degrade-platform");
     expect(
-      resolveOmnicodePerfTickAction({ enabled: true, platform: "darwin", runningCount: 1, consecutiveFailures: 5 }),
+      resolveOmnicodePerfTickAction({
+        enabled: true,
+        platform: "darwin",
+        runningCount: 1,
+        consecutiveFailures: 5,
+        visibleWindowCount: 1,
+      }),
     ).toBe("degrade-platform");
-    // 连续失败达阈值：probe 降级
+    // [R1 P1-1] 无可见窗口（hide 进托盘）：pause-invisible（不 spawn 不广播不推进决策），
+    // 且先于 probe 阈值判定（无观察者时不广播降级也不累计失败）
+    expect(
+      resolveOmnicodePerfTickAction({
+        enabled: true,
+        platform: "win32",
+        runningCount: 2,
+        consecutiveFailures: 0,
+        visibleWindowCount: 0,
+      }),
+    ).toBe("pause-invisible");
     expect(
       resolveOmnicodePerfTickAction({
         enabled: true,
         platform: "win32",
         runningCount: 2,
         consecutiveFailures: PERF_DEGRADE_FAILURE_THRESHOLD,
+        visibleWindowCount: 0,
+      }),
+    ).toBe("pause-invisible");
+    // 连续失败达阈值：probe 降级（有可见窗口时）
+    expect(
+      resolveOmnicodePerfTickAction({
+        enabled: true,
+        platform: "win32",
+        runningCount: 2,
+        consecutiveFailures: PERF_DEGRADE_FAILURE_THRESHOLD,
+        visibleWindowCount: 1,
       }),
     ).toBe("degrade-probe");
     // 阈值-1：仍继续采样（失败计 1 次不降级）
@@ -169,15 +226,28 @@ describe("omnicode batch2.5 X1: perfMonitor tick decision (pure)", () => {
         platform: "win32",
         runningCount: 2,
         consecutiveFailures: PERF_DEGRADE_FAILURE_THRESHOLD - 1,
+        visibleWindowCount: 1,
       }),
     ).toBe("sample");
-    // 零运行实例：广播空 samples（empty），不 spawn
+    // 零运行实例：广播空 samples（empty），不 spawn（可见窗口下）
     expect(
-      resolveOmnicodePerfTickAction({ enabled: true, platform: "win32", runningCount: 0, consecutiveFailures: 0 }),
+      resolveOmnicodePerfTickAction({
+        enabled: true,
+        platform: "win32",
+        runningCount: 0,
+        consecutiveFailures: 0,
+        visibleWindowCount: 1,
+      }),
     ).toBe("empty");
     // 常态：采样
     expect(
-      resolveOmnicodePerfTickAction({ enabled: true, platform: "win32", runningCount: 1, consecutiveFailures: 0 }),
+      resolveOmnicodePerfTickAction({
+        enabled: true,
+        platform: "win32",
+        runningCount: 1,
+        consecutiveFailures: 0,
+        visibleWindowCount: 1,
+      }),
     ).toBe("sample");
   });
 
@@ -308,6 +378,77 @@ describe("omnicode batch2.5 X1: perfMonitor sampler state machine", () => {
     } finally {
       Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
     }
+  });
+
+  it("[R1 P1-1] 窗口可见性生命周期：全部隐藏 → pause-invisible 不 spawn 不广播；重新可见自动续采（无需 renderer 重发 enable）", async () => {
+    vi.useFakeTimers();
+    const win = createFakeWindow();
+    resetPerfMocks({
+      windows: [win],
+      running: [{ profileId: "pa111111111", pid: 111 }],
+      memoryByPid: new Map([[111, 250]]),
+    });
+    applyOmnicodePerfPanelState(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(perfEvents(win)).toHaveLength(1); // 可见：正常采一轮
+    expect(reconcileState.spawnCalls).toBe(1);
+    // 主窗口 hide 进托盘（P1-1 场景）：无人可见 → 每 tick 只空转判定，不 spawn 不广播
+    win.setVisible(false);
+    await vi.advanceTimersByTimeAsync(PERF_SAMPLE_INTERVAL_MS * 3);
+    expect(perfEvents(win)).toHaveLength(1);
+    expect(reconcileState.spawnCalls).toBe(1);
+    // 重新 show：下一 tick 自动恢复采样（renderer 无需重发 enabled）
+    win.setVisible(true);
+    await vi.advanceTimersByTimeAsync(PERF_SAMPLE_INTERVAL_MS);
+    expect(perfEvents(win)).toHaveLength(2);
+    expect(reconcileState.spawnCalls).toBe(2);
+  });
+
+  it("[R1 P1-1] quit 屏障收尾语义：shutdown 后彻底停采，重新 enable 才恢复", async () => {
+    vi.useFakeTimers();
+    const win = createFakeWindow();
+    resetPerfMocks({
+      windows: [win],
+      running: [{ profileId: "pa111111111", pid: 111 }],
+      memoryByPid: new Map([[111, 250]]),
+    });
+    applyOmnicodePerfPanelState(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(perfEvents(win)).toHaveLength(1);
+    // prepareAppQuit 屏障调用点（index.ts）：幂等停采 + panelEnabled 复位
+    shutdownOmnicodePerfSampler();
+    shutdownOmnicodePerfSampler(); // 幂等
+    await vi.advanceTimersByTimeAsync(PERF_SAMPLE_INTERVAL_MS * 3);
+    expect(perfEvents(win)).toHaveLength(1);
+    expect(reconcileState.spawnCalls).toBe(1);
+    // 停的是采样不是面板偏好：重新 enable 恢复（对应重启/下次打开面板）
+    applyOmnicodePerfPanelState(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(perfEvents(win)).toHaveLength(2);
+    expect(reconcileState.spawnCalls).toBe(2);
+  });
+
+  it("[R1 评审补测] sampling 防并发：上轮 tasklist 未返回时本轮跳过（不并发 spawn），返回后恢复", async () => {
+    vi.useFakeTimers();
+    const win = createFakeWindow();
+    resetPerfMocks({ windows: [win], running: [{ profileId: "pa111111111", pid: 111 }] });
+    let releaseMemory!: (value: Map<number, number> | undefined) => void;
+    reconcileState.memoryByPid = new Promise<Map<number, number> | undefined>((resolve) => {
+      releaseMemory = resolve;
+    });
+    applyOmnicodePerfPanelState(true);
+    await vi.advanceTimersByTimeAsync(0); // 第 1 轮进入 sampling=true，await 挂起
+    expect(reconcileState.spawnCalls).toBe(1);
+    await vi.advanceTimersByTimeAsync(PERF_SAMPLE_INTERVAL_MS * 2); // 挂起期间的 tick 全部跳过
+    expect(reconcileState.spawnCalls).toBe(1);
+    expect(perfEvents(win)).toHaveLength(0); // 未返回不广播（不编造数据）
+    releaseMemory(new Map([[111, 260]])); // 慢轮返回
+    await vi.advanceTimersByTimeAsync(0);
+    const events = perfEvents(win);
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toBe("sample");
+    await vi.advanceTimersByTimeAsync(PERF_SAMPLE_INTERVAL_MS); // 下一轮恢复 spawn
+    expect(reconcileState.spawnCalls).toBe(2);
   });
 });
 
@@ -531,6 +672,42 @@ describe("omnicode batch2.5 X2: readOmnicodeLoginHealthFromDataRoot (fs + cipher
     await expect(readOmnicodeLoginHealthFromDataRoot(root, NOW)).resolves.toEqual({ status: "unknown" });
   });
 
+  it("[R1 P2-2] 密钥文件带尾随空白与实例侧同判定（canonical 不 trim：原样字节即密钥）→ 正常解密非 unknown", async () => {
+    const NOW = Date.now();
+    const credentialsPath = join(root, ".zcode", "v2", "credentials.json");
+    const paddedSecret = `${SECRET}\n`; // 手工编辑残留换行（字节长度仍 32..4096 内）
+    await writeSnapshot(
+      {
+        "oauth:zai:expires_at": await encrypt(credentialsPath, paddedSecret, String(NOW + 30 * DAY_MS)),
+        "oauth:active_provider": await encrypt(credentialsPath, paddedSecret, "zai"),
+      },
+      { secretFile: paddedSecret },
+    );
+    // 实例侧 resolveManagedSecret 原样读（不 trim）→ 用含空白密钥可解密；管理器对齐后同判
+    await expect(readOmnicodeLoginHealthFromDataRoot(root, NOW)).resolves.toEqual({
+      status: "healthy",
+      daysRemaining: 30,
+      expiresAt: NOW + 30 * DAY_MS,
+    });
+  });
+
+  it("[R1 P2-2/P2-6] 密钥超长（>4096 字节）→ unknown（与 canonical 字节界对齐）", async () => {
+    await writeSnapshot({}, { secretFile: "x".repeat(OMNICODE_LOGIN_SECRET_MAX_BYTES + 1) });
+    await expect(readOmnicodeLoginHealthFromDataRoot(root)).resolves.toEqual({ status: "unknown" });
+  });
+
+  it("[R1 P2-6] credentials.json 为合法 JSON 数组 → 安全落 unknown（仅接受对象快照）", async () => {
+    await writeSnapshot({}, { rawCredentials: JSON.stringify([1, 2, 3]) });
+    await expect(readOmnicodeLoginHealthFromDataRoot(root)).resolves.toEqual({ status: "unknown" });
+  });
+
+  it("[R1 P2-6] credentials.json 超大小上限 → 读前拒读归 unknown（有界防御，无真超时）", async () => {
+    await writeSnapshot({}, {
+      rawCredentials: `{"pad": "${"x".repeat(OMNICODE_LOGIN_CREDENTIALS_MAX_BYTES)}"}`,
+    });
+    await expect(readOmnicodeLoginHealthFromDataRoot(root)).resolves.toEqual({ status: "unknown" });
+  });
+
   it("readOmnicodeLoginHealths：逐 profile 解析数据根（override 优先），失败项 unknown 不拖垮整体", async () => {
     const NOW = Date.now();
     const healthyRoot = join(root, "p1-data");
@@ -561,8 +738,9 @@ describe("omnicode batch2.5 X2: readOmnicodeLoginHealthFromDataRoot (fs + cipher
 });
 
 // ═══ X3：trayMenu（菜单模型纯函数 + 去抖重建装配） ═══
-// 注意：trayMenu 为模块级单例（wired/名称缓存），本 describe 内按序执行：
-// 先锁「未装配返回空」，再 setup，再验证去抖与菜单项行为。
+// [R1 P2-4] 隔离说明：「未装配返回空」用例经 vi.resetModules + 动态 import 取全新模块
+// 实例（wired=false 恒成立），不再依赖与本文件内其它用例的执行顺序；wiring describe
+// 内 setup 之后的用例仍按文件序共享同一单例（装配态是它们的前置条件，属有意状态构建）。
 
 describe("omnicode batch2.5 X3: trayMenu model (pure)", () => {
   it("buildOmnicodeTraySectionModel：实例项 label / 启停全部可用性与双语", () => {
@@ -597,6 +775,16 @@ describe("omnicode batch2.5 X3: trayMenu model (pure)", () => {
     expect(partial.launchAllEnabled).toBe(true);
     expect(partial.stopAllEnabled).toBe(true);
   });
+
+  it("[R1 P2-3] 0 profile：启动全部与停止全部双双禁用（无操作对象即禁用）", () => {
+    const zero = buildOmnicodeTraySectionModel({ instances: [], profileCount: 0, isZh: true });
+    expect(zero.instanceItems).toEqual([]);
+    expect(zero.launchAllEnabled).toBe(false); // 0 < 0 不成立 → 禁用（不再 no-op 可点）
+    expect(zero.stopAllEnabled).toBe(false);
+    const zeroEn = buildOmnicodeTraySectionModel({ instances: [], profileCount: 0, isZh: false });
+    expect(zeroEn.launchAllEnabled).toBe(false);
+    expect(zeroEn.stopAllEnabled).toBe(false);
+  });
 });
 
 describe("omnicode batch2.5 X3: trayMenu wiring + debounce", () => {
@@ -606,9 +794,11 @@ describe("omnicode batch2.5 X3: trayMenu wiring + debounce", () => {
     bridgeState.commands = [];
   });
 
-  it("未装配（wired=false）时菜单区为空数组——官方 flavor 零影响", () => {
-    // 本测试先于 setup 执行（模块单例状态；见 describe 注释）
-    expect(buildOmnicodeTrayMenuSection()).toEqual([]);
+  it("未装配（wired=false）时菜单区为空数组——官方 flavor 零影响（R1 P2-4：模块重置隔离，与执行顺序无关）", async () => {
+    // 取全新模块实例锁定初始态（此前依赖"本用例先于 setup 执行"的隐式顺序，重排即碎）
+    vi.resetModules();
+    const freshTrayMenu = await import("../src/main/omnicode/trayMenu.js");
+    expect(freshTrayMenu.buildOmnicodeTrayMenuSection()).toEqual([]);
     expect(trayState.rebuilds).toBe(0);
   });
 
@@ -667,5 +857,53 @@ describe("omnicode batch2.5 X3: trayMenu wiring + debounce", () => {
     items[0].click?.(undefined as never, undefined as never, undefined as never);
     expect(bridgeState.broadcasts).toEqual([{ profileId: "pa111111111", type: "focusRequested" }]);
     expect(bridgeState.commands).toEqual([{ profileId: "pa111111111", command: { type: "focus" } }]);
+  });
+
+  it("[R1 评审补测] 名称缓存缺失的运行实例：托盘 label 回退 profileId（不因缓存缺口丢项）", () => {
+    // 缓存只有 pa/pb；让运行态出现未入缓存的 pc（如 profile.json 读取失败的窗口期）
+    managerState.running = [{ profileId: "pc111111333", pid: 333, startedAt: "2026-01-01T00:00:00.000Z" }];
+    try {
+      const items: MenuItemConstructorOptions[] = buildOmnicodeTrayMenuSection();
+      expect(items[0]).toMatchObject({ label: "● pc111111333" });
+    } finally {
+      // 还原现场，避免影响后续用例对运行态的假设
+      managerState.running = [
+        { profileId: "pa111111111", pid: 111, startedAt: "2026-01-01T00:00:00.000Z" },
+      ];
+    }
+  });
+});
+
+// ═══ X1 配套：consoleUiState 归一（mergeOmnicodeConsoleUiState perfPanelOpen 分支） ═══
+
+describe("omnicode batch2.5 X1: mergeOmnicodeConsoleUiState perfPanelOpen 归一（R1 评审补测）", () => {
+  const base = { mode: "embedded" as const, previewEnabled: true };
+
+  it("perfPanelOpen 仅显式布尔写入：true/false 均落；undefined/非布尔丢弃（旧档不被动携带）", () => {
+    expect(mergeOmnicodeConsoleUiState(base, { perfPanelOpen: true })).toEqual({
+      ...base,
+      perfPanelOpen: true,
+    });
+    expect(mergeOmnicodeConsoleUiState(base, { perfPanelOpen: false })).toEqual({
+      ...base,
+      perfPanelOpen: false,
+    });
+    expect(
+      mergeOmnicodeConsoleUiState({ ...base, perfPanelOpen: true }, { perfPanelOpen: false }),
+    ).toEqual({ ...base, perfPanelOpen: false });
+    // 非布尔（含显式 undefined / 字符串）不写入——落盘值永远收敛到合法形态
+    expect(mergeOmnicodeConsoleUiState(base, { perfPanelOpen: undefined })).toEqual(base);
+    expect(mergeOmnicodeConsoleUiState(base, { perfPanelOpen: "yes" as never })).toEqual(base);
+  });
+
+  it("patch 缺省/空对象/未知字段：原样返回，已知合法字段照常合并", () => {
+    expect(mergeOmnicodeConsoleUiState(base, undefined)).toBe(base);
+    expect(mergeOmnicodeConsoleUiState(base, {})).toEqual(base);
+    expect(mergeOmnicodeConsoleUiState(base, { evil: 1 } as never)).toEqual(base);
+    expect(mergeOmnicodeConsoleUiState(base, { mode: "desktop", perfPanelOpen: true })).toEqual({
+      ...base,
+      mode: "desktop",
+      perfPanelOpen: true,
+    });
   });
 });

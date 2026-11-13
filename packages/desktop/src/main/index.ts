@@ -27,6 +27,9 @@ import {
 // [OmniCode] 批次2.5 X3：托盘实例快捷菜单区提供者（仅管理器主进程注入 desktopTray；
 // spec: docs/omnicode/console-extras.md §X3）
 import { buildOmnicodeTrayMenuSection, setupOmnicodeConsoleTray } from "./omnicode/trayMenu.js";
+// [OmniCode] 批次2.5 X1 评审修复（R1 P1-1）：性能采样器退出收尾接入 quit 屏障
+//（spec: docs/omnicode/console-extras.md §X1 采样生命周期）
+import { shutdownOmnicodePerfSampler } from "./omnicode/perfMonitor.js";
 import "./desktopEarlyDataBaseDirBootstrap.js";
 import "./desktopEarlyChromiumHardwareAccelerationBootstrap.js";
 import { powerMonitor, powerSaveBlocker } from "electron";
@@ -1402,6 +1405,9 @@ async function prepareAppQuit(reason: string, kind: AppShutdownKind = "normal"):
   stopDesktopZCodeDataSizeTelemetry();
   stopDesktopNetworkTelemetry();
   stopRemoteUsageArmsPeriodicSampling();
+  // [OmniCode] 批次2.5 X1 评审修复（R1 P1-1）：性能采样器退出收尾（幂等，timer 已 unref，
+  // 此处防御性停采并复位 panelEnabled）。采样仅管理器主进程会启用，官方 flavor 调用为 no-op。
+  shutdownOmnicodePerfSampler();
   disposeRendererActionTraceIpc?.();
   disposeRendererActionTraceIpc = undefined;
   notifyStabilityAppExit(

@@ -429,8 +429,9 @@ export interface OmnicodeProfileSummaryInfo {
   memoryMB?: number;
   /**
    * [OmniCode] 批次2.5 X2：登录态健康度（管理器直读 profile 凭据快照的 expiresAt
-   * 分级，spec: docs/omnicode/console-extras.md §X2）。读失败/未登录 = unknown（静默）；
-   * 官方 flavor / 旧 main 不填充。
+   * 分级，spec: docs/omnicode/console-extras.md §X2）。读失败/未登录 = unknown（静默）。
+   * [R1 P2-5 勘误] 填充方为管理器进程的 Profile 列表（与 flavor 无关地走同一填充代码）；
+   * 官方 flavor 通常没有 omnicode profile（列表为空），故实际不出现该字段。
    */
   loginHealth?: OmnicodeLoginHealthInfo;
 }

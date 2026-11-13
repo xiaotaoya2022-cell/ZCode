@@ -124,21 +124,34 @@ export function ConsoleInstanceGrid() {
 
   // ─── [OmniCode] 批次2.5 X1：性能面板（右侧抽屉；开关记忆于 console-ui.json 的
   // perfPanelOpen；开=上报 PerfState enabled 让 main 启动周期采样，关=停采；
-  // unavailable（非 Windows / tasklist 连续失败）= 入口整体隐藏，spec:
+  // unavailable（非 Windows / tasklist 连续失败）= 面板关闭但入口保留可点击，
+  // 显式点击 = 一次重探（R1 P2-1，失败回落 unavailable，无自动循环重试），spec:
   // docs/omnicode/console-extras.md §X1） ───
   const [perfUnavailable, setPerfUnavailable] = useState(false);
   const perfPanelOpen = uiState.perfPanelOpen === true;
   useEffect(() => {
-    // 初始态与开关变化都上报（面板打开后 main 才开始采样；关闭即停）
+    // 初始态与开关变化都上报（面板打开后 main 才开始采样；关闭即停）。
     void platform.setOmnicodePerfPanelState?.({ enabled: perfPanelOpen }).catch(() => {
       /* 旧 preload / 瞬时失败：面板无数据但不阻断 */
     });
+    // [R1 P1-1] cleanup：卸载（离开控制台页）与依赖变化时兜底停采——窗口销毁/组件
+    // 卸载后 renderer 不再有机会补发 enabled=false，这里保证 main 不留采样尾巴。
+    return () => {
+      void platform.setOmnicodePerfPanelState?.({ enabled: false }).catch(() => {
+        /* 卸载路径失败不再有机会重试，静默（main 侧 tick 亦有无可见窗口自愈停采） */
+      });
+    };
   }, [platform, perfPanelOpen]);
 
   const handlePerfToggle = useCallback(
     (open: boolean) => {
       if (open && perfUnavailable) {
-        toast(intl.formatMessage({ id: "console.perfUnavailable" }), { variant: "default" });
+        // [R1 P2-1] unavailable 态下显式点击 = 允许一次重探：置回可用态并本地打开面板，
+        // 上面 effect 会发 enabled=true → main 重置失败计数并立即采一轮；若再降级会再次
+        // 收到 unavailable 广播回落（handlePerfUnavailable），一次点击只重探一次，无自动循环。
+        // 不持久化（与 handlePerfUnavailable 同策略）：落盘值不因重探翻转。
+        setPerfUnavailable(false);
+        setUiState((previous) => ({ ...previous, perfPanelOpen: true }));
         return;
       }
       setUiState((previous) => ({ ...previous, perfPanelOpen: open }));
@@ -146,15 +159,16 @@ export function ConsoleInstanceGrid() {
         /* 持久化失败不阻断本地开关（下次切换会再对齐） */
       });
     },
-    [intl, perfUnavailable, platform],
+    [perfUnavailable, platform],
   );
 
   const handlePerfUnavailable = useCallback(() => {
     setPerfUnavailable(true);
-    // 仅本地关闭面板并停采；持久化值保持原样——下次应用启动（perfPanelOpen=true）
-    // 会重新走一次 enable 全流程，给降级后的自动重试留出口（spec §降级语义）。
+    toast(intl.formatMessage({ id: "console.perfUnavailable" }), { variant: "default" });
+    // 仅本地关闭面板并停采；持久化值保持原样——下次应用启动（perfPanelOpen=true）或
+    // 用户显式点击入口（R1 P2-1 一次重探）都会重新走一次 enable 全流程。
     setUiState((previous) => (previous.perfPanelOpen ? { ...previous, perfPanelOpen: false } : previous));
-  }, []);
+  }, [intl]);
 
   // ─── 单视图放大（双击运行卡片 = 放大；ESC / 返回钮 = 回网格） ───
   const [enlargedId, setEnlargedId] = useState<string | null>(null);
@@ -465,18 +479,18 @@ export function ConsoleInstanceGrid() {
           />
           {intl.formatMessage({ id: "console.previewLabel" })}
         </label>
-        {!perfUnavailable ? (
-          <Button
-            variant={perfPanelOpen ? "default" : "outline"}
-            size="sm"
-            onClick={() => handlePerfToggle(!perfPanelOpen)}
-            disabled={busy}
-            title={intl.formatMessage({ id: "console.perfToggleTitle" })}
-          >
-            <Activity className="size-3.5" />
-            {intl.formatMessage({ id: "console.perfToggleLabel" })}
-          </Button>
-        ) : null}
+        {/* [R1 P2-1] unavailable 态入口保留（降级不再整体隐藏）：点击 = 一次重探；
+            再降级由 handlePerfUnavailable 回落（toast + 本地关闭），无自动循环重试 */}
+        <Button
+          variant={perfPanelOpen ? "default" : "outline"}
+          size="sm"
+          onClick={() => handlePerfToggle(!perfPanelOpen)}
+          disabled={busy}
+          title={intl.formatMessage({ id: "console.perfToggleTitle" })}
+        >
+          <Activity className="size-3.5" />
+          {intl.formatMessage({ id: "console.perfToggleLabel" })}
+        </Button>
         <Button
           variant="ghost"
           size="icon"

@@ -1,7 +1,7 @@
 // [OmniCode] 批次2.5 X1：性能监控面板（右侧抽屉，spec: docs/omnicode/console-extras.md §X1）。
 // 每运行实例一行（名称 + 当前内存 + 纯 SVG spark 曲线）+ 全局合计；CPU 列 v1 显示 —
 // （tasklist 无 CPU 占用列，spec 已知限制 1）。数据 = main 的 OmnicodePerfEvent 广播
-//（面板开=采样；unavailable=整面板入口隐藏，由 ConsoleInstanceGrid 控制）。
+//（面板开=采样；unavailable=面板关闭、入口保留可点击重探——R1 P2-1，由 ConsoleInstanceGrid 控制）。
 import { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import type { OmnicodeProfileSummaryInfo } from "@zcode/shared";
@@ -30,7 +30,8 @@ export interface ConsolePerfPanelState {
 
 /**
  * 性能抽屉面板。onClose 由 ConsoleInstanceGrid 传入（同时负责翻转 perfPanelOpen 并
- * 上报 PerfState enabled=false 停止采样）；onUnavailable=main 广播降级（入口整体隐藏）。
+ * 上报 PerfState enabled=false 停止采样）；onUnavailable=main 广播降级（面板关闭 +
+ * toast，入口保留可点击重探——R1 P2-1，由 ConsoleInstanceGrid 控制）。
  */
 export function ConsolePerfPanel(props: {
   profiles: OmnicodeProfileSummaryInfo[];
