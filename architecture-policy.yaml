@@ -1836,6 +1836,10 @@ modules:
     requires:
       - shared
       - desktop
+      # 批次2.5 X2 requires 增补 credential-security：loginHealth 管理器直读凭据快照
+      #（createSystemCredentialCipher 解 expiresAt，spec: docs/omnicode/console-extras.md §X2）
+      # ——desktop 主树 desktopHostProcess/host 同款依赖，仅走 module.ts 公共入口。
+      - credential-security
     publicEntrypoints:
       - packages/desktop/src/main/omnicode/contract.ts
       - packages/desktop/src/main/omnicode/profileBootstrap.ts

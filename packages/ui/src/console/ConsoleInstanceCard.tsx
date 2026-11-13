@@ -12,7 +12,11 @@ import {
   Square,
   Trash2,
 } from "lucide-react";
-import type { OmnicodeConsoleUiState, OmnicodeProfileSummaryInfo } from "@zcode/shared";
+import type {
+  OmnicodeConsoleUiState,
+  OmnicodeLoginHealthInfo,
+  OmnicodeProfileSummaryInfo,
+} from "@zcode/shared";
 import { Button } from "@/components/ui/button.js";
 import {
   DropdownMenu,
@@ -254,9 +258,10 @@ export function ConsoleInstanceCard(props: {
         ) : null}
       </div>
 
-      {/* 底部：备注 / pid */}
+      {/* 底部：备注 / 登录态徽标（批次2.5 X2）/ 运行态 */}
       <footer className="flex shrink-0 items-center justify-between gap-2 border-t border-border px-2 py-1 text-ui-xs text-foreground-subtlest">
         <span className="min-w-0 truncate">{notes || ""}</span>
+        <LoginHealthBadge running={running} loginHealth={profile.loginHealth} />
         <span className="shrink-0">
           {running
             ? intl.formatMessage(
@@ -267,6 +272,71 @@ export function ConsoleInstanceCard(props: {
         </span>
       </footer>
     </section>
+  );
+}
+
+/**
+ * [OmniCode] 批次2.5 X2：登录态健康度徽标（spec: docs/omnicode/console-extras.md §X2）。
+ * 语义色：healthy=绿（停止实例但登录健康=黄——"仅剩登录态"，X4 状态色统一）、
+ * expiring=黄、expired=红、unknown=灰；title 提示精确剩余时间（天+小时）。
+ */
+function LoginHealthBadge(props: {
+  running: boolean;
+  loginHealth?: OmnicodeLoginHealthInfo;
+}) {
+  const { intl } = useZCodeIntl();
+  const { running, loginHealth } = props;
+  const status = loginHealth?.status ?? "unknown";
+  const tone =
+    status === "healthy"
+      ? running
+        ? "text-emerald-500"
+        : "text-amber-500" // 仅剩登录态（实例停止但登录态活着）
+      : status === "expiring"
+        ? "text-amber-500"
+        : status === "expired"
+          ? "text-red-500"
+          : "text-foreground-subtlest";
+  const label =
+    status === "healthy" || status === "expiring"
+      ? intl.formatMessage(
+          { id: status === "healthy" ? "console.loginHealthyDays" : "console.loginExpiringDays" },
+          { days: String(loginHealth?.daysRemaining ?? 0) },
+        )
+      : intl.formatMessage({
+          id:
+            status === "expired"
+              ? "console.loginExpired"
+              : "console.loginUnknown",
+        });
+  const title =
+    status === "healthy" || status === "expiring"
+      ? formatLoginRemainingTitle(loginHealth, intl)
+      : label;
+  return (
+    <span
+      className={cn("flex shrink-0 items-center gap-1", tone)}
+      title={title}
+    >
+      <span className="inline-block size-1.5 rounded-full bg-current" />
+      {label}
+    </span>
+  );
+}
+
+function formatLoginRemainingTitle(
+  loginHealth: OmnicodeLoginHealthInfo | undefined,
+  intl: ReturnType<typeof useZCodeIntl>["intl"],
+): string {
+  const expiresAt = loginHealth?.expiresAt;
+  if (expiresAt === undefined) return "";
+  const remainingMs = expiresAt - Date.now();
+  if (remainingMs <= 0) return intl.formatMessage({ id: "console.loginExpired" });
+  const days = Math.floor(remainingMs / (24 * 60 * 60 * 1000));
+  const hours = Math.floor((remainingMs % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
+  return intl.formatMessage(
+    { id: "console.loginRemainingTitle" },
+    { days: String(days), hours: String(hours) },
   );
 }
 
