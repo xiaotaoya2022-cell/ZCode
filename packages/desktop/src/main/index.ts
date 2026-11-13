@@ -24,6 +24,9 @@ import {
   releaseOmnicodeEmbedForQuit,
   setOmnicodeEmbedManagerWindow,
 } from "./omnicode/consoleEmbedding.js";
+// [OmniCode] 批次2.5 X3：托盘实例快捷菜单区提供者（仅管理器主进程注入 desktopTray；
+// spec: docs/omnicode/console-extras.md §X3）
+import { buildOmnicodeTrayMenuSection, setupOmnicodeConsoleTray } from "./omnicode/trayMenu.js";
 import "./desktopEarlyDataBaseDirBootstrap.js";
 import "./desktopEarlyChromiumHardwareAccelerationBootstrap.js";
 import { powerMonitor, powerSaveBlocker } from "electron";
@@ -2641,7 +2644,24 @@ app.whenReady().then(async () => {
       app.quit();
     },
     logger,
+    // [OmniCode] 批次2.5 X3：仅管理器主进程注入实例快捷菜单区（官方 flavor 不注入，
+    // 托盘菜单零变化；内容与动态重建见 omnicode/trayMenu.ts）
+    ...(isOmnicodeManagerMain ? { buildOmnicodeSection: buildOmnicodeTrayMenuSection } : {}),
   };
+  if (isOmnicodeManagerMain) {
+    // [OmniCode] 批次2.5 X3：托盘实例区装配（名称缓存 + 运行态订阅去抖重建；托盘创建
+    // 早于此处也不缺项——provider 同步读缓存，setup 后首次重建即填充）
+    setupOmnicodeConsoleTray({
+      showConsoleWindow: () => {
+        void primaryWindowCoordinator
+          .ensurePrimaryWindow("omnicode-tray-focus")
+          .catch((error: unknown) => {
+            logger.warn("[omnicode] 托盘聚焦：显示管理器主窗口失败", error);
+          });
+      },
+      isZh: () => currentApplicationLocale === "zh-CN",
+    });
+  }
   // CR-01：托盘实例是否创建成功必须成为可隐藏能力的一部分。DBus watcher 只能证明桌面
   // 可能有 host，new Tray() 仍可能因图标缺失/会话未就绪抛错；此时隐藏窗口会让用户失去
   // 唯一入口（失联）。trayReady 由创建结果置位，关窗与设置页能力查询都读它。

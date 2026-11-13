@@ -47,6 +47,7 @@ export function ConsoleInstanceGrid() {
     loading,
     busy,
     frames,
+    focusRequest,
     refresh,
     runningCount,
     handleLaunch,
@@ -368,6 +369,28 @@ export function ConsoleInstanceGrid() {
     })();
   }, [intl, newName, newNotes, platform]);
 
+  // ─── [OmniCode] 批次2.5 X3：托盘聚焦请求 → 滚动定位对应卡片 + 短暂高亮
+  //（main 广播 focusRequested；目标在其他实例的单视图时先退回网格让卡片回 DOM，spec §X3） ───
+  const [focusHighlightId, setFocusHighlightId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!focusRequest) return;
+    const { profileId } = focusRequest;
+    setEnlargedId((current) => (current && current !== profileId ? null : current));
+    // 等一拍让（可能的）单视图退出先渲染，再滚动定位
+    const raf = window.requestAnimationFrame(() => {
+      const element = cardElementsRef.current.get(profileId);
+      element?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
+    setFocusHighlightId(profileId);
+    const timer = window.setTimeout(() => {
+      setFocusHighlightId((current) => (current === profileId ? null : current));
+    }, 1600);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
+    };
+  }, [focusRequest]);
+
   const cardActionProps = {
     busy,
     mode: uiState.mode,
@@ -520,6 +543,7 @@ export function ConsoleInstanceGrid() {
                   profile={profile}
                   frame={frames.get(profile.id)}
                   enlarged={enlargedId === profile.id}
+                  focusHighlighted={focusHighlightId === profile.id}
                   registerScreen={registerScreen}
                   registerCard={registerCard}
                   {...cardActionProps}

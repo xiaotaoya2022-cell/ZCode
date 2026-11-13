@@ -1,4 +1,4 @@
-import { app, Menu, Tray } from "electron";
+import { app, Menu, Tray, type MenuItemConstructorOptions } from "electron";
 import { join } from "node:path";
 import {
   DesktopCommandIds,
@@ -32,6 +32,11 @@ export function createDesktopTray(options: {
   executeDesktopCommand: (command: DesktopCommandId) => Promise<unknown>;
   quitApp: () => void;
   logger: { warn: (...args: unknown[]) => void };
+  /**
+   * [OmniCode] 批次2.5 X3：实例快捷菜单区提供者（仅 omnicode 管理器主进程注入；
+   * 返回空数组=无实例区，官方 flavor 零影响。spec: docs/omnicode/console-extras.md §X3）。
+   */
+  buildOmnicodeSection?: () => MenuItemConstructorOptions[];
 }) {
   const platform = options.platform ?? process.platform;
   // Linux 驻留能力由 createCloseToTrayCapabilityMonitor 探测决定（spec：
@@ -67,12 +72,18 @@ export function createDesktopTray(options: {
   };
   const rebuildContextMenu = () => {
     desktopTray?.setToolTip(getLabel(desktopMenuMessageIds.trayTooltip));
+    // [OmniCode] 批次2.5 X3：实例快捷菜单区（运行实例/启动全部/停止全部）插在「打开」
+    // 之后；提供者返回空数组时完全无痕（官方 flavor 不注入）。
+    const omnicodeSection = options.buildOmnicodeSection?.() ?? [];
     desktopTray?.setContextMenu(
       Menu.buildFromTemplate([
         {
           label: getLabel(desktopMenuMessageIds.trayOpenZCode),
           click: showTrayWindow,
         },
+        ...(omnicodeSection.length > 0
+          ? [{ type: "separator" as const }, ...omnicodeSection]
+          : []),
         { type: "separator" },
         {
           label: getLabel(desktopMenuMessageIds.fileNewTask),

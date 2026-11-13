@@ -45,8 +45,16 @@ export function useOmnicodeConsoleInstances() {
 
   // 实例事件订阅：thumbnail 帧实时更新（1.4fps/实例，M2 视窗管线；B2-3 帧附 {w,h}）
   const [frames, setFrames] = useState<ReadonlyMap<string, OmnicodeInstanceFrame>>(new Map());
+  // [OmniCode] 批次2.5 X3：托盘聚焦请求（main 广播 focusRequested → 网格滚动定位对应
+  // 卡片并短暂高亮；nonce 让同一实例的连续两次请求都能触发效果，spec:
+  // docs/omnicode/console-extras.md §X3）
+  const [focusRequest, setFocusRequest] = useState<{ profileId: string; nonce: number } | null>(null);
   useEffect(() => {
     const unsubscribe = platform.onOmnicodeInstanceEvent?.((payload) => {
+      if (payload.type === "focusRequested") {
+        setFocusRequest({ profileId: payload.profileId, nonce: Date.now() });
+        return;
+      }
       if (payload.type === "thumbnail" && payload.frame) {
         const profileId = payload.profileId;
         const nextFrame: OmnicodeInstanceFrame = {
@@ -224,6 +232,7 @@ export function useOmnicodeConsoleInstances() {
     loading,
     busy,
     frames,
+    focusRequest,
     refresh,
     runningCount,
     handleLaunch,
