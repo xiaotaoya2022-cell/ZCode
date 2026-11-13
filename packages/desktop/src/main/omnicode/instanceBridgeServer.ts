@@ -69,8 +69,12 @@ export function setOmnicodeInstanceBridgeManagerHooks(hooks: OmnicodeInstanceBri
   managerHooks = hooks;
 }
 
-/** [OmniCode] 推送给全部 renderer 窗口（设置页网格订阅渲染缩略图）。 */
-function broadcastOmnicodeInstanceEvent(payload: OmnicodeInstanceEventPayload): void {
+/**
+ * [OmniCode] 推送给全部 renderer 窗口（设置页网格订阅渲染缩略图）。
+ * [OmniCode] 批次2.5 X3：导出复用——托盘聚焦实例时广播 focusRequested 事件（renderer
+ * 网格滚动定位对应卡片，spec: docs/omnicode/console-extras.md §X3）。
+ */
+export function broadcastOmnicodeInstanceEvent(payload: OmnicodeInstanceEventPayload): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) {
       win.webContents.send(PlatformChannels.OmnicodeInstanceEvent, payload);

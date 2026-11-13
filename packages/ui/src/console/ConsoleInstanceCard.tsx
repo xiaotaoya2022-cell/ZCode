@@ -51,6 +51,8 @@ export function ConsoleInstanceCard(props: {
   profile: OmnicodeProfileSummaryInfo;
   frame?: OmnicodeInstanceFrame;
   enlarged: boolean;
+  /** [OmniCode] 批次2.5 X3：托盘聚焦请求的短暂高亮（ring）。 */
+  focusHighlighted?: boolean;
   registerScreen: (profileId: string, element: HTMLElement | null) => void;
   registerCard: (profileId: string, element: HTMLElement | null) => void;
 } & ConsoleInstanceCardActions) {
@@ -59,6 +61,7 @@ export function ConsoleInstanceCard(props: {
     profile,
     frame,
     enlarged,
+    focusHighlighted,
     registerScreen,
     registerCard,
     busy,
@@ -105,8 +108,13 @@ export function ConsoleInstanceCard(props: {
       onDoubleClick={() => onToggleEnlarge(profile)}
       onClick={handleCardClick}
       className={cn(
-        "group relative flex flex-col overflow-hidden rounded-lg border border-border bg-popover transition-colors",
-        mode === "desktop" && running && "cursor-pointer hover:border-foreground-subtle",
+        // [OmniCode] 批次2.5 X4：hover 过渡统一（全部模式一致的边框+阴影节奏）
+        "group relative flex flex-col overflow-hidden rounded-lg border border-border bg-popover transition-[border-color,box-shadow] duration-200 ease-out",
+        running
+          ? "hover:border-foreground-subtle/60 hover:shadow-md"
+          : "hover:border-border",
+        mode === "desktop" && running && "cursor-pointer",
+        focusHighlighted && "border-primary ring-1 ring-primary",
         enlarged && "h-full",
       )}
     >

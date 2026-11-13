@@ -52,6 +52,27 @@ interface RunningEntry extends OmnicodeRunningInstance {
 const runningByProfileId = new Map<string, RunningEntry>();
 const launchInFlightByProfileId = new Map<string, Promise<number>>();
 let launchChain: Promise<unknown> = Promise.resolve();
+/**
+ * [OmniCode] 批次2.5 X3：运行态变化订阅（托盘菜单动态重建的数据触发源，spec:
+ * docs/omnicode/console-extras.md §X3）。launch 确认 / exit / error / stop / reconcile /
+ * 批量操作全部经 notifyOmnicodeRunningStateChanged 通知。
+ */
+const runningStateListeners = new Set<() => void>();
+
+export function subscribeOmnicodeRunningStateChanges(listener: () => void): () => void {
+  runningStateListeners.add(listener);
+  return () => runningStateListeners.delete(listener);
+}
+
+function notifyOmnicodeRunningStateChanged(): void {
+  for (const listener of [...runningStateListeners]) {
+    try {
+      listener();
+    } catch (error) {
+      console.warn("[omnicode] 运行态订阅者通知失败（不影响编排）:", error);
+    }
+  }
+}
 
 const PROFILE_FLAG_PREFIX = "--omnicode-profile=";
 /** [OmniCode] 批次2 B2-1（T4）：管理器"新建并打开"下发的工作区目录旗标。 */
@@ -85,6 +106,7 @@ export function listOmnicodeRunningInstances(): OmnicodeRunningInstance[] {
       if (!alive && runningByProfileId.get(profileId) === entry) {
         runningByProfileId.delete(profileId);
         void clearProfileLaunched(profileId).catch(() => undefined);
+        notifyOmnicodeRunningStateChanged();
       }
     });
   }
@@ -117,6 +139,7 @@ export async function reconcileOmnicodeRunningInstances(): Promise<void> {
       startedAt: new Date().toISOString(),
     });
     console.info(`[omnicode] reconcile 重建运行态: profileId=${profileId} pid=${pid}`);
+    notifyOmnicodeRunningStateChanged();
   }
 }
 
@@ -254,14 +277,20 @@ async function doLaunch(
   child.once("exit", (code, signal) => {
     bootLog?.close();
     const current = runningByProfileId.get(profileId);
-    if (current?.pid === pid) runningByProfileId.delete(profileId);
+    if (current?.pid === pid) {
+      runningByProfileId.delete(profileId);
+      notifyOmnicodeRunningStateChanged();
+    }
     console.info(`[omnicode] 实例退出 profileId=${profileId} pid=${pid} code=${code ?? ""} signal=${signal ?? ""}`);
   });
   child.once("error", (error) => {
     console.error("[omnicode] 实例进程错误:", error);
     bootLog?.close();
     const current = runningByProfileId.get(profileId);
-    if (current?.pid === pid) runningByProfileId.delete(profileId);
+    if (current?.pid === pid) {
+      runningByProfileId.delete(profileId);
+      notifyOmnicodeRunningStateChanged();
+    }
   });
 
   // [OmniCode] P0-2 启动确认：稳定窗口内未退出 = 成功；窗口内退出/spawn 错误 = 快速
@@ -274,6 +303,7 @@ async function doLaunch(
     throw error;
   }
   runningByProfileId.set(profileId, { profileId, pid, startedAt: new Date().toISOString(), child });
+  notifyOmnicodeRunningStateChanged();
   // 批次1 P0-3：持久化启动提示（lastPid/lastLaunchedAt），控制台重启后 reconcile 加速提示；
   // 失败不影响启动成功（提示非真相）
   void recordProfileLaunched(profileId, pid).catch((error) => {
@@ -356,9 +386,39 @@ export async function stopOmnicodeProfile(profileId: string): Promise<void> {
   const entry = runningByProfileId.get(profileId);
   if (!entry) return;
   // P1-7：pid 驱动，不依赖 child 句柄（句柄只随本会话存在；pid 通道对重启过的控制台
-  // 未来持久化 pid 场景同样可用）。成功后主动摘除运行态（child exit 监听兜底同值幂等）。
+  // 未来持久化 pid 场景同样可用）。成功后主动摘除运行态（child exit 监听兜底同值幂等；
+  // [OmniCode] 批次2.5 X3：reconcile 重建的无句柄条目原本要等下一次 List 的存活校验才
+  // 摘除——显式删除让托盘/列表即时收敛）。
   await stopByPid(entry.pid);
+  if (runningByProfileId.get(profileId)?.pid === entry.pid) {
+    runningByProfileId.delete(profileId);
+    notifyOmnicodeRunningStateChanged();
+  }
   void clearProfileLaunched(profileId).catch(() => undefined);
+}
+
+/**
+ * [OmniCode] 批次2.5 X3：停止全部运行中实例（托盘「停止全部」）。逐实例复用
+ * stopOmnicodeProfile（三段式优雅停）；并行发起、allSettled 收口（单个失败不阻断其余，
+ * spec: docs/omnicode/console-extras.md §X3）。
+ */
+export async function stopAllOmnicodeInstances(): Promise<{ stopped: number; failed: number }> {
+  const targets = [...runningByProfileId.keys()];
+  const results = await Promise.allSettled(targets.map((profileId) => stopOmnicodeProfile(profileId)));
+  const failed = results.filter((result) => result.status === "rejected").length;
+  return { stopped: targets.length - failed, failed };
+}
+
+/**
+ * [OmniCode] 批次2.5 X3：启动全部未运行实例（托盘「启动全部」）。逐实例复用
+ * launchOmnicodeProfile（全局串行链保证真串行启动）；并行发起、allSettled 收口。
+ */
+export async function launchAllOmnicodeProfiles(): Promise<{ launched: number; failed: number }> {
+  const profiles = await listOmnicodeProfiles();
+  const targets = profiles.map((profile) => profile.id).filter((id) => !runningByProfileId.has(id));
+  const results = await Promise.allSettled(targets.map((id) => launchOmnicodeProfile(id)));
+  const failed = results.filter((result) => result.status === "rejected").length;
+  return { launched: targets.length - failed, failed };
 }
 
 async function stopByPid(pid: number): Promise<void> {
