@@ -4,7 +4,11 @@
 // 不写入 .zcode/v2/setting.json——收养后该树归属实例，管理器只写自己的管理数据
 // （spec §进程模型："数据根 = 纯管理数据 + 待收养的旧凭据"）。
 import { join } from "node:path";
-import type { OmnicodeConsoleUiState, OmnicodeConsoleUiStatePatch } from "@zcode/shared";
+import type {
+  OmnicodeClaimHistoryEntry,
+  OmnicodeConsoleUiState,
+  OmnicodeConsoleUiStatePatch,
+} from "@zcode/shared";
 import { readJsonWithRecovery, writeJsonAtomic } from "./atomicJson.js";
 import { getOmnicodeConsoleDataBaseDir } from "./profileRuntime.js";
 
@@ -16,10 +20,18 @@ export const DEFAULT_OMNICODE_CONSOLE_UI_STATE: OmnicodeConsoleUiState = {
 };
 
 /**
+ * [OmniCode] 批次3：领取历史上限（FIFO，超出丢最旧；spec:
+ * F:\OmniCode\docs\batch3\BATCH3-DESIGN-DISCUSSION.md §3 存储建议）。
+ */
+export const OMNICODE_CLAIM_HISTORY_MAX_ENTRIES = 50;
+
+/**
  * UI 状态部分合并（纯函数）：仅接受已知字段且值域合法；未知/非法字段被丢弃
  * （落盘值永远收敛到合法形态）。mode 相同 / previewEnabled 相同的字段写不写等价。
  * [OmniCode] 批次2.5 X1：perfPanelOpen 为可选布尔（旧档缺省=关；spec:
  * docs/omnicode/console-extras.md §X1）——只有显式布尔才写入，避免旧档被动携带该字段。
+ * [OmniCode] 批次3：autoClaimEnabled 为可选布尔（默认关，语义同 perfPanelOpen）；
+ * claimHistory 仅接受合法条目数组（逐条校验、FIFO 截断到上限 50）。
  */
 export function mergeOmnicodeConsoleUiState(
   current: OmnicodeConsoleUiState,
@@ -36,7 +48,72 @@ export function mergeOmnicodeConsoleUiState(
   if (typeof patch.perfPanelOpen === "boolean") {
     next.perfPanelOpen = patch.perfPanelOpen;
   }
+  if (typeof patch.autoClaimEnabled === "boolean") {
+    next.autoClaimEnabled = patch.autoClaimEnabled;
+  }
+  if (patch.claimHistory !== undefined) {
+    const normalized = normalizeOmnicodeClaimHistory(patch.claimHistory);
+    // 显式携带 claimHistory 才更新（undefined = 不变）；空数组 = 清空历史
+    next.claimHistory = normalized;
+  }
   return next;
+}
+
+/** claimHistory 单条合法性校验（纯函数）：缺核心字段/枚举越界即丢弃该条。 */
+function isValidOmnicodeClaimHistoryEntry(entry: unknown): entry is OmnicodeClaimHistoryEntry {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+  const candidate = entry as Record<string, unknown>;
+  if (typeof candidate["at"] !== "number" || !Number.isFinite(candidate["at"])) return false;
+  if (typeof candidate["profileId"] !== "string" || candidate["profileId"].length === 0) return false;
+  if (typeof candidate["planId"] !== "string" || candidate["planId"].length === 0) return false;
+  if (candidate["outcome"] !== "success" && candidate["outcome"] !== "failed" && candidate["outcome"] !== "skipped") {
+    return false;
+  }
+  if (candidate["mode"] !== "manual" && candidate["mode"] !== "auto") return false;
+  if (
+    candidate["reasonKey"] !== undefined &&
+    (typeof candidate["reasonKey"] !== "string" || candidate["reasonKey"].length === 0)
+  ) {
+    return false;
+  }
+  if (
+    candidate["planName"] !== undefined &&
+    (typeof candidate["planName"] !== "string" || candidate["planName"].length === 0)
+  ) {
+    return false;
+  }
+  if (
+    candidate["grantedUnits"] !== undefined &&
+    (typeof candidate["grantedUnits"] !== "number" || !Number.isFinite(candidate["grantedUnits"]))
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/** claimHistory 归一（纯函数）：逐条校验 + FIFO 截断（保最新 50 条）。 */
+export function normalizeOmnicodeClaimHistory(
+  raw: readonly unknown[],
+): OmnicodeClaimHistoryEntry[] {
+  const valid = (Array.isArray(raw) ? raw : []).filter(isValidOmnicodeClaimHistoryEntry);
+  return valid.length > OMNICODE_CLAIM_HISTORY_MAX_ENTRIES
+    ? valid.slice(valid.length - OMNICODE_CLAIM_HISTORY_MAX_ENTRIES)
+    : valid;
+}
+
+/**
+ * 追加一条领取历史（纯函数）：FIFO 上限 50 条（超出丢最旧）。current 里的非法条目
+ * 一并清洗（读档归一的兜底，写路径永远收敛到合法形态）。
+ */
+export function appendOmnicodeClaimHistory(
+  current: readonly OmnicodeClaimHistoryEntry[] | undefined,
+  entry: OmnicodeClaimHistoryEntry,
+): OmnicodeClaimHistoryEntry[] {
+  const base = normalizeOmnicodeClaimHistory(current ?? []);
+  const merged = [...base, entry];
+  return merged.length > OMNICODE_CLAIM_HISTORY_MAX_ENTRIES
+    ? merged.slice(merged.length - OMNICODE_CLAIM_HISTORY_MAX_ENTRIES)
+    : merged;
 }
 
 /** 读取持久化状态（损坏/缺省回退默认；不抛错——UI 偏好不值得阻断启动）。 */

@@ -88,6 +88,11 @@ import type {
   OmnicodeConsolePreviewStateInput,
   OmnicodePerfPanelStateInput,
   OmnicodePerfEventPayload,
+  OmnicodeAccountSnapshotRequest,
+  OmnicodeAccountDashboardSnapshot,
+  OmnicodeAccountClaimRunRequest,
+  OmnicodeAccountClaimRunResult,
+  OmnicodeAccountClaimEventPayload,
   OmnicodeProfileIdInput,
   OpenInEditorOptions,
   PostUpdateReleaseNotesPayload,
@@ -298,6 +303,14 @@ export const PlatformChannels = {
   OmnicodePerfState: "zcode:omnicode-perf-state",
   // [OmniCode] 批次2.5 X1：性能采样事件广播（main → renderer；sample 快照 / unavailable 降级）
   OmnicodePerfEvent: "zcode:omnicode-perf-event",
+  // [OmniCode] 批次3：登录态看板数据快照（main 汇总凭据快照 + billing/balance；30min
+  // TTL 缓存 + force 强刷。spec: F:\OmniCode\docs\batch3\BATCH3-DESIGN-DISCUSSION.md §2）
+  OmnicodeAccountSnapshotGet: "zcode:omnicode-account-snapshot-get",
+  // [OmniCode] 批次3：赛博鸡蛋逐张领取执行（mode: manual/auto 共用节奏器；run 启动即回，
+  // 结果经 OmnicodeAccountClaimEvent 广播。spec 同上 §3）
+  OmnicodeAccountClaimRun: "zcode:omnicode-account-claim-run",
+  // [OmniCode] 批次3：领取执行进度事件广播（main → renderer；逐张动效数据源）
+  OmnicodeAccountClaimEvent: "zcode:omnicode-account-claim-event",
   /** Renderer → Main：用 Chromium 打印引擎把当前页面 print 媒体版面导出为 PDF */
   PrintToPdf: "zcode:print-to-pdf",
   /** Renderer → Main：检查并按需请求系统麦克风权限 */
@@ -1016,6 +1029,21 @@ export interface PlatformChannelMap {
   // [OmniCode] 批次2.5 X1：性能采样事件广播（main → renderer）
   [PlatformChannels.OmnicodePerfEvent]: {
     request: OmnicodePerfEventPayload;
+    response: void;
+  };
+  // [OmniCode] 批次3：登录态看板数据快照（30min TTL；force=true 绕过缓存强刷）
+  [PlatformChannels.OmnicodeAccountSnapshotGet]: {
+    request: OmnicodeAccountSnapshotRequest;
+    response: OmnicodeAccountDashboardSnapshot;
+  };
+  // [OmniCode] 批次3：领取执行（启动即回 runId；进度/结算经 OmnicodeAccountClaimEvent）
+  [PlatformChannels.OmnicodeAccountClaimRun]: {
+    request: OmnicodeAccountClaimRunRequest;
+    response: OmnicodeAccountClaimRunResult;
+  };
+  // [OmniCode] 批次3：领取执行进度事件广播（main → renderer）
+  [PlatformChannels.OmnicodeAccountClaimEvent]: {
+    request: OmnicodeAccountClaimEventPayload;
     response: void;
   };
   [PlatformChannels.PrintToPdf]: {
