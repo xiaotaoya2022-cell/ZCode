@@ -261,3 +261,32 @@ Win32 owned window 随 owner 销毁——管理器窗口直接销毁会**连带�
 3. **收养兜底名语言无关（P2-11①）**：main 侧无 i18n 机制，畸形入参兜底名改为 `instance-adopted`（正常路径 renderer 始终传本地化名称 `console.adoptionDefaultName`）。
 4. **主窗口重建重挂（P2-11③）**：主窗口存在销毁重建路径（renderer 崩溃自愈 discard→重建 / macOS activate 重建），`createWindowInstance` 内每次创建后重挂 `setOmnicodeEmbedManagerWindow`（原先仅 app-ready 挂一次，重建后内嵌跟随失效）。
 5. **帧比例冻结的边界**：冻结发生在"进入内嵌后收到首帧"——该帧通常是 embedLayout 生效前的桌面基线比例，作为反馈环的稳定起点；实例窗口真实比例与冻结值差异由 letterbox 兜住（object-contain 不裁切）。
+
+## 批次3 停靠重构：全局模式退役 → 每实例 docked + 贴合 B 三件套（D10，2026-11-15）
+
+上位设计：F:\OmniCode\docs\batch3\BATCH3-DESIGN-DISCUSSION.md §4（方案 B：增强贴合，用户批准默认）。本节是停靠语义、一次性迁移与贴合三件套的行为事实源；§批次2 B2-3 中与"全局 embedded/desktop 模式"相关的描述（模式切换串行化/平铺禁用语义/console-ui.json mode 字段）由本节取代，其余（owned 机制/生命周期红线/预览管线/退避）原样生效。
+
+### 状态模型（每实例 docked）
+
+- console-ui.json 全局 `mode: "embedded"|"desktop"` 字段退役，改为 `dockDefault: boolean`（全局默认，缺省 true=停靠）+ `dockedByProfileId: Record<string, boolean>`（每实例覆盖，缺省键=跟随 dockDefault）。每实例停靠态唯一解析口径 = `resolveOmnicodeInstanceDocked`（@zcode/shared 纯函数：覆盖布尔命中优先 → dockDefault → 双缺省回停靠 true）。
+- **一次性迁移（读档即迁移，现状不丢）**：档案携带旧 `mode` 时——mode=desktop → dockDefault=false（全部拖出）；mode=embedded（或损坏值）→ dockDefault=true（全部停靠）；覆盖表清空（迁移=现状整体映射）；mode 字段剥离后原子写回（`loadOmnicodeConsoleUiStateMigrating`，写失败不阻断、下次读档幂等重迁移）。迁移只发生在读档路径；UiStateSet patch 的 mode 字段不再被接受（旧字段进白名单外丢弃）。
+- UI patch 面：`dockAll`（批量= dockDefault 直改 + 清覆盖表，新建实例跟随全局默认）/ `dockInstance {profileId, docked}`（单实例覆盖键）/ `dockDefault`（直改）。
+
+### 每实例停靠编排（consoleEmbedding）
+
+- 全局 embedMode 状态退役，改为 dockDefault + dockOverrideRecord 镜像（装配初始化 + UiStateSet dock 字段变化时经 `applyOmnicodeConsoleDockStateChange` 同步）；hello/回连/ownInstances/dispatch 全部按 `isOmnicodeProfileDocked` 逐实例判定——**undocked 实例不被 own、不参与布局下发、不受管理器最小化影响（owned 关系已解除）**。
+- 编排入口串行队列沿用（并发拖出/收回快速往返收敛到最后一次意图）；过渡标志（dockTransitionActive）在"先解除 owned 再提交镜像"窗口内短路尾随 dispatch/ownInstances。
+- 差分决策 = `diffOmnicodeDockState`（纯函数）：候选 = 已连接 ∪ owned；输出 toDock/toUndock。toUndock 先解除（PowerShell 批处理 + releaseEmbed=恢复任务栏/桌面约束回基线）；镜像提交后 toDock 走既有 own 链（requestWindowHandle 兜底 → ownInstances → dispatch）。
+- **托盘/管理器联动收敛**：owned 登记 ≡ 停靠实例——随管理器最小化/置顶/退出屏障的 Win32 联动天然只作用于 docked；undocked 实例为独立窗口不受影响。`releaseOmnicodeEmbedForQuit` 语义不变、模式无关（owned 集=停靠集，undocked 实例 quit 不被打扰）。
+- **平铺/还原收敛**：arrange/restoreBounds 桥命令在实例侧会先解除内嵌态，故 `arrangeOmnicodeInstances`/`restoreOmnicodeInstances` 只投递未停靠实例（main 侧过滤；工具行按钮按未停靠运行数禁用）。UI 批量动作 =「全部停靠/全部拖出」两钮替代旧「内嵌/桌面」切换组；单实例操作 = 卡片钮区「拖出」（SquareArrowOutUpRight）与监控遮罩/菜单「收回」（SquareArrowDownLeft），i18n zh/en 全覆盖。
+
+### 贴合 B 三件套（停靠实例）
+
+1. **隐藏底图（B-a）**：停靠态卡片不再渲染 letterbox 底图 `<img>`——真窗口精确盖满画面区=看起来就是预览窗口本身（消除双层悬浮感）。帧数据仍驱动 aspect 冻结与 letterbox 比例计算；实例侧缩略图 `capturePage` 走 WebContents（与本 img 渲染与否无关），X1 性能面板/预览订阅不受影响（已核实 instanceBridgeClient 截图链路独立于管理器 renderer DOM）。
+2. **零滞后跟随（B-b）**：管理器窗口 move/resize 不再走 60ms 节流档——main 用缓存相对矩形（latestClientLayout）+ 当前 contentBounds 换算直推 embedLayout（跳过 renderer 60ms hop；Electron move/resize 至多帧率级触发，回环 WS + SetWindowPos 可承载）。renderer 上报仅服务布局变化（滚动/卡片尺寸/增删/手柄拖拽），仍走 60ms 节流。
+3. **拖拽手柄（B-c）**：停靠卡片画面区四边 6px 命中区（cursor ns/ew-resize）→ **卡片权威调高**：pointermove 按 `resolveOmnicodeEmbedResizeHeightCss`（@zcode/shared 纯函数：上下边映射 dy、左右边映射 dx 1:1；下限 = 96 DIP / scale 换算回 CSS）改画面区高度 + 快路径上报（绕过 60ms 节流）让窗口实时跟随；pointerup 冻结新宽高比（内嵌比例反馈环的更新点）并清 inline 高度。宽度受网格列宽约束（卡片宽度固定 → 窗口宽度跟随卡片），故四边统一调"高度"。160×96 最小尺寸三层保证：手柄数学按 scale 钳制（scale 由 EmbedLayout IPC 响应回传 contentHeight/viewportHeight，首拍前按 1 兜底）→ main dispatch 对换算后矩形 `clampOmnicodeScreenRectToEmbedMinimum` 兜底（原"低于下限丢弃矩形"改为钳制，保持窗口与卡片一致）→ 实例侧独立校验原样保留。
+
+### console-ui.json 迁移与验收（D 组重写指向）
+
+- 验收清单批次2 D4-D7（全局内嵌/桌面模式语义）由 OmniCode 仓 ACCEPTANCE-CHECKLIST 停靠语义重写取代（每实例拖出/收回/批量/贴合三件套）。
+- 已知限制追加：①手柄 resize 仅调"高度"（网格列宽固定，宽度跟卡）；②scale 首拍前按 1 兜底——极端缩放下首拖一次可能有 ≤1 帧的钳制修正；③迁移后旧 mode 字段不复存在，回滚到批次2 代码会读不到模式（回退到缺省 embedded）。
