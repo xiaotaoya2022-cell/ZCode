@@ -15,8 +15,11 @@ import {
 } from "lucide-react";
 import {
   type OAuthProviderMeta,
+  type ZCodeProductFlavor,
   BIGMODEL_PROVIDER_ID,
+  ZAI_CN_PROVIDER_ID,
   ZAI_PROVIDER_ID,
+  ZCODE_PRODUCT_FLAVOR,
 } from "@zcode/shared";
 import {
   TID_LOGIN_USE_API_KEY_BUTTON,
@@ -27,6 +30,7 @@ import {
   TID_OAUTH_COPY_LOGIN_LINK,
   TID_OAUTH_ERROR,
   TID_OAUTH_LOGIN_BUTTON,
+  TID_OAUTH_REOPEN_AUTH_BROWSER,
   testId,
 } from "@zcode/shared/test-ids";
 import { Alert, AlertDescription } from "./components/ui/alert.js";
@@ -160,7 +164,11 @@ export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
   const platform = usePlatform();
   // [OmniCode] 首屏=实例管理优先（批次2 方案 A 第一步）：未登录即可创建/启动/编排实例，
   // 主实例自身登录次级化为折叠区——控制台的职能是管理实例，不是登录墙。
+  // 批次3 T4：omnicode flavor 的 WelcomeScreen 只出现在 Profile 实例窗口（管理器首屏恒为
+  // ConsoleHome，Root 收紧），两卡布局在实例内只剩空壳"实例管理"卡（ProfileMultiInstanceSection
+  // early-return null）+ 折叠登录卡，合并为实例语义单卡；官方 flavor 融合版两卡渲染零改动（硬红线）。
   const [loginOpen, setLoginOpen] = useState(false);
+  const isOmnicodeFlavor = ZCODE_PRODUCT_FLAVOR === "omnicode";
   return (
     <main className="relative h-full min-h-dvh overflow-hidden bg-background text-foreground">
       <ThemeHeroVisual className="absolute inset-0" />
@@ -169,38 +177,58 @@ export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
       <DesktopOverlayWindowControls />
       {/* 矮窗口展开表单时，绝对定位的协议会盖住操作区；同一滚动布局保证两者可达，窗控仍在外层。 */}
       <div className="relative z-10 flex h-dvh flex-col items-center overflow-y-auto px-4 pb-6 pt-14 sm:px-6">
-        {/* [OmniCode] 实例管理卡：创建/启动/实时缩略图/平铺编排全套，登录前即可用 */}
-        <section className="w-full max-w-2xl shrink-0 flex flex-col gap-3 rounded-2xl border border-popover-border bg-background p-6 shadow-md sm:p-8">
-          <h1 className="text-ui-lg text-foreground">
-            {intl.formatMessage({ id: "welcome.omnicodeInstancesTitle" })}
-          </h1>
-          <p className="text-ui-sm text-foreground-subtle">
-            {intl.formatMessage({ id: "welcome.omnicodeInstancesHint" })}
-          </p>
-          <ProfileMultiInstanceSection />
-        </section>
-        <div className="flex w-full flex-1 shrink-0 flex-col items-center justify-center py-6">
-          <section className="w-full max-w-2xl shrink-0 flex flex-col rounded-2xl border border-popover-border bg-background shadow-md">
-            <button
-              type="button"
-              onClick={() => setLoginOpen((previous) => !previous)}
-              className="flex items-center justify-between px-6 py-4 text-ui-base text-foreground"
-              aria-expanded={loginOpen}
-            >
-              <span>{intl.formatMessage({ id: "welcome.loginToggle" })}</span>
-              {loginOpen ? (
-                <ChevronUpIcon className="size-4" />
-              ) : (
-                <ChevronDownIcon className="size-4" />
-              )}
-            </button>
-            {loginOpen ? (
-              <div className="border-t border-popover-border px-6 py-6 sm:px-8">
-                <LoginPanel active onComplete={onComplete} />
-              </div>
-            ) : null}
-          </section>
-        </div>
+        {isOmnicodeFlavor ? (
+          /* [OmniCode] 批次3 T4：实例窗口单卡。登录实际写入本实例自身数据根的凭据（"主实例"
+             是 B2-2a 前管理器时代的遗留语义，随折叠卡一并移除）；LoginPanel 直接展开、无折叠态。
+             标题/副题为实例通用语义，对所有触发场景（startup/manual/provider-request/
+             session-expired/logout-provider-required）都成立。 */
+          <div className="flex w-full flex-1 shrink-0 flex-col items-center justify-center py-6">
+            <section className="w-full max-w-2xl shrink-0 flex flex-col gap-4 rounded-2xl border border-popover-border bg-background p-6 shadow-md sm:p-8">
+              <h1 className="text-ui-lg text-foreground">
+                {intl.formatMessage({ id: "welcome.instanceLoginTitle" })}
+              </h1>
+              <p className="text-ui-sm text-foreground-subtle">
+                {intl.formatMessage({ id: "welcome.instanceLoginHint" })}
+              </p>
+              <LoginPanel active showHeader={false} onComplete={onComplete} />
+            </section>
+          </div>
+        ) : (
+          <>
+            {/* 官方 flavor：批次2 融合版两卡原样（硬红线零改动）。 */}
+            <section className="w-full max-w-2xl shrink-0 flex flex-col gap-3 rounded-2xl border border-popover-border bg-background p-6 shadow-md sm:p-8">
+              <h1 className="text-ui-lg text-foreground">
+                {intl.formatMessage({ id: "welcome.omnicodeInstancesTitle" })}
+              </h1>
+              <p className="text-ui-sm text-foreground-subtle">
+                {intl.formatMessage({ id: "welcome.omnicodeInstancesHint" })}
+              </p>
+              <ProfileMultiInstanceSection />
+            </section>
+            <div className="flex w-full flex-1 shrink-0 flex-col items-center justify-center py-6">
+              <section className="w-full max-w-2xl shrink-0 flex flex-col rounded-2xl border border-popover-border bg-background shadow-md">
+                <button
+                  type="button"
+                  onClick={() => setLoginOpen((previous) => !previous)}
+                  className="flex items-center justify-between px-6 py-4 text-ui-base text-foreground"
+                  aria-expanded={loginOpen}
+                >
+                  <span>{intl.formatMessage({ id: "welcome.loginToggle" })}</span>
+                  {loginOpen ? (
+                    <ChevronUpIcon className="size-4" />
+                  ) : (
+                    <ChevronDownIcon className="size-4" />
+                  )}
+                </button>
+                {loginOpen ? (
+                  <div className="border-t border-popover-border px-6 py-6 sm:px-8">
+                    <LoginPanel active onComplete={onComplete} />
+                  </div>
+                ) : null}
+              </section>
+            </div>
+          </>
+        )}
         <footer className="pointer-events-none flex shrink-0 flex-col items-center gap-2 text-center text-ui-xs text-foreground-subtle">
           <p className="flex flex-wrap items-center justify-center gap-x-1">
             <span>{intl.formatMessage({ id: "login.agreement.prefix" })}</span>
@@ -233,6 +261,11 @@ export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
 
 interface LoginPanelProps {
   active: boolean;
+  /**
+   * [OmniCode] 批次3 T4：omnicode 实例窗口单卡自带标题/副题（welcome.instanceLogin*），
+   * 内置 header（logo+欢迎语）关闭；官方折叠卡路径保持默认渲染（零改动）。
+   */
+  showHeader?: boolean;
   onComplete: (reason: LoginCompleteReason) => void | Promise<void>;
 }
 
@@ -255,7 +288,7 @@ export function shouldCompleteLoginFromExistingUser(params: {
   return params.hasUser && !params.attempt;
 }
 
-export function LoginPanel({ active, onComplete }: LoginPanelProps) {
+export function LoginPanel({ active, showHeader = true, onComplete }: LoginPanelProps) {
   const { intl, locale, setLocalePreference } = useZCodeIntl();
   const platform = usePlatform();
   const {
@@ -284,6 +317,7 @@ export function LoginPanel({ active, onComplete }: LoginPanelProps) {
   // 旧 OAuth 身份在 v3.18.0 凭据库快照机制下 direct 材料成立，额度链路照常工作；
   // zai_cn 手机号登录的会话被官方故意排除在额度家族之外（"中国区 OAuth 不能被
   // 当成全球区业务凭据"），是"登录后免费额度显示没有"的根源。
+  // 批次3 T5：zai_cn 不再进入可见按钮列表（resolveVisibleLoginProviders 按 flavor 过滤）。
   // [OmniCode] 失败态恢复入口（spec §定稿决策 4）：常驻 UI 不出现，仅错误态可展开。
   const [showAdvancedRecovery, setShowAdvancedRecovery] = useState(false);
   const [callbackUrlInput, setCallbackUrlInput] = useState("");
@@ -543,12 +577,14 @@ export function LoginPanel({ active, onComplete }: LoginPanelProps) {
 
   return (
     <>
-      <LoginPanelHeader
-        title={intl.formatMessage({ id: "login.title" })}
-        description={intl.formatMessage({ id: "login.description" })}
-      >
-        {null}
-      </LoginPanelHeader>
+      {showHeader ? (
+        <LoginPanelHeader
+          title={intl.formatMessage({ id: "login.title" })}
+          description={intl.formatMessage({ id: "login.description" })}
+        >
+          {null}
+        </LoginPanelHeader>
+      ) : null}
 
       {/* idle → waiting 会整体替换操作区，而等待态比按钮列表矮；页面垂直居中时
           卡片会先缩小、授权链接出现后再变高，表现为点击登录时抖动。
@@ -657,22 +693,57 @@ export function LoginPanel({ active, onComplete }: LoginPanelProps) {
             >
               {intl.formatMessage({ id: "login.oauth.cancel" })}
             </Button>
-            {/* 第三行固定占位，授权链接晚到时只替换内容，不改变卡片高度和按钮位置。 */}
-            <div className="mt-4 flex h-7 items-center justify-center gap-1 text-center text-ui-sm text-foreground-subtle">
-              {authorizeUrl ? (
-                <>
-                  <span>{intl.formatMessage({ id: "login.oauth.browserNotOpened" })}</span>
+            {/* [OmniCode] 批次3 T3：omnicode 实例窗口的登录授权点固定走内置专属浏览器
+                （M1.5 gate：desktopMainIpcRemote OpenExternal 在实例身份∧isOmnicodeAuthorizeUrl
+                时改投 instanceAuthWindow），等待态"浏览器没打开？复制登录链接"占位在内置
+                浏览器已打开的场景纯属误导。omnicode flavor 改为主动"跳转至专属浏览器"主按钮
+                （行为与 startLogin 相同的 platform.openExternal(authorizeUrl)：实例 gate 再次
+                拉起内置授权窗，instanceAuthWindow 单例语义=销毁旧窗重新打开），其下保留一行
+                小号"或复制登录链接"兜底（剪贴板+toast，行为不变）。官方 flavor 该行原样保留
+                （硬红线零改动）。 */}
+            {ZCODE_PRODUCT_FLAVOR === "omnicode" ? (
+              authorizeUrl ? (
+                <div className="mt-4 flex flex-col items-center gap-1.5">
+                  <Button
+                    variant="default"
+                    className="h-10 w-full text-ui-base"
+                    size="lg"
+                    data-testid={TID_OAUTH_REOPEN_AUTH_BROWSER}
+                    onClick={() => void platform.openExternal(authorizeUrl)}
+                  >
+                    {intl.formatMessage({ id: "login.oauth.openInstanceAuthBrowser" })}
+                  </Button>
                   <button
                     type="button"
-                    className="font-medium text-brand underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="text-ui-sm text-foreground-subtle underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     data-testid={TID_OAUTH_COPY_LOGIN_LINK}
                     onClick={() => void handleCopyLoginLink()}
                   >
-                    {intl.formatMessage({ id: "login.oauth.copyLoginLink" })}
+                    {intl.formatMessage({ id: "login.oauth.copyLoginLinkFallback" })}
                   </button>
-                </>
-              ) : null}
-            </div>
+                </div>
+              ) : (
+                // 授权链接未返回前保留固定高度占位（对齐官方行高），卡片高度不抖动。
+                <div className="mt-4 h-7" aria-hidden />
+              )
+            ) : (
+              // 官方 flavor：等待态第三行原样（固定占位，授权链接晚到时只替换内容）。
+              <div className="mt-4 flex h-7 items-center justify-center gap-1 text-center text-ui-sm text-foreground-subtle">
+                {authorizeUrl ? (
+                  <>
+                    <span>{intl.formatMessage({ id: "login.oauth.browserNotOpened" })}</span>
+                    <button
+                      type="button"
+                      className="font-medium text-brand underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      data-testid={TID_OAUTH_COPY_LOGIN_LINK}
+                      onClick={() => void handleCopyLoginLink()}
+                    >
+                      {intl.formatMessage({ id: "login.oauth.copyLoginLink" })}
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            )}
           </div>
         )}
 
@@ -819,9 +890,23 @@ function getProviderPriority(provider: OAuthProviderMeta): number {
   }
 }
 
-export function resolveVisibleLoginProviders(providers: OAuthProviderMeta[]): OAuthProviderMeta[] {
+export function resolveVisibleLoginProviders(
+  providers: OAuthProviderMeta[],
+  options?: { flavor?: ZCodeProductFlavor },
+): OAuthProviderMeta[] {
+  // [OmniCode] 批次3 T5：omnicode flavor 的登录首屏隐藏 zai_cn。官方凭据库**故意**排除
+  // zai_cn 会话（oauthCredentialRepo.materialFromSnapshot："中国区 OAuth 不能被当成全球区
+  // 业务凭据"，direct = loginProvider === family 对 zai_cn 永不成立，loadOAuthFamilyTokenSet
+  // 同样只认 zai/bigmodel）——zai_cn 登录"成功"却拿不到 zai 家族材料，表现为额度显示为空、
+  // agent 请求报 Account request credential is unavailable。登录按钮列表与"连接 Z.ai 继续使用"
+  // 几乎无法区分，是用户必踩的坑，故首屏不展示。provider adapter 与设置页显式连接入口保留
+  //（linkedBigModel 账号关联依赖 zai_cn 的上游授权）。官方 flavor 渲染零改动（硬红线）。
+  const visible =
+    (options?.flavor ?? ZCODE_PRODUCT_FLAVOR) === "omnicode"
+      ? providers.filter((provider) => provider.id !== ZAI_CN_PROVIDER_ID)
+      : providers;
   // 保持 Z.ai 在前、BigModel 在后的稳定顺序。
-  return [...providers].sort((left, right) => {
+  return [...visible].sort((left, right) => {
     return getProviderPriority(left) - getProviderPriority(right);
   });
 }

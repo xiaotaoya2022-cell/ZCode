@@ -1830,6 +1830,9 @@ const enUS: Record<string, string> = {
   "login.oauth.waiting": "Waiting for {provider} authentication...",
   "login.oauth.browserNotOpened": "Browser didn't open?",
   "login.oauth.copyLoginLink": "Copy login link",
+  // [OmniCode] batch3 T3: omnicode instance waiting-state primary button (reopen the dedicated auth browser) and small copy fallback link
+  "login.oauth.openInstanceAuthBrowser": "Open in dedicated browser",
+  "login.oauth.copyLoginLinkFallback": "Or copy the login link",
   "login.oauth.copyLinkSuccess": "Copied. Paste and open it in your browser.",
   "login.oauth.copyLinkFailed": "Could not copy the login link. Please try again.",
   "login.oauth.loginFailure": "Login failed, please try again",
@@ -4168,6 +4171,10 @@ const enUS: Record<string, string> = {
   "welcome.omnicodeInstancesHint":
     "Create isolated instances and run them in parallel; each has its own login state and data.",
   "welcome.loginToggle": "Sign in to use the main instance (optional)",
+  // [OmniCode] batch3 T4: title/subtitle of the merged single card in omnicode instance windows (login writes this instance's own credentials)
+  "welcome.instanceLoginTitle": "Sign in to use ZCode",
+  "welcome.instanceLoginHint":
+    "Sign in to start working in this instance. Create and manage instances in the OmniCode manager.",
   "settings.omnicodeProfiles.description":
     "Run isolated ZCode instances per account: credentials, sessions and browser storage stay separate, and logins survive restarts. Launched instances run alongside this window.",
   "settings.omnicodeProfiles.namePlaceholder": "Instance name (e.g. Work)",
