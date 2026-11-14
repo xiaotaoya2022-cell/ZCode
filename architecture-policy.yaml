@@ -2439,3 +2439,8 @@ exceptions:
     paths:
       - packages/services/src/zcode-agent/browserRelayServerChannel.ts
     reason: OmniCode browser relay moves the fork-only IServerChannel implementation into services so both server flavors (stdio bundle and zcode-server-cli Core) share one subscription-count fact source under the zcode-server-cli -> @zcode/server import boundary; the file sits next to the existing BrowserAmbientContextExecutor contract and the @zcode/server path keeps a re-export shim, so adopting the whole services module tree stays out of scope for this feature.
+  - id: omnicode-login-visible-providers
+    rule: unmanaged-new-file
+    paths:
+      - packages/ui/src/loginVisibleProviders.ts
+    reason: 批次3 R1-P2-4 处置把 WelcomeScreen 既有纯函数 resolveVisibleLoginProviders 抽离为独立文件以便工程测试直接覆盖（omnicode flavor 登录首屏 zai_cn 过滤；函数体逐字节不变，仅移动落点，WelcomeScreen 保留 re-export 导出面）；采纳整个 ui 未受管模块不在本次范围内。
