@@ -239,18 +239,44 @@ export interface SettingsPageConfigOptions {
   isDesktop?: boolean;
   isMacDesktop?: boolean;
   isWindowsDesktop?: boolean;
+  /**
+   * [OmniCode] 管理器语境（omnicode flavor ∧ 无实例身份的窗口，由 Root 注入）。
+   * 管理器是纯管理中枢、无会话栈：只保留不依赖 workspace/session/账号的纯偏好分区
+   * 与管理器自有分区；依赖会话语义的分区一概隐藏，避免设置页出现会话入口。
+   */
+  omnicodeManager?: boolean;
 }
+
+// [OmniCode] 管理器可见分区白名单（与 omnicodeProfiles 的 desktop-only 过滤同构）：
+// - general：本机/进程级偏好（语言/界面模式/通知/托盘/代理/硬件加速/更新/数据目录）
+// - appearance：纯 UI 偏好（主题/字号/代码预览）
+// - shortcuts：纯偏好键位表（读写 shortcutBindings，无 workspace/session 依赖）
+// - omnicodeProfiles：管理器自有功能（多开实例管理）
+// 其余分区（模型/Agent 行为/memory/subagents/plugin/mcp/skill/commands/hooks/browser/
+// computerUse/workspaceFileSearch/remoteDevices/dataSync/usage/projects/archives/shares）
+// 的内容组件均要求 workspacePath/会话身份或承载账号/实例级语义，管理器语境下隐藏。
+const OMINCODE_MANAGER_VISIBLE_SETTINGS_SECTIONS = new Set<SettingsSectionId>([
+  "general",
+  "appearance",
+  "shortcuts",
+  "omnicodeProfiles",
+]);
 
 export function createSettingsPageConfig({
   isDesktop = false,
   isMacDesktop = false,
   isWindowsDesktop = false,
+  omnicodeManager = false,
 }: SettingsPageConfigOptions = {}) {
   const showComputerUse = isDesktop || isMacDesktop || isWindowsDesktop;
   const settingsSections = BASE_SETTINGS_SECTIONS.filter((section) => {
     if (section.id === "computerUse" && !showComputerUse) return false;
     // [OmniCode] Profile 多实例仅桌面可用（依赖 Electron spawn 能力）
     if (section.id === "omnicodeProfiles" && !isDesktop) return false;
+    // [OmniCode] 管理器语境只保留纯偏好 + 多实例分区（判据：管理器无会话栈）
+    if (omnicodeManager && !OMINCODE_MANAGER_VISIBLE_SETTINGS_SECTIONS.has(section.id)) {
+      return false;
+    }
     return isSettingsSectionEnabled(section.id);
   });
   const settingsSectionGroups = BASE_SETTINGS_SECTION_GROUPS.map((group) => ({

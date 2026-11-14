@@ -3,9 +3,9 @@
 // 开关）+ 实例卡片网格（真实宽高比 letterbox 预览、双击放大、内嵌 owned-window 跟随）
 // + 旧控制台收养横幅 + 底栏（spec: docs/omnicode/profile-runtime.md §批次2 D9）。
 // 控制台自身不是可干活的 ZCode 实例（方案 A 拍板）；工作与登录都在实例窗口内完成。
-import { Download, Globe } from "lucide-react";
+import { Download, Globe, Settings } from "lucide-react";
 import { LOCALE_NATIVE_NAMES, SUPPORTED_LOCALES, type Locale } from "@zcode/shared";
-import { TID_LOCALE_TOGGLE } from "@zcode/shared/test-ids";
+import { TID_CONSOLE_SETTINGS_BUTTON, TID_LOCALE_TOGGLE } from "@zcode/shared/test-ids";
 import { ConsoleInstanceGrid } from "@/console/ConsoleInstanceGrid.js";
 import { DesktopOverlayWindowControls } from "@/DesktopOverlayWindowControls.js";
 import { Button } from "@/components/ui/button.js";
@@ -17,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { useTabStore } from "@/store/TabStoreProvider.js";
 import { useOmnicodeConsoleAdoption } from "@/settings/ProfileMultiInstanceSection.js";
 
 export function ConsoleHome() {
@@ -42,6 +43,9 @@ export function ConsoleHome() {
               的语言下拉；[app-region:no-drag] 保证按钮不被顶部拖拽层吃掉点击。 */}
           <div className="flex shrink-0 items-center gap-1 pt-1 [app-region:no-drag]">
             <ConsoleHomeLocaleSwitcher />
+            {/* [OmniCode] 设置入口：打开窗口唯一的设置 tab；Root 侧早返回门禁对设置 tab
+                放行，渲染进既有「无 workspace + settings tab」全屏设置页（候选 B）。 */}
+            <ConsoleHomeSettingsButton />
           </div>
         </div>
         <AdoptionBanner />
@@ -86,6 +90,28 @@ function ConsoleHomeLocaleSwitcher() {
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/**
+ * [OmniCode] 设置入口（批次3 候选 B）：齿轮钮 → tabStore.openSettingsTab()。
+ * 与官方窗口同一条打开语义（tabStore.ts openSettingsTab：已有设置 tab 则激活，否则
+ * 新建并激活）；文案复用既有 settings.title（zh「设置」/ en「Settings」）。
+ */
+function ConsoleHomeSettingsButton() {
+  const { intl } = useZCodeIntl();
+  const openSettingsTab = useTabStore((state) => state.openSettingsTab);
+  return (
+    <Button
+      variant="ghost"
+      size="icon-md"
+      data-testid={TID_CONSOLE_SETTINGS_BUTTON}
+      aria-label={intl.formatMessage({ id: "settings.title" })}
+      title={intl.formatMessage({ id: "settings.title" })}
+      onClick={openSettingsTab}
+    >
+      <Settings className="size-4" />
+    </Button>
   );
 }
 

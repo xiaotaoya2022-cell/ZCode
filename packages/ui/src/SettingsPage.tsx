@@ -315,6 +315,10 @@ export function SettingsPage({
   windowsWindowControlsRightPaddingPx: _windowsWindowControlsRightPaddingPx,
   captionWorkspacePath,
   onBack,
+  // [OmniCode] 管理器语境：无会话栈，分区过滤只保留纯偏好 + 多实例分区（Root 注入）。
+  omnicodeManager = false,
+  // 设置页返回钮文案；管理器退出语义是「回管理器首屏」而非「回工作区」，由 Root 覆盖。
+  backTitleMessageId = "workspace.backToWorkspace",
   onOpenTask,
   onCreateTask,
   onOpenWorkspace,
@@ -331,6 +335,8 @@ export function SettingsPage({
   windowsWindowControlsRightPaddingPx?: number;
   captionWorkspacePath?: string | null;
   onBack?: () => void;
+  omnicodeManager?: boolean;
+  backTitleMessageId?: string;
   /** 设置页内跳转到指定会话（分享管理「跳转对话」）；Root 注入。 */
   onOpenTask?: (target: SettingsShareTaskTarget) => void;
   onCreateTask?: (request?: CreateTaskRequest) => void;
@@ -349,8 +355,9 @@ export function SettingsPage({
         isDesktop: Boolean(isDesktop),
         isMacDesktop: Boolean(isMacDesktop),
         isWindowsDesktop: Boolean(isWindowsDesktop),
+        omnicodeManager,
       }),
-    [isDesktop, isMacDesktop, isWindowsDesktop],
+    [isDesktop, isMacDesktop, isWindowsDesktop, omnicodeManager],
   );
   const isLinuxDesktop = Boolean(isDesktop && !isMacDesktop && !isWindowsDesktop);
   const usesInlineWindowControls = Boolean(isWindowsDesktop || isLinuxDesktop);
@@ -1522,7 +1529,7 @@ export function SettingsPage({
                 {onBack ? (
                   <ControlHintTooltip
                     title={intl.formatMessage({
-                      id: "workspace.backToWorkspace",
+                      id: backTitleMessageId,
                     })}
                     side="right"
                     align="center"
@@ -1533,7 +1540,7 @@ export function SettingsPage({
                       size="lg"
                       data-testid={TID_SETTINGS_BACK_BUTTON}
                       aria-label={intl.formatMessage({
-                        id: "workspace.backToWorkspace",
+                        id: backTitleMessageId,
                       })}
                       className="m-1 w-[calc(100%-0.5rem)] justify-start gap-2 rounded-xl bg-surface px-1.5 text-remote-foreground-muted hover:bg-surface-hover hover:text-foreground max-lg:m-1 max-lg:size-10 max-lg:justify-center max-lg:px-0"
                       onClick={() => {
@@ -1557,7 +1564,7 @@ export function SettingsPage({
                       <ArrowLeft className="size-4" />
                       <span className="max-lg:sr-only">
                         {intl.formatMessage({
-                          id: "workspace.backToWorkspace",
+                          id: backTitleMessageId,
                         })}
                       </span>
                     </Button>

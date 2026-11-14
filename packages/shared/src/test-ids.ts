@@ -50,6 +50,8 @@ export const TID_OAUTH_ADVANCED_RECOVERY_SUBMIT = "oauth-advanced-recovery-submi
 export const TID_APP_HEADER = "app-header";
 /** 语言切换按钮 */
 export const TID_LOCALE_TOGGLE = "locale-toggle";
+/** 管理器首屏设置入口按钮（打开设置 tab） */
+export const TID_CONSOLE_SETTINGS_BUTTON = "console-settings-button";
 /** 主题切换按钮 */
 export const TID_THEME_TOGGLE = "theme-toggle";
 /** 退出登录按钮 */

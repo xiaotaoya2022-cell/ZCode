@@ -3834,6 +3834,7 @@ const zhCN: Record<string, string> = {
     "创建独立实例并并行运行；每个实例有自己的登录态与数据。工作与登录都在实例窗口内完成，本窗口负责管理。",
   "console.adoptionTitle": "检测到原主实例数据——收养为实例可保留登录与历史。",
   "console.adoptionAction": "收养",
+  "console.backToManager": "返回管理器",
   "console.adoptionConfirmTitle": "收养原主实例",
   "console.adoptionConfirmDescription":
     "将创建一个指向原 OmniCode 控制台数据目录的新实例（零拷贝），登录态与会话历史原样保留。",
