@@ -508,6 +508,17 @@ export interface OmnicodeConsoleUiState {
   mode: "embedded" | "desktop";
   previewEnabled: boolean;
   perfPanelOpen?: boolean;
+  /**
+   * [OmniCode] 批次3：赛博鸡蛋自动领取总开关（管理器数据根 console-ui.json；默认关，
+   * spec: F:\OmniCode\docs\batch3\BATCH3-DESIGN-DISCUSSION.md §3）。仅存储层——
+   * 开关 UI 与轮询执行不做（执行面为显式 ClaimRun IPC）。
+   */
+  autoClaimEnabled?: boolean;
+  /**
+   * [OmniCode] 批次3：领取历史（FIFO 上限 50 条，超出丢最旧）。仅管理器本地记录，
+   * 不写实例树（consoleUiState.ts 立场注释同源）。
+   */
+  claimHistory?: OmnicodeClaimHistoryEntry[];
 }
 
 /** UI 状态部分更新（字段缺省=不变；非法值在 main 侧归一后落盘）。 */
@@ -515,6 +526,27 @@ export interface OmnicodeConsoleUiStatePatch {
   mode?: "embedded" | "desktop";
   previewEnabled?: boolean;
   perfPanelOpen?: boolean;
+  autoClaimEnabled?: boolean;
+  claimHistory?: OmnicodeClaimHistoryEntry[];
+}
+
+/**
+ * [OmniCode] 批次3：领取历史单条（console-ui.json claimHistory[]）。outcome=success
+ * 时带 planName/grantedUnits（来源 billing/claim 响应）；failed/skipped 时 reasonKey
+ * 为稳定文案键（zh/en 文案本轮预留、不在本批次落 locale 表）。绝不落 token/设备号。
+ */
+export interface OmnicodeClaimHistoryEntry {
+  /** 记录时刻（epoch ms）。 */
+  at: number;
+  profileId: string;
+  planId: string;
+  planName?: string;
+  outcome: "success" | "failed" | "skipped";
+  /** outcome≠success 时的稳定原因键（如 omnicode.claim.failure.already_claimed）。 */
+  reasonKey?: string;
+  /** 成功领取后到账额度（balance/claim entitlements grant_units 求和，可缺省）。 */
+  grantedUnits?: number;
+  mode: "manual" | "auto";
 }
 
 /** 内嵌跟随：renderer 上报的卡片画面区矩形（窗口客户区 CSS 像素）。 */
@@ -562,6 +594,145 @@ export type OmnicodePerfEventPayload =
   | {
       type: "unavailable";
       reason: "platform" | "probe";
+    };
+
+// ─── [OmniCode] 批次3：登录态看板 / 赛博鸡蛋（数据层，spec: F:\OmniCode\docs\batch3\
+// BATCH3-DESIGN-DISCUSSION.md §2/§3）──────────────────────────────────────────────
+// 红线：凭据/设备号/token 不进任何 IPC 载荷（token 只在 main 侧请求头里出现一次）；
+// 失败必须归"未知/原因键"而非抛穿。
+
+/** 账号身份展示字段（来源 oauth:{p}:user_info 解密归一化；读不到=缺省字段）。 */
+export interface OmnicodeAccountIdentityInfo {
+  displayName?: string;
+  email?: string;
+  avatarUrl?: string;
+  customerNumber?: string;
+}
+
+/**
+ * 登录态字段（active_provider / 该 provider 的 expires_at / 是否有业务 JWT）。
+ * hasJwtToken=true 时 main 侧确有可用的 zcodejwttoken，但 token 本体不出 main。
+ */
+export interface OmnicodeAccountSessionInfo {
+  activeProvider?: string;
+  /** 登录态过期时刻（epoch ms；active provider 优先，否则取已知 provider 最大值）。 */
+  expiresAt?: number;
+  hasJwtToken: boolean;
+}
+
+/** 套餐行（billing/balance data.plans[] 子集）。 */
+export interface OmnicodeBalancePlanInfo {
+  name?: string;
+  status?: string;
+  /** 套餐到期（秒级 epoch）。 */
+  endsAt?: number;
+}
+
+/** 额度分桶行（billing/balance data.balances[] 子集，Cockpit quota_raw 同源）。 */
+export interface OmnicodeBalanceEntryInfo {
+  showName?: string;
+  meter?: string;
+  totalUnits?: number;
+  usedUnits?: number;
+  remainingUnits?: number;
+  /** 额度周期结束（秒级 epoch）。 */
+  periodEnd?: number;
+  /** 分桶到期（秒级 epoch）。 */
+  expiresAt?: number;
+}
+
+/**
+ * balance 聚合结果（对齐 Cockpit apply_quota_payload 的展示口径）：
+ * planType=active plan 名（fallback 首 plan），配额/用量/余量=分桶求和，
+ * quotaResetAt=各分桶 period_end|expires_at 的最小值（秒）。
+ */
+export interface OmnicodeAccountBalanceInfo {
+  planType?: string;
+  quotaTotal?: number;
+  quotaUsed?: number;
+  quotaRemaining?: number;
+  quotaResetAt?: number;
+  serverTime?: number;
+  plans: OmnicodeBalancePlanInfo[];
+  balances: OmnicodeBalanceEntryInfo[];
+}
+
+/**
+ * 单账号 balance 查询结果状态：ok（解析成功）/ failed（HTTP/网络/响应异常，reasonKey
+ * 说明原因）/ skipped_no_device_mid（数据根无已存设备号——绝不代生成，风控红线）/
+ * missing_jwt（无 zcodejwttoken）/ unknown（快照读取失败等）。
+ */
+export type OmnicodeAccountBalanceState =
+  | "ok"
+  | "failed"
+  | "skipped_no_device_mid"
+  | "missing_jwt"
+  | "unknown";
+
+/** 看板单账号条目（凭据快照 + balance 结果的合并视图）。 */
+export interface OmnicodeAccountDashboardEntry {
+  profileId: string;
+  profileName: string;
+  identity?: OmnicodeAccountIdentityInfo;
+  session?: OmnicodeAccountSessionInfo;
+  balanceState: OmnicodeAccountBalanceState;
+  /** balanceState==="ok" 时必有；其余状态缺省。 */
+  balance?: OmnicodeAccountBalanceInfo;
+  /** balanceState≠ok 时的稳定原因键（zh/en 文案预留，本轮不落 locale 表）。 */
+  balanceErrorReasonKey?: string;
+  /** 本账号 balance 查询完成时刻（epoch ms；ok/failed 均记录）。 */
+  balanceFetchedAt?: number;
+}
+
+/** 看板数据快照（OmnicodeAccountSnapshotGet 响应；main 侧 30min TTL 缓存）。 */
+export interface OmnicodeAccountDashboardSnapshot {
+  fetchedAt: number;
+  /** true=命中 TTL 缓存（未重新请求 API）。 */
+  fromCache: boolean;
+  accounts: OmnicodeAccountDashboardEntry[];
+}
+
+/** 看板快照拉取入参：force=true 绕过 TTL 缓存强制刷新。 */
+export interface OmnicodeAccountSnapshotRequest {
+  force?: boolean;
+}
+
+/** 领取执行入参：mode 仅决定历史记录标注与后续 UI 语义，执行链共用同一节奏器。 */
+export interface OmnicodeAccountClaimRunRequest {
+  mode: "manual" | "auto";
+}
+
+/**
+ * 领取执行响应：ok=true 表示 run 已启动（结果经事件广播），reason=in_progress 表示
+ * 已有 run 在跑，no_targets 表示无任何可领账号（都不算错误，不抛穿）。
+ */
+export interface OmnicodeAccountClaimRunResult {
+  ok: boolean;
+  reason?: "in_progress" | "no_targets";
+  runId?: string;
+}
+
+/** 领取执行进度事件（main → renderer 广播；renderer 可订阅渲染逐张动效）。 */
+export type OmnicodeAccountClaimEventPayload =
+  | { type: "started"; runId: string; mode: "manual" | "auto"; total: number }
+  | { type: "account_start"; runId: string; index: number; total: number; profileId: string }
+  | {
+      type: "account_result";
+      runId: string;
+      profileId: string;
+      planId: string;
+      outcome: "success" | "failed" | "skipped";
+      reasonKey?: string;
+      grantedUnits?: number;
+    }
+  | {
+      type: "done";
+      runId: string;
+      succeeded: number;
+      failed: number;
+      skipped: number;
+      /** 用户中断（skip 剩余）时为 true。 */
+      aborted: boolean;
     };
 
 export function createOpenInEditorRemoteTarget(
@@ -1126,6 +1297,20 @@ export interface IPlatformService {
   setOmnicodePerfPanelState?(input: OmnicodePerfPanelStateInput): Promise<{ ok: boolean }>;
   /** [OmniCode] 批次2.5 X1：订阅性能采样事件（sample/unavailable），返回 disposer。仅管理器 Desktop。 */
   onOmnicodePerfEvent?(handler: (payload: OmnicodePerfEventPayload) => void): () => void;
+  /**
+   * [OmniCode] 批次3：拉登录态看板数据快照（凭据快照 + billing/balance；main 侧 30min
+   * TTL 缓存，force 绕过）。仅管理器 Desktop。
+   */
+  getOmnicodeAccountSnapshot?(input: OmnicodeAccountSnapshotRequest): Promise<OmnicodeAccountDashboardSnapshot>;
+  /**
+   * [OmniCode] 批次3：启动一次赛博鸡蛋逐张领取（mode 仅作执行标注，共用节奏器；
+   * 启动即回 runId，进度/结算经事件广播）。仅管理器 Desktop。
+   */
+  runOmnicodeAccountClaim?(input: OmnicodeAccountClaimRunRequest): Promise<OmnicodeAccountClaimRunResult>;
+  /** [OmniCode] 批次3：订阅领取执行进度事件，返回 disposer。仅管理器 Desktop。 */
+  onOmnicodeAccountClaimEvent?(
+    handler: (payload: OmnicodeAccountClaimEventPayload) => void,
+  ): () => void;
 
   // [OmniCode] 实例专属登录浏览器：失败态恢复入口（手动粘贴完整 OAuth 回调 URL，spec:
   // docs/omnicode/instance-login-browser.md）。accepted=false 表示回调未被接收
