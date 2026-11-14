@@ -4,11 +4,12 @@
 // 进程装配——实例进程内不再注册管理面（其实例 renderer 的 ConsoleHome 入口已被
 // Root 收紧移除，这里的守卫封死"实例内再 spawn 实例"的最后一层）。官方 flavor
 // （production/preview）行为保持既有不变（继续注册）。
-import { ipcMain, shell } from "electron";
+import { ipcMain, shell, BrowserWindow } from "electron";
 import {
   isOmnicodeProfileInstanceEnv,
   PlatformChannels,
   ZCODE_PRODUCT_FLAVOR,
+  type OmnicodeAccountClaimEventPayload,
   type OmnicodeConsoleUiState,
   type OmnicodeConsoleUiStatePatch,
   type OmnicodeProfileSummaryInfo,
@@ -54,6 +55,8 @@ import {
 import { setOmnicodeInstanceBridgeManagerHooks } from "./omnicode/instanceBridgeServer.js";
 import { readOmnicodeLoginHealths } from "./omnicode/loginHealth.js";
 import { applyOmnicodePerfPanelState } from "./omnicode/perfMonitor.js";
+import { getOmnicodeAccountDashboardSnapshot } from "./omnicode/accountDashboard.js";
+import { startOmnicodeAccountClaimRun } from "./omnicode/claimRunner.js";
 import { assertValidProfileId } from "./omnicode/contract.js";
 
 export function registerDesktopOmnicodeProfileIpcHandlers(): void {
@@ -147,6 +150,9 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
   registerDesktopOmnicodeConsoleAdoptionIpcHandlers();
   // [OmniCode] 批次2 B2-3：控制台网格/内嵌/预览 IPC + 桥管理钩子（spec §批次2 D9）
   registerDesktopOmnicodeConsoleViewportIpcHandlers();
+  // [OmniCode] 批次3：登录态看板数据快照 + 赛博鸡蛋领取执行（数据层，spec:
+  // F:\OmniCode\docs\batch3\BATCH3-DESIGN-DISCUSSION.md §2/§3）
+  registerDesktopOmnicodeAccountIpcHandlers();
   setOmnicodeInstanceBridgeManagerHooks({
     onInstanceConnected: (profileId) => notifyOmnicodeInstanceConnected(profileId),
     onInstanceDisconnected: (profileId) => notifyOmnicodeInstanceDisconnected(profileId),
@@ -295,6 +301,48 @@ function registerDesktopOmnicodeConsoleAdoptionIpcHandlers(): void {
         getOmnicodeConsoleDataBaseDir(),
       );
       return { profile: { ...profile, running: false } };
+    },
+  );
+}
+
+/**
+ * [OmniCode] 批次3：登录态看板 / 赛博鸡蛋 IPC（仅管理器装配；数据层，spec:
+ * F:\OmniCode\docs\batch3\BATCH3-DESIGN-DISCUSSION.md §2/§3）。
+ * - AccountSnapshotGet：看板快照（凭据快照 + billing/balance；main 侧 30min TTL 缓存，
+ *   force=true 绕过强刷）。永不 reject（单账号失败归 entry 级原因键）。
+ * - AccountClaimRun：启动逐张领取（mode: manual/auto 共用节奏器；启动即回 runId，
+ *   进度/结算经 OmnicodeAccountClaimEvent 全窗口广播）。不做轮询定时器（UI 批次做）。
+ * 红线：token/设备号不进任何载荷/日志（billing 客户端只在请求头内使用一次）。
+ */
+function registerDesktopOmnicodeAccountIpcHandlers(): void {
+  // 领取进度事件广播（main → renderer 全窗口；与 perfMonitor 同模式）
+  const broadcastOmnicodeAccountClaimEvent = (payload: OmnicodeAccountClaimEventPayload): void => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send(PlatformChannels.OmnicodeAccountClaimEvent, payload);
+      }
+    }
+  };
+
+  ipcMain.handle(
+    PlatformChannels.OmnicodeAccountSnapshotGet,
+    async (_event, input: unknown) => {
+      // 防御性归一：force 仅接受显式布尔；畸形入参按普通拉取处理（不抛穿）
+      const force = (input ?? {}) instanceof Object && (input as { force?: unknown }).force === true;
+      return getOmnicodeAccountDashboardSnapshot({ force });
+    },
+  );
+
+  ipcMain.handle(
+    PlatformChannels.OmnicodeAccountClaimRun,
+    async (_event, input: unknown) => {
+      const mode = (input ?? {}) instanceof Object && (input as { mode?: unknown }).mode === "auto"
+        ? ("auto" as const)
+        : ("manual" as const);
+      return startOmnicodeAccountClaimRun({
+        mode,
+        broadcast: broadcastOmnicodeAccountClaimEvent,
+      });
     },
   );
 }

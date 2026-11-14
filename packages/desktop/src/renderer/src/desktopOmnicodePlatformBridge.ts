@@ -2,6 +2,11 @@
 // 与 desktopBrowserPlatformBridge 同一模式：desktopPlatform.ts 展开合入，
 // IPlatformService 上这些方法为可选，缺席（Web/旧 preload）即无入口。
 import type {
+  OmnicodeAccountClaimEventPayload,
+  OmnicodeAccountClaimRunRequest,
+  OmnicodeAccountClaimRunResult,
+  OmnicodeAccountDashboardSnapshot,
+  OmnicodeAccountSnapshotRequest,
   OmnicodeConsoleEmbedLayoutInput,
   OmnicodeConsolePreviewStateInput,
   OmnicodeConsoleUiState,
@@ -88,4 +93,19 @@ export const desktopOmnicodePlatformBridge = {
     window.zcode.setOmnicodePerfPanelState?.(payload) ?? Promise.resolve({ ok: false }),
   onOmnicodePerfEvent: (handler: (payload: OmnicodePerfEventPayload) => void): (() => void) =>
     window.zcode.onOmnicodePerfEvent?.(handler) ?? (() => {}),
+  // [OmniCode] 批次3：登录态看板 / 赛博鸡蛋（数据层，spec:
+  // F:\OmniCode\docs\batch3\BATCH3-DESIGN-DISCUSSION.md §2/§3；缺席=官方 flavor 或旧
+  // preload——看板入口不渲染，调用面拒绝而非静默空数据）。
+  getOmnicodeAccountSnapshot: (
+    payload: OmnicodeAccountSnapshotRequest,
+  ): Promise<OmnicodeAccountDashboardSnapshot> =>
+    requireBridge(window.zcode.getOmnicodeAccountSnapshot?.(payload)),
+  runOmnicodeAccountClaim: (
+    payload: OmnicodeAccountClaimRunRequest,
+  ): Promise<OmnicodeAccountClaimRunResult> =>
+    requireBridge(window.zcode.runOmnicodeAccountClaim?.(payload)),
+  onOmnicodeAccountClaimEvent: (
+    handler: (payload: OmnicodeAccountClaimEventPayload) => void,
+  ): (() => void) =>
+    window.zcode.onOmnicodeAccountClaimEvent?.(handler) ?? (() => {}),
 };
