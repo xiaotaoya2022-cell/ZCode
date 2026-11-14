@@ -1,7 +1,12 @@
 // [OmniCode] 批次2 B2-3：控制台实例卡片 + 新建实例弹窗（spec: docs/omnicode/profile-runtime.md §批次2 D9）。
 // 卡片结构对照演示稿：顶条（28-32px 管理器自绘控制钮区，内嵌模式下实例窗口贴下方画面区）+
-// 画面区（letterbox 预览 / 停止占位 / 桌面模式模糊遮罩 / 预览关角标）+ 底部备注。
-import { useEffect, useState } from "react";
+// 画面区（letterbox 预览 / 停止占位 / 拖出监控模糊遮罩 / 预览关角标 / 停靠 resize 手柄）。
+// [OmniCode] 批次3 停靠重构（B 套件 a/c）：全局内嵌/桌面模式退役，改为每实例 docked——
+// - 停靠（docked=true）：画面区 letterbox 底图隐藏（真窗口精确盖满=看起来就是预览窗口
+//   本身，消除双层悬浮感；帧数据仍驱动 aspect 计算，缩略图 capturePage 走实例侧
+//   WebContents 与本 img 无关）+ 四边 resize 手柄（卡片权威调高→embedLayout 跟随）；
+// - 拖出（docked=false）：恢复底图实时预览 + 模糊监控遮罩 +「收回」钮。
+import { useEffect, useRef, useState } from "react";
 import {
   Copy,
   FolderOpen,
@@ -10,13 +15,16 @@ import {
   MoreHorizontal,
   Play,
   Square,
+  SquareArrowDownLeft,
+  SquareArrowOutUpRight,
   Trash2,
 } from "lucide-react";
 import type {
-  OmnicodeConsoleUiState,
+  OmnicodeEmbedResizeEdge,
   OmnicodeLoginHealthInfo,
   OmnicodeProfileSummaryInfo,
 } from "@zcode/shared";
+import { resolveOmnicodeEmbedResizeHeightCss } from "@zcode/shared";
 import { Button } from "@/components/ui/button.js";
 import {
   DropdownMenu,
@@ -35,7 +43,6 @@ export const DEFAULT_FRAME_ASPECT_RATIO = 16 / 10;
 /** 卡片动作集合（ConsoleInstanceGrid 传入；操作实现在 useOmnicodeConsoleInstances）。 */
 export interface ConsoleInstanceCardActions {
   busy: boolean;
-  mode: OmnicodeConsoleUiState["mode"];
   previewEnabled: boolean;
   onLaunch: (profile: OmnicodeProfileSummaryInfo) => void;
   onStop: (profile: OmnicodeProfileSummaryInfo) => void;
@@ -55,6 +62,14 @@ export function ConsoleInstanceCard(props: {
   focusHighlighted?: boolean;
   registerScreen: (profileId: string, element: HTMLElement | null) => void;
   registerCard: (profileId: string, element: HTMLElement | null) => void;
+  /** [OmniCode] 批次3 停靠重构：本实例是否停靠（resolveOmnicodeInstanceDocked 解析结果）。 */
+  docked: boolean;
+  /** 拖出/收回（卡片钮区 + 监控遮罩收回钮；编排与持久化在 main，grid 乐观更新）。 */
+  onDockChange: (docked: boolean) => void;
+  /** [OmniCode] 批次3（B 套件 c）：resize 手柄拖拽快路径上报（绕过 60ms 节流）。 */
+  reportEmbedLayoutNow?: () => void;
+  /** [OmniCode] 批次3（B 套件 c）：CSS→DIP 纵向换算比例（main 随上报响应回传）。 */
+  embedScaleRef?: { current: number };
 } & ConsoleInstanceCardActions) {
   const { intl } = useZCodeIntl();
   const {
@@ -64,8 +79,11 @@ export function ConsoleInstanceCard(props: {
     focusHighlighted,
     registerScreen,
     registerCard,
+    docked,
+    onDockChange,
+    reportEmbedLayoutNow,
+    embedScaleRef,
     busy,
-    mode,
     previewEnabled,
     onLaunch,
     onStop,
@@ -80,26 +98,94 @@ export function ConsoleInstanceCard(props: {
     frame?.width && frame?.height && frame.width > 0 && frame.height > 0
       ? `${frame.width} / ${frame.height}`
       : String(DEFAULT_FRAME_ASPECT_RATIO);
-  // [OmniCode] B2 评审修复（P2-7 内嵌尺寸反馈环）：内嵌下"帧尺寸→卡片画面区高（aspect）
-  // →embedLayout 矩形→实例窗口 setBounds→下一帧尺寸"形成反馈环（微抖）。进入内嵌后
-  // 冻结首次收到的帧比例（embedLayout 生效前的自然基线，反馈环无起点）；桌面模式恢复
-  // 动态（真窗口不贴卡片，无环）。
+  // [OmniCode] B2 评审修复（P2-7 内嵌尺寸反馈环）：停靠下"帧尺寸→卡片画面区高（aspect）
+  // →embedLayout 矩形→实例窗口 setBounds→下一帧尺寸"形成反馈环（微抖）。进入停靠后
+  // 冻结首帧比例（embedLayout 生效前的自然基线，反馈环无起点）；拖出恢复动态（真窗口
+  // 不贴卡片，无环）。[OmniCode] 批次3（B 套件 c）：resize 手柄拖拽提交时更新冻结值
+  // （新比例 = 拖后画面区真实宽高比，窗口跟随卡片保持精确贴合）。
   const [embeddedAspectRatio, setEmbeddedAspectRatio] = useState<string | null>(null);
   useEffect(() => {
-    if (mode !== "embedded") {
-      setEmbeddedAspectRatio(null); // 桌面态恢复动态比例
+    if (!docked) {
+      setEmbeddedAspectRatio(null); // 拖出态恢复动态比例
       return;
     }
     if (embeddedAspectRatio === null && frame?.width && frame?.height && frame.width > 0 && frame.height > 0) {
       setEmbeddedAspectRatio(`${frame.width} / ${frame.height}`);
     }
-  }, [mode, frame, embeddedAspectRatio]);
-  const aspectRatio = mode === "embedded" ? (embeddedAspectRatio ?? String(DEFAULT_FRAME_ASPECT_RATIO)) : frameAspectRatio;
+  }, [docked, frame, embeddedAspectRatio]);
+  const aspectRatio = docked ? (embeddedAspectRatio ?? String(DEFAULT_FRAME_ASPECT_RATIO)) : frameAspectRatio;
+
+  // [OmniCode] 批次3（B 套件 c）：画面区元素本地引用（resize 手柄改高/提交冻结比例）。
+  const screenElementRef = useRef<HTMLDivElement | null>(null);
+  const registerScreenElement = (element: HTMLDivElement | null) => {
+    screenElementRef.current = element;
+    registerScreen(id, element);
+  };
+
+  /**
+   * resize 手柄拖拽（卡片权威）：pointermove 按 shared 手柄数学改画面区高度
+   *（下限 = 96 DIP / scale 换算回 CSS，保证实例侧独立校验必过）+ 快路径上报让窗口
+   * 实时跟随；pointerup 冻结新宽高比并清 inline 高度（aspect 样式接管，渲染尺寸不变）。
+   * 双击/点击在手柄上被吞（不触发放大/聚焦）。
+   */
+  const beginResize = (edge: OmnicodeEmbedResizeEdge) => (event: React.PointerEvent<HTMLDivElement>) => {
+    const element = screenElementRef.current;
+    if (!element || event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const startRect = element.getBoundingClientRect();
+    if (startRect.width <= 0 || startRect.height <= 0) return;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const scaleY = embedScaleRef?.current ?? 1;
+    const onMove = (moveEvent: PointerEvent) => {
+      const nextHeight = resolveOmnicodeEmbedResizeHeightCss({
+        edge,
+        startHeightCss: startRect.height,
+        dxCss: moveEvent.clientX - startX,
+        dyCss: moveEvent.clientY - startY,
+        scaleY,
+      });
+      element.style.height = `${Math.round(nextHeight)}px`;
+      reportEmbedLayoutNow?.();
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      const finalRect = element.getBoundingClientRect();
+      if (finalRect.width > 0 && finalRect.height > 0) {
+        setEmbeddedAspectRatio(`${finalRect.width} / ${finalRect.height}`);
+      }
+      element.style.height = "";
+      reportEmbedLayoutNow?.();
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
 
   const handleCardClick = () => {
-    // 桌面模式：点击卡片 = 聚焦真窗口（内嵌模式的画面区被真窗口覆盖，点击到不了这里）
-    if (mode === "desktop" && running) onFocus(profile);
+    // 拖出态：点击卡片 = 聚焦真窗口（停靠态的画面区被真窗口覆盖，点击到不了这里）
+    if (!docked && running) onFocus(profile);
   };
+
+  const resizeHandles = docked && running && !enlarged
+    ? (["top", "bottom", "left", "right"] as const).map((edge) => (
+        <div
+          key={edge}
+          onPointerDown={beginResize(edge)}
+          onClick={(event) => event.stopPropagation()}
+          onDoubleClick={(event) => event.stopPropagation()}
+          title={intl.formatMessage({ id: "console.resizeHandleTitle" })}
+          className={cn(
+            "absolute z-10 touch-none",
+            edge === "top" && "inset-x-0 top-0 h-1.5 cursor-ns-resize",
+            edge === "bottom" && "inset-x-0 bottom-0 h-1.5 cursor-ns-resize",
+            edge === "left" && "inset-y-0 left-0 w-1.5 cursor-ew-resize",
+            edge === "right" && "inset-y-0 right-0 w-1.5 cursor-ew-resize",
+          )}
+        />
+      ))
+    : null;
 
   return (
     <section
@@ -113,12 +199,12 @@ export function ConsoleInstanceCard(props: {
         running
           ? "hover:border-foreground-subtle/60 hover:shadow-md"
           : "hover:border-border",
-        mode === "desktop" && running && "cursor-pointer",
+        !docked && running && "cursor-pointer",
         focusHighlighted && "border-primary ring-1 ring-primary",
         enlarged && "h-full",
       )}
     >
-      {/* 顶条（28-32px：内嵌模式下管理器自绘控制钮区，实例窗口贴下方画面区） */}
+      {/* 顶条（28-32px：停靠模式下管理器自绘控制钮区，实例窗口贴下方画面区） */}
       <header className="flex h-8 shrink-0 items-center gap-2 border-b border-border px-2">
         <span
           className={cn(
@@ -132,6 +218,23 @@ export function ConsoleInstanceCard(props: {
         <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           {running ? (
             <>
+              {/* [OmniCode] 批次3 停靠重构：停靠实例「拖出」——releaseEmbed 恢复桌面
+                  窗口（任务栏项复位），卡片转纯监控态（实时预览+模糊遮罩+收回钮） */}
+              {docked ? (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-6"
+                  disabled={busy}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onDockChange(false);
+                  }}
+                  title={intl.formatMessage({ id: "console.undockTitle" })}
+                >
+                  <SquareArrowOutUpRight className="size-3.5" />
+                </Button>
+              ) : null}
               <Button
                 variant="ghost"
                 size="icon"
@@ -178,10 +281,22 @@ export function ConsoleInstanceCard(props: {
                 <Play className="size-3.5" />
                 {intl.formatMessage({ id: "settings.omnicodeProfiles.launch" })}
               </DropdownMenuItem>
-              {running ? (
+              {running && !docked ? (
                 <DropdownMenuItem onClick={() => onFocus(profile)}>
                   <Monitor className="size-3.5" />
                   {intl.formatMessage({ id: "settings.omnicodeProfiles.focus" })}
+                </DropdownMenuItem>
+              ) : null}
+              {running && docked ? (
+                <DropdownMenuItem onClick={() => onDockChange(false)}>
+                  <SquareArrowOutUpRight className="size-3.5" />
+                  {intl.formatMessage({ id: "console.undockTitle" })}
+                </DropdownMenuItem>
+              ) : null}
+              {running && !docked ? (
+                <DropdownMenuItem onClick={() => onDockChange(true)}>
+                  <SquareArrowDownLeft className="size-3.5" />
+                  {intl.formatMessage({ id: "console.dockTitle" })}
                 </DropdownMenuItem>
               ) : null}
               <DropdownMenuItem onClick={() => onClone(profile)}>
@@ -201,16 +316,21 @@ export function ConsoleInstanceCard(props: {
         </div>
       </header>
 
-      {/* 画面区：letterbox 预览（内嵌模式被真窗口覆盖）/ 停止占位 / 桌面模式模糊遮罩 */}
+      {/* 画面区：letterbox 预览（停靠时底图隐藏——真窗口精确盖满）/ 停止占位 /
+          拖出监控模糊遮罩 / 停靠 resize 手柄 */}
       <div
-        ref={(element) => registerScreen(id, element)}
+        ref={registerScreenElement}
         style={enlarged ? undefined : { aspectRatio }}
         className={cn(
           "relative min-h-0 w-full overflow-hidden bg-black/90",
           enlarged ? "flex-1" : "",
         )}
       >
-        {running && frame ? (
+        {/* [OmniCode] 批次3 停靠重构（B 套件 a 隐藏底图）：停靠态不渲染 letterbox 底图
+            ——真窗口精确盖满画面区=看起来就是预览窗口本身。帧数据仍供 aspect 冻结与
+            letterbox 比例计算；实例侧缩略图 capturePage 走 WebContents（与本 img 渲染
+            与否无关），X1 性能面板截图订阅不受影响。 */}
+        {running && frame && !docked ? (
           <img
             src={`data:image/jpeg;base64,${frame.frame}`}
             alt=""
@@ -220,11 +340,13 @@ export function ConsoleInstanceCard(props: {
               !previewEnabled && "grayscale-[0.95] brightness-[0.45]",
             )}
           />
-        ) : running ? (
+        ) : null}
+        {running && !frame ? (
           <div className="absolute inset-0 flex items-center justify-center text-ui-xs text-foreground-subtlest">
             {intl.formatMessage({ id: "console.waitingFrame" })}
           </div>
-        ) : (
+        ) : null}
+        {!running ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
             <Button
               variant="outline"
@@ -243,22 +365,42 @@ export function ConsoleInstanceCard(props: {
               {intl.formatMessage({ id: "console.stoppedHint" })}
             </p>
           </div>
-        )}
+        ) : null}
 
-        {/* 桌面模式：模糊遮罩 + 不可交互（遮罩 pointer-events:none，点击穿透到卡片聚焦） */}
-        {mode === "desktop" && running ? (
+        {/* [OmniCode] 批次3 停靠重构：拖出监控态 = 模糊遮罩（底图可见）+「收回」钮
+            （遮罩 pointer-events:none，仅按钮可点；点击卡片其余区域聚焦真窗口） */}
+        {!docked && running ? (
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/40 backdrop-blur-md">
             <Monitor className="size-4 text-foreground-subtle" />
             <span className="text-ui-sm font-medium text-foreground">
-              {intl.formatMessage({ id: "console.desktopOverlayTitle" })}
+              {intl.formatMessage({ id: "console.undockedOverlayTitle" })}
             </span>
             <span className="text-ui-xs text-foreground-subtle">
-              {intl.formatMessage({ id: "console.desktopOverlayHint" })}
+              {intl.formatMessage({ id: "console.undockedOverlayHint" })}
             </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="pointer-events-auto mt-1"
+              disabled={busy}
+              onClick={(event) => {
+                event.stopPropagation();
+                onDockChange(true);
+              }}
+            >
+              <SquareArrowDownLeft className="size-3.5" />
+              {intl.formatMessage({ id: "console.dockBackLabel" })}
+            </Button>
           </div>
         ) : null}
 
-        {/* 预览总开关关闭：角标（卡片停留最后一帧灰暗化） */}
+        {/* [OmniCode] 批次3 停靠重构（B 套件 c）：停靠画面区四边 resize 手柄
+            （6px 命中区；卡片权威调高→embedLayout 跟随→窗口实时贴合，160×96 下限
+            由手柄数学 + main clamp + 实例侧校验三层保证） */}
+        {resizeHandles}
+
+        {/* 预览总开关关闭：角标（卡片停留最后一帧灰暗化；停靠态底图隐藏但真窗口即预览，
+            角标仍提示订阅已停） */}
         {!previewEnabled && running ? (
           <span className="absolute right-2 top-2 rounded bg-black/80 px-1.5 py-0.5 text-ui-xs text-amber-500">
             {intl.formatMessage({ id: "console.previewOffBadge" })}

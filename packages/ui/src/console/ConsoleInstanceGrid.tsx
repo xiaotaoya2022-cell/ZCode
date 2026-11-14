@@ -1,10 +1,21 @@
 // [OmniCode] 批次2 B2-3：控制台实例网格主体（spec: docs/omnicode/profile-runtime.md §批次2 D9）。
-// 工具行（新建/内嵌-桌面模式切换/平铺/实时预览开关）+ 自适应卡片网格 + 单视图放大 +
-// 底栏。内嵌模式上报卡片画面区矩形（embedLayout 跟随）；视口可见性经 IntersectionObserver
-// 驱动预览订阅；数据与操作来自 useOmnicodeConsoleInstances（与设置页分区共享）。
+// [OmniCode] 批次3 停靠重构：全局内嵌/桌面模式退役，改为每实例停靠（docked）——
+// 工具行「全部停靠/全部拖出」批量按钮 + 卡片「拖出/收回」单实例操作；停靠实例上报
+// 卡片画面区矩形（embedLayout 跟随 + resize 手柄拖高），拖出实例卡片转纯监控态；
+// 视口可见性经 IntersectionObserver 驱动预览订阅；数据与操作来自
+// useOmnicodeConsoleInstances（与设置页分区共享）。
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, LayoutGrid, Plus, RefreshCw, Undo2 } from "lucide-react";
+import {
+  Activity,
+  LayoutGrid,
+  MonitorDown,
+  Plus,
+  RefreshCw,
+  SquareArrowOutUpRight,
+  Undo2,
+} from "lucide-react";
 import type { OmnicodeConsoleUiState } from "@zcode/shared";
+import { resolveOmnicodeInstanceDocked } from "@zcode/shared";
 import { Button } from "@/components/ui/button.js";
 import { Switch } from "@/components/ui/switch.js";
 import { toast } from "@/components/ui/toast.js";
@@ -69,9 +80,11 @@ export function ConsoleInstanceGrid() {
     return running.reduce((sum, profile) => sum + (profile.memoryMB ?? 0), 0);
   })();
 
-  // ─── UI 状态（内嵌/桌面模式 + 实时预览总开关，持久化于 main 的 console-ui.json） ───
+  // ─── UI 状态（每实例停靠态 + 实时预览总开关，持久化于 main 的 console-ui.json；
+  // 批次3 停靠重构：全局 mode 退役，dockDefault + dockedByProfileId 每实例解析） ───
   const [uiState, setUiState] = useState<OmnicodeConsoleUiState>({
-    mode: "embedded",
+    dockDefault: true,
+    dockedByProfileId: {},
     previewEnabled: true,
   });
   useEffect(() => {
@@ -81,35 +94,74 @@ export function ConsoleInstanceGrid() {
         if (state) setUiState(state);
       })
       .catch(() => {
-        /* 旧 preload / 读取失败：保持默认（embedded + 预览开） */
+        /* 旧 preload / 读取失败：保持默认（全部停靠 + 预览开） */
       });
   }, [platform]);
 
-  const handleModeChange = useCallback(
-    (mode: OmnicodeConsoleUiState["mode"]) => {
-      if (busy || uiState.mode === mode) return;
+  /** 每实例停靠解析（resolveOmnicodeInstanceDocked 唯一口径；渲染期直查）。 */
+  const isDocked = useCallback(
+    (profileId: string) => resolveOmnicodeInstanceDocked(uiState, profileId),
+    [uiState],
+  );
+
+  /** 批量停靠/拖出（乐观本地更新 + main 编排完成后以落盘值对齐）。 */
+  const handleDockAll = useCallback(
+    (docked: boolean) => {
+      if (busy) return;
+      setUiState((previous) => ({
+        ...previous,
+        dockDefault: docked,
+        dockedByProfileId: {},
+      }));
       void (async () => {
         try {
-          // main 侧先完成 owned 编排/解除（进桌面需等待解除完成）再返回
-          const next = await platform.setOmnicodeConsoleUiState?.({ mode });
-          setUiState(next ?? { ...uiState, mode });
-          toast(
-            intl.formatMessage({
-              id: mode === "embedded" ? "console.modeToastEmbedded" : "console.modeToastDesktop",
-            }),
-            { variant: "success" },
-          );
+          // main 侧先完成 owned 编排/解除（拖出需等待 PowerShell 解除完成）再返回
+          const next = await platform.setOmnicodeConsoleUiState?.({ dockAll: docked });
+          if (next) setUiState(next);
+          toast(intl.formatMessage({ id: docked ? "console.toastDockedAll" : "console.toastUndockedAll" }), {
+            variant: "success",
+          });
         } catch (error) {
           toast(intl.formatMessage({ id: "settings.omnicodeProfiles.actionFailed" }), {
             variant: "warning",
           });
-          logger.warn("[omnicode] 控制台模式切换失败", {
+          logger.warn("[omnicode] 批量停靠/拖出失败", {
             error: error instanceof Error ? error.message : String(error),
           });
         }
       })();
     },
-    [busy, intl, platform, uiState],
+    [busy, intl, platform],
+  );
+
+  /** 单实例拖出/收回（卡片钮区；乐观本地更新 + main 编排完成后对齐）。 */
+  const handleInstanceDockChange = useCallback(
+    (profileId: string, docked: boolean) => {
+      if (busy) return;
+      setUiState((previous) => ({
+        ...previous,
+        dockedByProfileId: { ...previous.dockedByProfileId, [profileId]: docked },
+      }));
+      void (async () => {
+        try {
+          const next = await platform.setOmnicodeConsoleUiState?.({
+            dockInstance: { profileId, docked },
+          });
+          if (next) setUiState(next);
+          toast(intl.formatMessage({ id: docked ? "console.toastDocked" : "console.toastUndocked" }), {
+            variant: "success",
+          });
+        } catch (error) {
+          toast(intl.formatMessage({ id: "settings.omnicodeProfiles.actionFailed" }), {
+            variant: "warning",
+          });
+          logger.warn("[omnicode] 单实例停靠/拖出失败", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      })();
+    },
+    [busy, intl, platform],
   );
 
   const handlePreviewToggle = useCallback(
@@ -198,11 +250,14 @@ export function ConsoleInstanceGrid() {
     [intl],
   );
 
-  // ─── 内嵌跟随：卡片画面区矩形上报（60ms 节流；仅内嵌模式） ───
+  // ─── 停靠跟随：卡片画面区矩形上报（60ms 节流；仅停靠实例）+ resize 手柄快路径 ───
   const gridRef = useRef<HTMLDivElement | null>(null);
   const { elementsRef, registerScreen } = useScreenElementRegistry();
   const reportTimerRef = useRef<number | null>(null);
   const reportPendingRef = useRef(false);
+  // [OmniCode] 批次3（B 套件 c）：main 随上报响应回传的 CSS→DIP 纵向换算比例（resize
+  // 手柄下限钳制依据；首拍前按 1 兜底，逐拍校正）。
+  const embedScaleRef = useRef(1);
 
   const collectAndReportEmbedLayout = useCallback(() => {
     // [OmniCode] B2 评审修复（P2-9 勘误记录）：视口分母必须用整窗 CSS 视口
@@ -213,20 +268,31 @@ export function ConsoleInstanceGrid() {
     // 卡片坐标天然落在滚动条左侧，分母是全局比例与内容位置无关。
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
-    const runningIds = new Set(profiles.filter((profile) => profile.running).map((p) => p.id));
+    // [OmniCode] 批次3 停靠重构：仅停靠运行实例上报矩形（拖出实例窗口独立，
+    // 不参与贴合布局下发）。
+    const dockedRunningIds = new Set(
+      profiles
+        .filter((profile) => profile.running && resolveOmnicodeInstanceDocked(uiState, profile.id))
+        .map((p) => p.id),
+    );
     const rects: { profileId: string; x: number; y: number; width: number; height: number }[] = [];
     for (const [profileId, element] of elementsRef.current) {
-      if (!runningIds.has(profileId)) continue;
+      if (!dockedRunningIds.has(profileId)) continue;
       const rect = element.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) continue;
       rects.push({ profileId, x: rect.x, y: rect.y, width: rect.width, height: rect.height });
     }
     void platform
       .sendOmnicodeEmbedLayout?.({ viewportWidth, viewportHeight, rects })
+      .then((result) => {
+        if (result && typeof result.scale === "number" && result.scale > 0) {
+          embedScaleRef.current = result.scale;
+        }
+      })
       .catch(() => {
         /* 上报失败等下一拍（拖动中高频，静默容忍） */
       });
-  }, [elementsRef, platform, profiles]);
+  }, [elementsRef, platform, profiles, uiState]);
 
   const scheduleEmbedReport = useCallback(() => {
     if (reportTimerRef.current !== null) return;
@@ -243,12 +309,17 @@ export function ConsoleInstanceGrid() {
     );
   }, [collectAndReportEmbedLayout]);
 
+  // [OmniCode] 批次3（B 套件 c）：resize 手柄拖拽快路径——绕过 60ms 节流直报
+  //（pointermove 至多帧率级触发，回环 IPC 可承载），实例窗口跟随手柄实时贴卡。
+  const reportEmbedLayoutNow = useCallback(() => {
+    collectAndReportEmbedLayout();
+  }, [collectAndReportEmbedLayout]);
+
   // 触发源：网格/卡片尺寸变化（ResizeObserver 观察容器 + 各卡片画面区——卡片高度随
   // 帧首现的真实宽高比变化，容器本身滚动区高度不变观察不到）+ 滚动/窗口缩放 +
-  // 卡片增删/放大切换/模式切换。deps 刻意不含 frames（1.4fps 高频重建观察者是浪费，
-  // 帧驱动的尺寸变化由观察到的卡片元素自身尺寸变化捕获）。
+  // 卡片增删/放大切换/停靠状态变化。deps 刻意不含 frames（1.4fps 高频重建观察者是
+  // 浪费，帧驱动的尺寸变化由观察到的卡片元素自身尺寸变化捕获）。
   useEffect(() => {
-    if (uiState.mode !== "embedded") return;
     scheduleEmbedReport();
     const container = gridRef.current;
     if (!container) return;
@@ -269,7 +340,7 @@ export function ConsoleInstanceGrid() {
       container.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onScroll);
     };
-  }, [elementsRef, scheduleEmbedReport, uiState.mode, profiles, enlargedId]);
+  }, [elementsRef, scheduleEmbedReport, uiState, profiles, enlargedId]);
 
   // ─── 视口可见性 → 预览订阅（IntersectionObserver；总开关关 = 全部退订停最后一帧） ───
   const visibleIdsRef = useRef<Set<string>>(new Set());
@@ -407,7 +478,6 @@ export function ConsoleInstanceGrid() {
 
   const cardActionProps = {
     busy,
-    mode: uiState.mode,
     previewEnabled: uiState.previewEnabled,
     onLaunch: handleLaunch,
     onStop: handleStop,
@@ -419,44 +489,52 @@ export function ConsoleInstanceGrid() {
       toggleEnlarge(profile.id, profile.running),
   };
 
+  // [OmniCode] 批次3 停靠重构：平铺/还原只作用于未停靠运行实例（main 侧同样过滤——
+  // arrange/restoreBounds 桥命令在实例侧会解除内嵌态，投给停靠实例会破坏贴合）。
+  const undockedRunningCount = profiles.filter(
+    (profile) => profile.running && !resolveOmnicodeInstanceDocked(uiState, profile.id),
+  ).length;
+  const hasDockedRunning = profiles.some(
+    (profile) => profile.running && resolveOmnicodeInstanceDocked(uiState, profile.id),
+  );
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-      {/* 工具行：新建 | 内嵌/桌面模式切换 | 平铺/还原（桌面模式专属）| 实时预览开关 */}
+      {/* 工具行：新建 | 全部停靠/全部拖出（批量）| 平铺/还原（未停靠实例）| 实时预览开关 */}
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" onClick={() => setCreateOpen(true)} disabled={busy}>
           <Plus className="size-3.5" />
           {intl.formatMessage({ id: "console.toolbarNewInstance" })}
         </Button>
-        <div className="flex items-center rounded-md border border-border p-0.5">
-          {(["embedded", "desktop"] as const).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              onClick={() => handleModeChange(mode)}
-              disabled={busy}
-              className={cn(
-                "rounded-sm px-3 py-1 text-ui-sm transition-colors",
-                uiState.mode === mode
-                  ? "bg-primary text-primary-foreground"
-                  : "text-foreground-subtle hover:text-foreground",
-              )}
-            >
-              {intl.formatMessage({
-                id: mode === "embedded" ? "console.modeEmbedded" : "console.modeDesktop",
-              })}
-            </button>
-          ))}
-        </div>
+        {/* [OmniCode] 批次3 停靠重构：旧「内嵌/桌面」全局切换钮改为批量停靠/拖出——
+            单实例操作走卡片钮区「拖出」/监控态「收回」；批量 = dockDefault 直改 +
+            清覆盖表（后续新建实例跟随全局默认） */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => handleDockAll(true)}
+          disabled={busy}
+          title={intl.formatMessage({ id: "console.dockAllTitle" })}
+        >
+          <MonitorDown className="size-3.5" />
+          {intl.formatMessage({ id: "console.dockAll" })}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => handleDockAll(false)}
+          disabled={busy}
+          title={intl.formatMessage({ id: "console.undockAllTitle" })}
+        >
+          <SquareArrowOutUpRight className="size-3.5" />
+          {intl.formatMessage({ id: "console.undockAll" })}
+        </Button>
         <Button
           variant="outline"
           size="sm"
           onClick={() => handleArrange("settings.omnicodeProfiles.toastArranged")}
-          disabled={busy || uiState.mode !== "desktop" || runningCount === 0}
-          title={
-            uiState.mode === "embedded"
-              ? intl.formatMessage({ id: "console.arrangeTileDisabledTitle" })
-              : intl.formatMessage({ id: "settings.omnicodeProfiles.arrange" })
-          }
+          disabled={busy || undockedRunningCount === 0}
+          title={intl.formatMessage({ id: "settings.omnicodeProfiles.arrange" })}
         >
           <LayoutGrid className="size-3.5" />
           {intl.formatMessage({ id: "settings.omnicodeProfiles.arrange" })}
@@ -465,7 +543,7 @@ export function ConsoleInstanceGrid() {
           variant="outline"
           size="sm"
           onClick={() => handleArrange("settings.omnicodeProfiles.toastRestored")}
-          disabled={busy || uiState.mode !== "desktop" || runningCount === 0}
+          disabled={busy || undockedRunningCount === 0}
           title={intl.formatMessage({ id: "settings.omnicodeProfiles.restore" })}
         >
           <Undo2 className="size-3.5" />
@@ -578,6 +656,10 @@ export function ConsoleInstanceGrid() {
                   focusHighlighted={focusHighlightId === profile.id}
                   registerScreen={registerScreen}
                   registerCard={registerCard}
+                  docked={resolveOmnicodeInstanceDocked(uiState, profile.id)}
+                  onDockChange={(docked) => handleInstanceDockChange(profile.id, docked)}
+                  reportEmbedLayoutNow={reportEmbedLayoutNow}
+                  embedScaleRef={embedScaleRef}
                   {...cardActionProps}
                 />
               ))}
@@ -620,9 +702,7 @@ export function ConsoleInstanceGrid() {
           </span>
         ) : null}
         <span className="min-w-0 truncate">
-          {intl.formatMessage({
-            id: uiState.mode === "embedded" ? "console.gridHintEmbedded" : "console.gridHintDesktop",
-          })}
+          {intl.formatMessage({ id: "console.gridHint" })}
         </span>
       </div>
 
