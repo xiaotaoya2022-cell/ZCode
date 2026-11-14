@@ -663,12 +663,15 @@ describe("omnicode batch3: mergeOmnicodeConsoleUiState 白名单扩展", () => {
   });
 
   it("未知字段不落盘（白名单外丢弃）", () => {
+    // [OmniCode] 批次3 停靠重构：旧 mode 字段已退役（不再属于合并白名单），
+    // 白名单外丢弃断言改用 dockDefault 合法字段 + evil 未知字段同款口径。
     const merged = mergeOmnicodeConsoleUiState(DEFAULT_OMNICODE_CONSOLE_UI_STATE, {
-      mode: "desktop",
+      dockDefault: false,
       evil: "payload",
     } as never);
-    expect(merged).toMatchObject({ mode: "desktop", previewEnabled: true });
+    expect(merged).toMatchObject({ dockDefault: false, previewEnabled: true });
     expect(Object.keys(merged)).not.toContain("evil");
+    expect(Object.keys(merged)).not.toContain("mode");
   });
 });
 

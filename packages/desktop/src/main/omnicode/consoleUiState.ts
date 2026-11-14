@@ -9,13 +9,13 @@ import type {
   OmnicodeConsoleUiState,
   OmnicodeConsoleUiStatePatch,
 } from "@zcode/shared";
+import { resolveOmnicodeInstanceDocked } from "@zcode/shared";
 import { readJsonWithRecovery, writeJsonAtomic } from "./atomicJson.js";
 import { getOmnicodeConsoleDataBaseDir } from "./profileRuntime.js";
 
-export type OmnicodeConsoleMode = OmnicodeConsoleUiState["mode"];
-
 export const DEFAULT_OMNICODE_CONSOLE_UI_STATE: OmnicodeConsoleUiState = {
-  mode: "embedded",
+  dockDefault: true,
+  dockedByProfileId: {},
   previewEnabled: true,
 };
 
@@ -27,11 +27,15 @@ export const OMNICODE_CLAIM_HISTORY_MAX_ENTRIES = 50;
 
 /**
  * UI 状态部分合并（纯函数）：仅接受已知字段且值域合法；未知/非法字段被丢弃
- * （落盘值永远收敛到合法形态）。mode 相同 / previewEnabled 相同的字段写不写等价。
+ * （落盘值永远收敛到合法形态）。previewEnabled 相同的字段写不写等价。
  * [OmniCode] 批次2.5 X1：perfPanelOpen 为可选布尔（旧档缺省=关；spec:
  * docs/omnicode/console-extras.md §X1）——只有显式布尔才写入，避免旧档被动携带该字段。
  * [OmniCode] 批次3：autoClaimEnabled 为可选布尔（默认关，语义同 perfPanelOpen）；
  * claimHistory 仅接受合法条目数组（逐条校验、FIFO 截断到上限 50）。
+ * [OmniCode] 批次3 停靠重构：dockDefault 仅接受显式布尔；dockAll=v 语义 =
+ * dockDefault=v 且清空每实例覆盖表（收敛到全局语义）；dockInstance 写单键覆盖
+ * （profileId 非空字符串 ∧ docked 布尔才接受）。旧全局 mode 字段不再接受
+ * （迁移只发生在读档路径 migrateOmnicodeConsoleUiState）。
  */
 export function mergeOmnicodeConsoleUiState(
   current: OmnicodeConsoleUiState,
@@ -39,8 +43,21 @@ export function mergeOmnicodeConsoleUiState(
 ): OmnicodeConsoleUiState {
   if (!patch || typeof patch !== "object") return current;
   const next: OmnicodeConsoleUiState = { ...current };
-  if (patch.mode === "embedded" || patch.mode === "desktop") {
-    next.mode = patch.mode;
+  if (typeof patch.dockDefault === "boolean") {
+    next.dockDefault = patch.dockDefault;
+  }
+  if (patch.dockAll === true || patch.dockAll === false) {
+    next.dockDefault = patch.dockAll;
+    next.dockedByProfileId = {};
+  }
+  if (
+    patch.dockInstance &&
+    typeof patch.dockInstance === "object" &&
+    typeof patch.dockInstance.profileId === "string" &&
+    patch.dockInstance.profileId.length > 0 &&
+    typeof patch.dockInstance.docked === "boolean"
+  ) {
+    next.dockedByProfileId = { ...next.dockedByProfileId, [patch.dockInstance.profileId]: patch.dockInstance.docked };
   }
   if (typeof patch.previewEnabled === "boolean") {
     next.previewEnabled = patch.previewEnabled;
@@ -116,11 +133,59 @@ export function appendOmnicodeClaimHistory(
     : merged;
 }
 
-/** 读取持久化状态（损坏/缺省回退默认；不抛错——UI 偏好不值得阻断启动）。 */
+/**
+ * [OmniCode] 批次3 停靠重构：旧档案一次性迁移（纯函数）。console-ui.json 携带全局
+ * `mode`（"embedded"|"desktop"）时：mode=desktop → 全部拖出（dockDefault=false）；
+ * mode=embedded（或损坏值，按缺省语义回停靠）→ 全部停靠（dockDefault=true）；
+ * 覆盖表清空（迁移语义=现状整体映射，不保留历史覆盖）。迁移后档案不再含 mode 字段
+ * （写回由 loadOmnicodeConsoleUiStateMigrating 完成）。无 mode 字段 = 原样透传。
+ */
+export function migrateOmnicodeConsoleUiState(
+  parsed: unknown,
+): { state: Partial<OmnicodeConsoleUiState> & Record<string, unknown>; migrated: boolean } {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { state: {}, migrated: false };
+  }
+  const raw = parsed as Record<string, unknown>;
+  if (raw["mode"] === undefined) {
+    return { state: raw as Partial<OmnicodeConsoleUiState> & Record<string, unknown>, migrated: false };
+  }
+  const legacyDocked = raw["mode"] !== "desktop"; // "embedded" 或损坏值 → 停靠（缺省语义）
+  const { mode: _legacyMode, ...rest } = raw;
+  return {
+    state: {
+      ...rest,
+      dockDefault: legacyDocked,
+      dockedByProfileId: {},
+    },
+    migrated: true,
+  };
+}
+
+/**
+ * 读取持久化状态并完成旧档案一次性迁移写回（损坏/缺省回退默认；不抛错——UI 偏好
+ * 不值得阻断启动）。[OmniCode] 批次3 停靠重构：读档即迁移（mode → dockDefault），
+ * 迁移发生时原子写回（去掉 mode 字段），保证"读取旧值迁移后写回、用户现状不丢"；
+ * 迁移写失败不阻断（下次读档仍会迁移，幂等）。
+ */
+export async function loadOmnicodeConsoleUiStateMigrating(): Promise<{
+  state: OmnicodeConsoleUiState;
+  migratedFromLegacyMode: boolean;
+}> {
+  const parsed = await readJsonWithRecovery<Partial<OmnicodeConsoleUiState> & Record<string, unknown>>(
+    getConsoleUiStatePath(),
+  );
+  const { state: migratedPartial, migrated } = migrateOmnicodeConsoleUiState(parsed);
+  const state = mergeOmnicodeConsoleUiState(DEFAULT_OMNICODE_CONSOLE_UI_STATE, migratedPartial);
+  if (migrated) {
+    await writeOmnicodeConsoleUiState(state);
+  }
+  return { state, migratedFromLegacyMode: migrated };
+}
+
+/** 读取持久化状态（迁移感知；不写回——写回仅由 loadOmnicodeConsoleUiStateMigrating 完成）。 */
 export async function readOmnicodeConsoleUiState(): Promise<OmnicodeConsoleUiState> {
-  const parsed = await readJsonWithRecovery<Partial<OmnicodeConsoleUiState>>(getConsoleUiStatePath());
-  if (!parsed || typeof parsed !== "object") return { ...DEFAULT_OMNICODE_CONSOLE_UI_STATE };
-  return mergeOmnicodeConsoleUiState(DEFAULT_OMNICODE_CONSOLE_UI_STATE, parsed);
+  return (await loadOmnicodeConsoleUiStateMigrating()).state;
 }
 
 /** 原子写持久化（失败仅告警——模式/预览偏好丢失可接受，不该阻断交互）。 */
@@ -136,15 +201,31 @@ function getConsoleUiStatePath(): string {
   return join(getOmnicodeConsoleDataBaseDir(), "console-ui.json");
 }
 
-/** 模式切换决策（纯函数）：只有 embedded↔desktop 跨越才触发 owned 编排/解除。 */
-export type OmnicodeConsoleModeTransition = "none" | "enterEmbed" | "exitEmbed";
+/**
+ * [OmniCode] 批次3 停靠重构：停靠状态迁移差异决策（纯函数，替代旧全局 mode 跨越判定）。
+ * 对给定候选实例集合逐个解析前后停靠态，输出需要进入停靠（toDock）与需要拖出
+ *（toUndock）的 profileId 列表；顺序保持候选输入顺序（ownInstances 批处理稳定）。
+ */
+export interface OmnicodeDockStateDiff {
+  toDock: string[];
+  toUndock: string[];
+}
 
-export function resolveOmnicodeConsoleModeTransition(
-  currentMode: OmnicodeConsoleMode,
-  requestedMode: OmnicodeConsoleMode,
-): OmnicodeConsoleModeTransition {
-  if (currentMode === requestedMode) return "none";
-  return requestedMode === "embedded" ? "enterEmbed" : "exitEmbed";
+export function diffOmnicodeDockState(
+  previous: Pick<OmnicodeConsoleUiState, "dockDefault" | "dockedByProfileId">,
+  next: Pick<OmnicodeConsoleUiState, "dockDefault" | "dockedByProfileId">,
+  profileIds: readonly string[],
+): OmnicodeDockStateDiff {
+  const toDock: string[] = [];
+  const toUndock: string[] = [];
+  for (const profileId of profileIds) {
+    const wasDocked = resolveOmnicodeInstanceDocked(previous, profileId);
+    const nowDocked = resolveOmnicodeInstanceDocked(next, profileId);
+    if (wasDocked === nowDocked) continue;
+    if (nowDocked) toDock.push(profileId);
+    else toUndock.push(profileId);
+  }
+  return { toDock, toUndock };
 }
 
 /**

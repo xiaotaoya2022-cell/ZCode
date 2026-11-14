@@ -1,9 +1,16 @@
 // [OmniCode] 批次2 B2-3：管理器内嵌编排（owned-window 方案，spec §批次2 D9）。
+// [OmniCode] 批次3 停靠重构：全局 embedded/desktop 模式退役，改为每实例 docked 布尔
+//（console-ui.json dockDefault + dockedByProfileId，spec §批次3 停靠重构）。
+// - docked=true：窗口 owned 进卡片画面区（贴合 B 套件：隐藏底图由 renderer 完成，
+//   零滞后跟随 = 窗口 move/resize 直推缓存矩形，resize 手柄 = 卡片权威调高）；
+// - docked=false：releaseEmbed 恢复桌面窗口（任务栏项复位），卡片转纯监控态；
+//   实例不被 own、不参与布局下发、不受管理器最小化影响（owned 关系已解除）。
 //
 // 生命周期红线（Win32：owned window 随 owner 销毁——管理器窗口销毁会连带杀死内嵌实例）：
 // - 管理器窗口 close/before-quit → prepareAppQuit 屏障内 await releaseOmnicodeEmbedForQuit()
-//   （幂等 + 超时上限）；切桌面模式同样先解除。
-// - 管理器崩溃/被强杀无法收尾 → 内嵌实例被连坐销毁，记录为已知限制（spec D9）。
+//   （幂等 + 超时上限）。owned 登记 ≡ 停靠实例（undocked 实例无 owned 关系），
+//   故 quit 收尾天然只处理 docked；undocked 实例 quit 时不打扰。
+// - 管理器崩溃/被强杀无法收尾 → 停靠实例被连坐销毁，记录为已知限制（spec D9）。
 //
 // PowerShell 纪律：owned 设置/解除 = 一次性 spawn（-NoProfile -NonInteractive -Command，
 // argv 数组直传、禁 shell 拼接），全部动态参数经 16 位 hex 白名单字面量校验后内插；
@@ -17,7 +24,9 @@ import type { BrowserWindow } from "electron";
 import type {
   OmnicodeConsoleEmbedLayoutInput,
   OmnicodeConsolePreviewStateInput,
+  OmnicodeConsoleUiState,
 } from "@zcode/shared";
+import { resolveOmnicodeInstanceDocked } from "@zcode/shared";
 import { assertValidProfileId } from "./profileRuntime.js";
 import {
   sendOmnicodeInstanceCommand,
@@ -25,18 +34,20 @@ import {
   getOmnicodeConnectedInstanceProfileIds,
 } from "./instanceBridgeServer.js";
 import {
+  clampOmnicodeScreenRectToEmbedMinimum,
   convertOmnicodeClientRectToScreen,
   isOmnicodeEmbedRectUsable,
   isValidOmnicodeHwndHex,
 } from "./embedLayoutMath.js";
 import {
+  diffOmnicodeDockState,
+  loadOmnicodeConsoleUiStateMigrating,
   readOmnicodeConsoleUiState,
   writeOmnicodeConsoleUiState,
   resolveOmnicodePreviewSubscriptions,
-  type OmnicodeConsoleMode,
 } from "./consoleUiState.js";
 
-/** 跟随下发的最小间隔（renderer rAF+60ms 节流之上，main 侧 move/resize 再兜一层）。 */
+/** renderer 上报布局变化的下发节流（main 侧 move/resize 走零滞后直推，不经此节流）。 */
 const EMBED_DISPATCH_THROTTLE_MS = 60;
 /** 单次 PowerShell 批处理的硬超时（spawn 卡死不阻断退出流程）。 */
 const POWERSHELL_TIMEOUT_MS = 5_000;
@@ -47,22 +58,28 @@ const GWL_HWNDPARENT = -8;
 // ─── 状态 ───
 
 let managerWindow: BrowserWindow | null = null;
-let embedMode: OmnicodeConsoleMode = "embedded"; // 与 consoleUiState 同源，装配时初始化
-let embedModeInitialized = false;
 /**
- * [OmniCode] B2 评审修复（P2-6）：模式切换过渡标志。切桌面时先 await 解除全部 owned
- * （PowerShell 批处理可达秒级），期间尾随节流 timer 的 dispatchEmbedLayout 仍会以
- * embedded 态重下发 embedLayout 并经 ownInstances 重登记 owned——用本标志在
- * dispatchEmbedLayout / ownInstances 入口短路，切换落地后才恢复跟随。
+ * [OmniCode] 批次3 停靠重构：每实例停靠态镜像（与 console-ui.json 同源，装配时初始化、
+ * UiStateSet dock 变化时经 applyOmnicodeConsoleDockStateChange 同步）。覆盖表只存显式
+ * 键（Record 形态与落盘同构——解析直查属性，避免窗口 move 热路径建 Map 开销），
+ * 缺省键按 dockDefault 解析（resolveOmnicodeInstanceDocked 唯一口径）。
  */
-let switchingMode = false;
+let dockDefault = true;
+let dockOverrideRecord: Record<string, boolean> = {};
+let dockStateInitialized = false;
 /**
- * [OmniCode] B2 评审修复（P2-6）：模式切换串行队列。并发双击（desktop→embedded 快速
- * 往返）时第二个请求在 `embedMode === mode` 早退检查处失步（旧请求未落地、embedMode
- * 还是旧值）——全部切换请求排队串行执行，各自执行时以最新 embedMode 重判，最终收敛
- * 到最后一次用户意图。
+ * [OmniCode] B2 评审修复（P2-6）→ 批次3 语义沿用：停靠/拖出编排的过渡标志。拖出实例时
+ * 先 await 解除 owned（PowerShell 批处理可达秒级），期间尾随节流 timer 的
+ * dispatchEmbedLayout 仍会重下发 embedLayout 并经 ownInstances 重登记 owned——用本标志
+ * 在 dispatchEmbedLayout / ownInstances 入口短路，编排落地后才恢复跟随。
  */
-let modeChangeQueue: Promise<void> = Promise.resolve();
+let dockTransitionActive = false;
+/**
+ * [OmniCode] B2 评审修复（P2-6）→ 批次3 语义沿用：停靠状态变化串行队列。并发双击
+ * （拖出→快速收回往返）时第二个请求可能失步（旧请求未落地、镜像还是旧值）——全部
+ * 编排请求排队串行执行，各自执行时以最新镜像重判，最终收敛到最后一次用户意图。
+ */
+let dockChangeQueue: Promise<void> = Promise.resolve();
 const instanceHwndHexByProfileId = new Map<string, string>();
 const ownedProfileIds = new Set<string>();
 /** 内嵌中但卡片滚出视口被临时隐藏的实例（回视口时 embedLayout 自带 show）。 */
@@ -84,6 +101,23 @@ let quitTeardownInFlight: Promise<void> | null = null;
 /** 每实例当前订阅态（与桥实际下发 diff，避免重复命令）。 */
 const subscribedByProfileId = new Map<string, boolean>();
 let previewState: OmnicodeConsolePreviewStateInput = { previewEnabled: true, visibleProfileIds: [] };
+
+/**
+ * 镜像态 → 每实例停靠判定（resolveOmnicodeInstanceDocked 唯一口径，属性直查零分配）。
+ * 导出给 instanceManager（arrange/restoreBounds 只投递未停靠实例——桥命令在实例侧会
+ * 解除内嵌态，投给停靠实例会静默破坏贴合）等编排方消费。
+ */
+export function isOmnicodeProfileDocked(profileId: string): boolean {
+  return resolveOmnicodeInstanceDocked(
+    { dockDefault, dockedByProfileId: dockOverrideRecord },
+    profileId,
+  );
+}
+
+/** 候选列表过滤：仅保留停靠实例（undocked 实例不参与 own/布局下发）。 */
+function filterDockedProfileIds(profileIds: readonly string[]): string[] {
+  return profileIds.filter((profileId) => isOmnicodeProfileDocked(profileId));
+}
 
 // ─── PowerShell owned 设置/解除（一次性 spawn，全字面量参数） ───
 
@@ -159,70 +193,96 @@ function getManagerHwndHex(): string | null {
   }
 }
 
-// ─── 内嵌模式编排 ───
+// ─── 每实例停靠编排 ───
 
 /**
- * 装配：初始化持久化模式（进程启动时调用一次；窗口引用此时可为 null，主窗口创建后
- * 经 setOmnicodeEmbedManagerWindow 补挂）。持久化模式为内嵌时立即进入内嵌态。
+ * 装配：初始化持久化停靠态（进程启动时调用一次；窗口引用此时可为 null，主窗口创建后
+ * 经 setOmnicodeEmbedManagerWindow 补挂）。[OmniCode] 批次3：读档即迁移（旧全局 mode →
+ * dockDefault，迁移后原子写回去掉 mode 字段）；随后把已连接且停靠的实例跟接进 owned。
  */
 export async function setupOmnicodeConsoleEmbedding(): Promise<void> {
-  if (embedModeInitialized) return;
-  embedModeInitialized = true;
-  embedMode = (await readOmnicodeConsoleUiState()).mode;
-  if (embedMode === "embedded") {
-    setEmbedModeInternal("embedded");
-  }
+  if (dockStateInitialized) return;
+  dockStateInitialized = true;
+  const { state } = await loadOmnicodeConsoleUiStateMigrating();
+  dockDefault = state.dockDefault !== false;
+  dockOverrideRecord = { ...(state.dockedByProfileId ?? {}) };
+  // 与旧 embedded 全局模式同构：装配时已连接的停靠实例直接跟接（owned + 布局下发）。
+  void ownDockedConnectedInstances();
 }
 
 /** 管理器主窗口引用变化（重建/销毁）时更新；窗口失效时解除 move/resize 监听。 */
 export function setOmnicodeEmbedManagerWindow(window: BrowserWindow | null): void {
   detachManagerWindowListeners();
   managerWindow = window;
-  if (window && embedMode === "embedded") attachManagerWindowListeners();
+  // 批次3：监听不再按全局模式挂/摘——停靠实例可能随时存在（每实例 docked），
+  // move/resize 直推在无停靠实例时 owned 集为空、dispatch 早退，开销可忽略。
+  if (window) attachManagerWindowListeners();
 }
 
-function setEmbedModeInternal(mode: OmnicodeConsoleMode): void {
-  embedMode = mode;
-  if (mode === "embedded") {
-    attachManagerWindowListeners();
-    void ownAllConnectedInstances();
-  } else {
-    detachManagerWindowListeners();
-    void releaseEmbeddedInstances();
+/** 装配期跟接：已连接且停靠的实例索取 HWND（缺则兜底命令）→ owned → 布局下发。 */
+async function ownDockedConnectedInstances(): Promise<void> {
+  const connected = getOmnicodeConnectedInstanceProfileIds();
+  const docked = filterDockedProfileIds(connected);
+  for (const profileId of docked) {
+    if (!instanceHwndHexByProfileId.has(profileId)) {
+      sendOmnicodeInstanceCommand(profileId, { type: "requestWindowHandle" });
+    }
   }
+  await ownInstances(docked);
+  dispatchEmbedLayout();
 }
 
 /**
- * 模式切换入口（UI 状态 set IPC 调用；持久化由调用方完成）。
- * [OmniCode] B2 评审修复（P2-6）：请求串行排队（并发双击失步）+ 过渡标志短路尾随
- * dispatch（详见 switchingMode 注释）；实际编排见 performModeChange。
+ * 停靠状态变化入口（UI 状态 set IPC 调用；持久化由调用方完成）。
+ * [OmniCode] B2 评审修复（P2-6）语义沿用：请求串行排队（并发往返失步）+ 过渡标志
+ * 短路尾随 dispatch；实际编排见 performDockStateChange。
  */
-export function applyOmnicodeConsoleModeChange(mode: OmnicodeConsoleMode): Promise<void> {
-  const run = modeChangeQueue.then(() => performModeChange(mode));
-  // 队列上的失败不阻塞后续切换请求（编排本身不抛，防御性兜底）
-  modeChangeQueue = run.then(
+export function applyOmnicodeConsoleDockStateChange(next: {
+  dockDefault: boolean;
+  dockedByProfileId: Record<string, boolean>;
+}): Promise<void> {
+  const run = dockChangeQueue.then(() => performDockStateChange(next));
+  // 队列上的失败不阻塞后续编排请求（编排本身不抛，防御性兜底）
+  dockChangeQueue = run.then(
     () => undefined,
     () => undefined,
   );
   return run;
 }
 
-async function performModeChange(mode: OmnicodeConsoleMode): Promise<void> {
-  if (embedMode === mode) return;
-  switchingMode = true;
-  try {
-    if (mode === "desktop") {
-      // 生命周期红线：切桌面模式先解除全部 owned（幂等、带超时），再改状态。
-      await releaseEmbeddedInstances();
+async function performDockStateChange(next: {
+  dockDefault: boolean;
+  dockedByProfileId: Record<string, boolean>;
+}): Promise<void> {
+  // 差异候选 = 已连接 ∪ 当前 owned（owned 者必已连接；并集覆盖"已 owned 后被改判"）
+  const candidates = new Set<string>([...getOmnicodeConnectedInstanceProfileIds(), ...ownedProfileIds]);
+  const previous = { dockDefault, dockedByProfileId: dockOverrideRecord };
+  const { toDock, toUndock } = diffOmnicodeDockState(previous, next, [...candidates]);
+  if (toUndock.length > 0) {
+    // 生命周期红线：拖出先解除 owned（幂等、带超时），再改镜像——解除进行中的尾随
+    // dispatch 被过渡标志短路，不会把刚拖出的实例重新 own 回来。
+    dockTransitionActive = true;
+    try {
+      await releaseEmbeddedInstances(toUndock);
+    } finally {
+      dockTransitionActive = false;
     }
-  } finally {
-    // 先置回再 setEmbedModeInternal：进入内嵌的 own 链不被过渡标志短路
-    switchingMode = false;
   }
-  setEmbedModeInternal(mode);
+  // 编排落地后提交镜像（toDock 的 own 链以新状态为准）
+  dockDefault = next.dockDefault !== false;
+  dockOverrideRecord = { ...next.dockedByProfileId };
+  for (const profileId of toDock) {
+    if (!instanceHwndHexByProfileId.has(profileId)) {
+      sendOmnicodeInstanceCommand(profileId, { type: "requestWindowHandle" });
+    }
+  }
+  if (toDock.length > 0) {
+    await ownInstances(toDock);
+  }
+  dispatchEmbedLayout();
 }
 
-/** 实例 hello 上报的 HWND 登记；内嵌态下自动跟接（owned + 等待布局下发）。 */
+/** 实例 hello 上报的 HWND 登记；停靠实例自动跟接（owned + 等待布局下发）。 */
 export function notifyOmnicodeInstanceHello(profileId: string, hwndHex: string): void {
   try {
     assertValidProfileId(profileId);
@@ -231,7 +291,7 @@ export function notifyOmnicodeInstanceHello(profileId: string, hwndHex: string):
   }
   if (!isValidOmnicodeHwndHex(hwndHex)) return;
   instanceHwndHexByProfileId.set(profileId, hwndHex.toLowerCase());
-  if (embedMode === "embedded") {
+  if (isOmnicodeProfileDocked(profileId)) {
     void ownInstances([profileId]).then(() => dispatchEmbedLayout());
   }
 }
@@ -248,12 +308,13 @@ export function notifyOmnicodeInstanceDisconnected(profileId: string): void {
 }
 
 /**
- * 实例回连：内嵌态下索取 HWND（hello 轮询兜底）并补 owned；预览订阅对账。
+ * 实例回连：停靠实例索取 HWND（hello 轮询兜底）并补 owned；预览订阅对账。
  * [OmniCode] B2 评审修复（P1-2）：连接路径末尾 reconcilePreviewSubscriptions——
  * 兑现 spec D9"连接时即时对账"（连接不再等于订阅：总开关∧视口可见才订）。
+ * [OmniCode] 批次3：undocked 实例连接只对账订阅，不做 owned 编排（不受管理器联动）。
  */
 export function notifyOmnicodeInstanceConnected(profileId: string): void {
-  if (embedMode === "embedded") {
+  if (isOmnicodeProfileDocked(profileId)) {
     sendOmnicodeInstanceCommand(profileId, { type: "requestWindowHandle" });
     if (instanceHwndHexByProfileId.has(profileId)) {
       void ownInstances([profileId]).then(() => dispatchEmbedLayout());
@@ -261,18 +322,6 @@ export function notifyOmnicodeInstanceConnected(profileId: string): void {
     // 尚无 HWND：实例 hello 上报时经 notifyOmnicodeInstanceHello 自动跟接
   }
   reconcilePreviewSubscriptions();
-}
-
-async function ownAllConnectedInstances(): Promise<void> {
-  const connected = getOmnicodeConnectedInstanceProfileIds();
-  // 没有 HWND 的先索取 hello（实例 1s 轮询兜底重发）
-  for (const profileId of connected) {
-    if (!instanceHwndHexByProfileId.has(profileId)) {
-      sendOmnicodeInstanceCommand(profileId, { type: "requestWindowHandle" });
-    }
-  }
-  await ownInstances(connected);
-  dispatchEmbedLayout();
 }
 
 // ─── owned 登记决策（纯函数，P1-3，单测登记 engineering-test-files.json） ───
@@ -354,16 +403,15 @@ function clearOwnBackoff(profileIds: readonly string[]): void {
 }
 
 async function ownInstances(profileIds: readonly string[]): Promise<void> {
-  if (embedMode !== "embedded" || switchingMode || process.platform !== "win32") return;
+  if (dockTransitionActive || process.platform !== "win32") return;
   const managerHex = getManagerHwndHex();
   if (!managerHex) {
     console.warn("[omnicode] 内嵌 owned 设置跳过：管理器窗口 HWND 不可用");
     return;
   }
-  // [OmniCode] B2 评审复审修复（N1）：退避期内的实例跳过 own 重试（PowerShell 病态
-  // 环境下避免每轮 60ms 节流重跑注定失败的批处理——进程放大 + 窗口来回跳）。
+  // [OmniCode] 批次3：候选先过停靠过滤（undocked 实例不参与 own；调用方已过滤时为空转）。
   const { eligible } = resolveOmnicodeOwnBackoffFilter(
-    profileIds,
+    filterDockedProfileIds(profileIds),
     ownBackoffUntilByProfileId,
     Date.now(),
   );
@@ -401,10 +449,9 @@ async function ownInstances(profileIds: readonly string[]): Promise<void> {
   }
 }
 
-/** 内嵌跟随：renderer 上报卡片画面区客户区矩形（CSS px），换算屏幕 DIP 后下发。 */
+/** 内嵌跟随：renderer 上报卡片画面区客户区矩形（CSS px），换算屏幕 DIP 后下发（布局变化走节流档）。 */
 export function applyOmnicodeConsoleEmbedLayout(input: OmnicodeConsoleEmbedLayoutInput): void {
   latestClientLayout = input;
-  if (embedMode !== "embedded") return;
   scheduleDispatch(false);
 }
 
@@ -413,7 +460,12 @@ let onManagerWindowMoved: (() => void) | null = null;
 function attachManagerWindowListeners(): void {
   if (!managerWindow || managerWindowMoveListenersAttached) return;
   managerWindowMoveListenersAttached = true;
-  onManagerWindowMoved = () => scheduleDispatch(true);
+  // [OmniCode] 批次3 停靠重构（B 套件 b 零滞后跟随）：窗口 move/resize 不再走 60ms
+  // 节流档——管理器窗口位移期间 renderer 不重布局、上报矩形不变，main 直接用缓存
+  // 相对矩形（latestClientLayout）+ 当前 contentBounds 换算直推（跳过 renderer 60ms
+  // hop），每事件同步 dispatch（Electron move/resize 至多帧率级触发，回环 WS +
+  // SetWindowPos 可承载）。renderer 上报仅服务布局变化（滚动/卡片尺寸/增删）。
+  onManagerWindowMoved = () => dispatchEmbedLayout();
   managerWindow.on("move", onManagerWindowMoved);
   managerWindow.on("resize", onManagerWindowMoved);
 }
@@ -427,7 +479,7 @@ function detachManagerWindowListeners(): void {
   managerWindowMoveListenersAttached = false;
 }
 
-/** 节流调度：立即档（60ms 内至多一次）+ 尾随兜底（窗口拖动中的最后一次位移不丢）。 */
+/** 节流调度（renderer 上报档）：立即档（60ms 内至多一次）+ 尾随兜底（最后一次位移不丢）。 */
 function scheduleDispatch(fromWindowEvent: boolean): void {
   const now = Date.now();
   const elapsed = now - lastDispatchAt;
@@ -448,13 +500,32 @@ function scheduleDispatch(fromWindowEvent: boolean): void {
   dispatchTrailingTimer.unref?.();
 }
 
+/**
+ * [OmniCode] 批次3 停靠重构：本轮 CSS→DIP 纵向换算比例（renderer resize 手柄数学的
+ * 下限钳制依据）。取最近一次上报布局 + 当前 contentBounds；不可得时返回 null（renderer
+ * 按 1 兜底）。
+ */
+export function getOmnicodeConsoleEmbedScale(): number | null {
+  const layout = latestClientLayout;
+  if (!managerWindow || managerWindow.isDestroyed() || !layout || layout.viewportHeight <= 0) {
+    return null;
+  }
+  const content = managerWindow.getContentBounds();
+  if (content.height <= 0) return null;
+  const scale = content.height / layout.viewportHeight;
+  return Number.isFinite(scale) && scale > 0 ? scale : null;
+}
+
 function dispatchEmbedLayout(): void {
-  // P2-6：模式切换过渡期（解除 owned 进行中）不重下发 embedLayout/重登记 owned
-  if (embedMode !== "embedded" || switchingMode || !managerWindow || managerWindow.isDestroyed()) {
+  // P2-6：停靠/拖出编排过渡期（解除 owned 进行中）不重下发 embedLayout/重登记 owned
+  if (dockTransitionActive || !managerWindow || managerWindow.isDestroyed()) {
     return;
   }
   const layout = latestClientLayout;
   if (!layout || !Array.isArray(layout.rects)) return;
+  // 批次3：无停靠实例（owned 集 + 候选均空）时早退——undocked-only 世界里 move/resize
+  // 直推路径的每事件开销收敛为一次矩形换算前检查。
+  if (ownedProfileIds.size === 0) return;
   const content = managerWindow.getContentBounds();
   const basis = {
     contentX: content.x,
@@ -472,9 +543,15 @@ function dispatchEmbedLayout(): void {
     } catch {
       continue;
     }
+    if (!isOmnicodeProfileDocked(rect.profileId)) continue;
     const screen = convertOmnicodeClientRectToScreen(basis, rect);
-    if (!screen || !isOmnicodeEmbedRectUsable({ profileId: rect.profileId, ...screen })) continue;
-    screenRects.push({ profileId: rect.profileId, ...screen });
+    if (!screen) continue;
+    // [OmniCode] 批次3（B 套件 c）：低于内嵌最低规格的矩形钳制到下限（resize 手柄
+    // 场景 scale 镜像滞后/损坏时的防御；正常路径 renderer 已按 scale 钳制）——
+    // 保持窗口与卡片可换算一致，而非丢弃矩形让窗口停留旧位置。
+    const clamped = clampOmnicodeScreenRectToEmbedMinimum(screen);
+    if (!isOmnicodeEmbedRectUsable({ profileId: rect.profileId, ...clamped })) continue;
+    screenRects.push({ profileId: rect.profileId, ...clamped });
   }
   // 视口外的内嵌实例临时隐藏（owned 窗口无裁剪，悬在管理器外会遮挡桌面）
   const inLayout = new Set(screenRects.map((rect) => rect.profileId));
@@ -506,7 +583,8 @@ function dispatchEmbedLayout(): void {
 
 /**
  * 解除内嵌（全部或指定实例）：PowerShell GWL_HWNDPARENT=0（批处理）+ releaseEmbed
- * 桥命令（实例恢复任务栏/桌面约束并回基线）。幂等；每次 PowerShell 批处理 ≤5s。
+ * 桥命令（实例恢复任务栏/桌面约束并回基线=拖出语义）。幂等；每次 PowerShell 批处理
+ * ≤5s。仅 owned（≡ 停靠）实例受影响；undocked 实例不在 targets 时为 no-op。
  */
 export async function releaseEmbeddedInstances(profileIds?: readonly string[]): Promise<void> {
   const targets = profileIds
@@ -519,7 +597,7 @@ export async function releaseEmbeddedInstances(profileIds?: readonly string[]): 
     if (hwndHex) pairs.push({ child: hwndHex, owner: null });
     // [OmniCode] N2 决策：簿记仍提前删（而非"PowerShell 成功后才删"）。理由：解除
     // 批处理的失败可能是假阴性（超时但部分/全部已解除）——提前删后，若残留 owned
-    // 关系，下次进入 embedded 时 ownInstances 会幂等重设自愈；反之"成功后才删"在
+    // 关系，下次进入停靠（dock）时 ownInstances 会幂等重设自愈；反之"成功后才删"在
     // 假阴性下簿记永久残留 owned → 后续 dispatch 跳过该实例的 own → 窗口不跟随
     // 且无自愈路径。病态重试由退避（N1）统一抑制，见下方失败分支。
     ownedProfileIds.delete(profileId);
@@ -530,9 +608,8 @@ export async function releaseEmbeddedInstances(profileIds?: readonly string[]): 
   if (released) {
     clearOwnBackoff(targets);
   } else {
-    // [OmniCode] N2（配 N1 退避）：解除失败同样记退避——PowerShell 病态环境下，切到
-    // 桌面模式后 dispatch 已不再跑（embedMode=desktop），但切回 embedded 的第一轮
-    // own 重试也会被退避挡住 5s，避免立即再撞同一堵墙。
+    // [OmniCode] N2（配 N1 退避）：解除失败同样记退避——PowerShell 病态环境下避免
+    // 立即重试再撞同一堵墙（收回停靠的第一轮 own 重试会被退避挡住 5s）。
     recordOwnBackoff(targets, Date.now());
   }
 }
@@ -540,7 +617,9 @@ export async function releaseEmbeddedInstances(profileIds?: readonly string[]): 
 /**
  * 退出收尾队列（生命周期红线）：管理器 close/before-quit 屏障内 await——先于窗口销毁
  * 解除全部 owned。幂等 + 总预算 4s（PowerShell 卡死时放行退出，残余 owned 实例被连坐
- * 销毁为已知限制）。窗口未销毁前实例已恢复任务栏与桌面位置，即使强杀也独立存活。
+ * 销毁为已知限制）。[OmniCode] 批次3 停靠重构：owned 登记 ≡ 停靠实例（undocked 实例
+ * 无 owned 关系、不受管理器退出收尾影响），故本函数天然只处理 docked、模式无关。
+ * 窗口未销毁前实例已恢复任务栏与桌面位置，即使强杀也独立存活。
  */
 export function releaseOmnicodeEmbedForQuit(): Promise<void> {
   if (!quitTeardownInFlight) {

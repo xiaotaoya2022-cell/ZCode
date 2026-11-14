@@ -37,10 +37,11 @@ import {
   stopOmnicodeProfile,
 } from "./omnicode/contract.js";
 import {
+  applyOmnicodeConsoleDockStateChange,
   applyOmnicodeConsoleEmbedLayout,
-  applyOmnicodeConsoleModeChange,
   applyOmnicodePreviewEnabled,
   applyOmnicodePreviewState,
+  getOmnicodeConsoleEmbedScale,
   notifyOmnicodeInstanceConnected,
   notifyOmnicodeInstanceDisconnected,
   notifyOmnicodeInstanceHello,
@@ -48,10 +49,7 @@ import {
   setupOmnicodeConsoleEmbedding,
   writeOmnicodeConsoleUiState,
 } from "./omnicode/consoleEmbedding.js";
-import {
-  mergeOmnicodeConsoleUiState,
-  resolveOmnicodeConsoleModeTransition,
-} from "./omnicode/consoleUiState.js";
+import { mergeOmnicodeConsoleUiState } from "./omnicode/consoleUiState.js";
 import { setOmnicodeInstanceBridgeManagerHooks } from "./omnicode/instanceBridgeServer.js";
 import { readOmnicodeLoginHealths } from "./omnicode/loginHealth.js";
 import { applyOmnicodePerfPanelState } from "./omnicode/perfMonitor.js";
@@ -164,9 +162,10 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
 
 /**
  * [OmniCode] 批次2 B2-3：控制台视窗 IPC（仅管理器装配，spec §批次2 D9）。
- * - UiStateGet/Set：内嵌/桌面模式 + 实时预览开关（console-ui.json 持久化；模式切换
- *   触发 owned 编排/解除）。
- * - EmbedLayout：renderer 卡片画面区客户区矩形上报（换算/下发在 consoleEmbedding）。
+ * [OmniCode] 批次3 停靠重构：UiStateSet 携带每实例停靠态（dockAll/dockInstance/dockDefault
+ * ——console-ui.json 持久化；dock 字段变化触发 owned 编排/解除，见 consoleEmbedding）。
+ * - EmbedLayout：renderer 卡片画面区客户区矩形上报（换算/下发在 consoleEmbedding）；
+ *   响应携带本轮 CSS→DIP 纵向换算比例（renderer resize 手柄下限钳制依据）。
  * - PreviewState：总开关 + 视口内卡片集合 → 桥订阅对账。
  * - RevealDataDir：系统文件管理器打开实例数据目录。
  * - PerfState：性能面板采样开关（批次2.5 X1，spec: docs/omnicode/console-extras.md §X1）。
@@ -182,8 +181,18 @@ function registerDesktopOmnicodeConsoleViewportIpcHandlers(): void {
       const current = await readOmnicodeConsoleUiState();
       const merged = mergeOmnicodeConsoleUiState(current, patch);
       await writeOmnicodeConsoleUiState(merged);
-      if (resolveOmnicodeConsoleModeTransition(current.mode, merged.mode) !== "none") {
-        await applyOmnicodeConsoleModeChange(merged.mode);
+      // [OmniCode] 批次3 停靠重构：patch 携带 dock 字段才触发编排（per-instance diff
+      // 在 consoleEmbedding 内完成——toDock/toUndock 相对镜像判定，幂等）。
+      const dockTouched =
+        patch?.dockAll === true ||
+        patch?.dockAll === false ||
+        patch?.dockInstance !== undefined ||
+        typeof patch?.dockDefault === "boolean";
+      if (dockTouched) {
+        await applyOmnicodeConsoleDockStateChange({
+          dockDefault: merged.dockDefault,
+          dockedByProfileId: merged.dockedByProfileId,
+        });
       }
       if (current.previewEnabled !== merged.previewEnabled) {
         // 保留 renderer 最近上报的可见集合，只翻总开关（清零会丢订阅直到下一拍上报）
@@ -195,7 +204,7 @@ function registerDesktopOmnicodeConsoleViewportIpcHandlers(): void {
 
   ipcMain.handle(PlatformChannels.OmnicodeConsoleEmbedLayout, async (_event, input: unknown) => {
     applyOmnicodeConsoleEmbedLayout(normalizeEmbedLayoutInput(input));
-    return { ok: true };
+    return { ok: true, scale: getOmnicodeConsoleEmbedScale() };
   });
 
   ipcMain.handle(PlatformChannels.OmnicodeConsolePreviewState, async (_event, input: unknown) => {

@@ -877,7 +877,9 @@ describe("omnicode batch2.5 X3: trayMenu wiring + debounce", () => {
 // ═══ X1 配套：consoleUiState 归一（mergeOmnicodeConsoleUiState perfPanelOpen 分支） ═══
 
 describe("omnicode batch2.5 X1: mergeOmnicodeConsoleUiState perfPanelOpen 归一（R1 评审补测）", () => {
-  const base = { mode: "embedded" as const, previewEnabled: true };
+  // [OmniCode] 批次3 停靠重构：旧全局 mode 字段退役，base 改为每实例停靠态形态
+  //（dockDefault + dockedByProfileId，缺省=全部停靠）。
+  const base = { dockDefault: true, dockedByProfileId: {}, previewEnabled: true };
 
   it("perfPanelOpen 仅显式布尔写入：true/false 均落；undefined/非布尔丢弃（旧档不被动携带）", () => {
     expect(mergeOmnicodeConsoleUiState(base, { perfPanelOpen: true })).toEqual({
@@ -900,9 +902,9 @@ describe("omnicode batch2.5 X1: mergeOmnicodeConsoleUiState perfPanelOpen 归一
     expect(mergeOmnicodeConsoleUiState(base, undefined)).toBe(base);
     expect(mergeOmnicodeConsoleUiState(base, {})).toEqual(base);
     expect(mergeOmnicodeConsoleUiState(base, { evil: 1 } as never)).toEqual(base);
-    expect(mergeOmnicodeConsoleUiState(base, { mode: "desktop", perfPanelOpen: true })).toEqual({
+    expect(mergeOmnicodeConsoleUiState(base, { dockDefault: false, perfPanelOpen: true })).toEqual({
       ...base,
-      mode: "desktop",
+      dockDefault: false,
       perfPanelOpen: true,
     });
   });

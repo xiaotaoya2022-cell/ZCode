@@ -32,6 +32,9 @@ import { scanOmnicodeInstanceProcesses } from "./instanceReconcile.js";
 import { backupCredentialFile } from "./credentialBackups.js";
 // [OmniCode] 桥接服务直接从实现文件导入：经 contract.ts 会与本文件形成导出循环
 import { ensureOmnicodeInstanceBridgeServerStarted, sendOmnicodeInstanceCommand } from "./instanceBridgeServer.js";
+// [OmniCode] 批次3 停靠重构：arrange/restoreBounds 只投递未停靠实例（直接从实现文件
+// 导入，与桥服务同款约定——经 contract.ts 会与本文件形成导出循环）。
+import { isOmnicodeProfileDocked } from "./consoleEmbedding.js";
 
 export interface OmnicodeRunningInstance {
   profileId: string;
@@ -550,14 +553,16 @@ export function buildOmnicodeInstanceRelaunchArgs(): string[] | undefined {
 const ARRANGE_GAP_PX = 8;
 
 /**
- * M2 v1 平铺编排：全部运行中实例窗口 setBounds 到主屏 workArea 网格
+ * M2 v1 平铺编排：运行中实例窗口 setBounds 到主屏 workArea 网格
  * （spec §实时视窗：cols=ceil(√n)，启动时间升序排位，控制台主窗口不动）。
+ * [OmniCode] 批次3 停靠重构：仅投递**未停靠**实例——arrange 桥命令在实例侧会先解除
+ * 内嵌态，投给停靠实例会静默破坏 dock 状态（窗口脱离卡片贴合）；停靠实例跳过。
  * 未连接实例不投递（与 focus 同形）；fire-and-forget，结果以缩略图画面为准。
  */
 export function arrangeOmnicodeInstances(): { delivered: string[] } {
-  const running = [...runningByProfileId.values()].sort((a, b) =>
-    a.startedAt.localeCompare(b.startedAt),
-  );
+  const running = [...runningByProfileId.values()]
+    .sort((a, b) => a.startedAt.localeCompare(b.startedAt))
+    .filter((entry) => !isOmnicodeProfileDocked(entry.profileId));
   if (running.length === 0) return { delivered: [] };
   const { workArea } = screen.getPrimaryDisplay();
   const count = running.length;
@@ -587,10 +592,15 @@ export function arrangeOmnicodeInstances(): { delivered: string[] } {
   return { delivered };
 }
 
-/** M2 v1 还原：向全部运行中实例发 restoreBounds（实例按自身基线回位，未编排实例为 no-op）。 */
+/**
+ * M2 v1 还原：向运行中实例发 restoreBounds（实例按自身基线回位，未编排实例为 no-op）。
+ * [OmniCode] 批次3 停靠重构：同 arrange 只投递未停靠实例（restoreBounds 桥命令在实例
+ * 侧同样先解除内嵌态，停靠实例跳过以保护贴合状态）。
+ */
 export function restoreOmnicodeInstances(): { delivered: string[] } {
   const delivered: string[] = [];
   for (const entry of runningByProfileId.values()) {
+    if (isOmnicodeProfileDocked(entry.profileId)) continue;
     if (sendOmnicodeInstanceCommand(entry.profileId, { type: "restoreBounds" })) {
       delivered.push(entry.profileId);
     }
