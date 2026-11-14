@@ -33,7 +33,6 @@ export const TID_OAUTH_LOGIN_BUTTON = "oauth-login-button";
 export const TID_OAUTH_CANCEL = "oauth-cancel";
 /** OAuth 等待态复制登录链接按钮 */
 export const TID_OAUTH_COPY_LOGIN_LINK = "oauth-copy-login-link";
-// [OmniCode] 批次3 T3：omnicode 实例窗口等待态"跳转至专属浏览器"主按钮（重新拉起内置授权窗）
 /** OAuth 等待态跳转专属浏览器按钮 */
 export const TID_OAUTH_REOPEN_AUTH_BROWSER = "oauth-reopen-auth-browser";
 /** OAuth 错误提示文本 */

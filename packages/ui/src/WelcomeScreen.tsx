@@ -15,9 +15,7 @@ import {
 } from "lucide-react";
 import {
   type OAuthProviderMeta,
-  type ZCodeProductFlavor,
   BIGMODEL_PROVIDER_ID,
-  ZAI_CN_PROVIDER_ID,
   ZAI_PROVIDER_ID,
   ZCODE_PRODUCT_FLAVOR,
 } from "@zcode/shared";
@@ -41,6 +39,10 @@ import { useOAuth } from "./hooks/useOAuth.js";
 import { usePlatform } from "./hooks/usePlatform.js";
 import { useZCodeIntl } from "./i18n/IntlProvider.js";
 import { LoginApiKeyForm } from "./login/LoginApiKeyForm.js";
+// [OmniCode] 批次3 T5（R1-P2-4）：登录首屏可见 provider 过滤抽离为纯函数模块
+//（packages/ui/src/loginVisibleProviders.ts），desktop 工程测试可直接导入覆盖
+//（ui 包无独立 vitest 工程）。
+import { resolveVisibleLoginProviders } from "./loginVisibleProviders.js";
 import { renderOAuthProviderIcon } from "./lib/oauthProviderIcon.js";
 import { ThemeHeroVisual } from "./openWorkspacePageThemeHero.js";
 import { useZCodeStore } from "./store/StoreProvider.js";
@@ -693,33 +695,41 @@ export function LoginPanel({ active, showHeader = true, onComplete }: LoginPanel
             >
               {intl.formatMessage({ id: "login.oauth.cancel" })}
             </Button>
-            {/* [OmniCode] 批次3 T3：omnicode 实例窗口的登录授权点固定走内置专属浏览器
+            {/* [OmniCode] 批次3 T3 / R1-P2-1：omnicode 实例窗口的登录授权点固定走内置专属浏览器
                 （M1.5 gate：desktopMainIpcRemote OpenExternal 在实例身份∧isOmnicodeAuthorizeUrl
-                时改投 instanceAuthWindow），等待态"浏览器没打开？复制登录链接"占位在内置
-                浏览器已打开的场景纯属误导。omnicode flavor 改为主动"跳转至专属浏览器"主按钮
-                （行为与 startLogin 相同的 platform.openExternal(authorizeUrl)：实例 gate 再次
-                拉起内置授权窗，instanceAuthWindow 单例语义=销毁旧窗重新打开），其下保留一行
-                小号"或复制登录链接"兜底（剪贴板+toast，行为不变）。官方 flavor 该行原样保留
-                （硬红线零改动）。 */}
+                时改投 instanceAuthWindow）。等待态第三行同构官方"浏览器没打开？ 复制登录链接"
+                的提示+文字链接形态：文案「浏览器没打开？」+ 文字按钮「跳转至专属浏览器」。
+                R1-P2-1：文字按钮行为升级为重新发起——走与点击 provider 相同的 startTrackedLogin
+                （fresh startOAuthWithPolling 换新 state/authorizeUrl 后，由 useOAuth.startLogin 内
+                的 platform.openExternal 经实例 gate 拉起内置授权窗），不再重开可能已过期的旧
+                authorizeUrl（旧实现重开旧 URL 有 ≤1s 过期竞态：过期 state 回调会被 handleDeepLink
+                拒收、授权窗最长挂 300s）。服务层 oauthFlowStartGeneration 与 hook 层
+                loginAttemptRef 双代次护栏保证旧 flow 的迟到 init/轮询/超时不会覆盖新 flow；
+                传入当前 loginEntryAttempt id 保持连接/购买意图（同一条流程重发不算换流程）。
+                官方"或复制登录链接"兜底对 omnicode 无意义（内置授权窗常驻，无需绕道系统浏览器），
+                不保留。官方 flavor 该行原样保留（硬红线零改动）。 */}
             {ZCODE_PRODUCT_FLAVOR === "omnicode" ? (
               authorizeUrl ? (
-                <div className="mt-4 flex flex-col items-center gap-1.5">
-                  <Button
-                    variant="default"
-                    className="h-10 w-full text-ui-base"
-                    size="lg"
-                    data-testid={TID_OAUTH_REOPEN_AUTH_BROWSER}
-                    onClick={() => void platform.openExternal(authorizeUrl)}
-                  >
-                    {intl.formatMessage({ id: "login.oauth.openInstanceAuthBrowser" })}
-                  </Button>
+                <div className="mt-4 flex h-7 items-center justify-center gap-1 text-center text-ui-sm text-foreground-subtle">
+                  <span>{intl.formatMessage({ id: "login.oauth.browserNotOpened" })}</span>
                   <button
                     type="button"
-                    className="text-ui-sm text-foreground-subtle underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    data-testid={TID_OAUTH_COPY_LOGIN_LINK}
-                    onClick={() => void handleCopyLoginLink()}
+                    className="font-medium text-brand underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    data-testid={TID_OAUTH_REOPEN_AUTH_BROWSER}
+                    onClick={() => {
+                      // 等待态必有 pendingProvider（startLogin 设置、cancel/reset 清空）；
+                      // 空值防御直接忽略，不给状态机注入无 provider 的重新发起。
+                      if (!pendingProvider) {
+                        return;
+                      }
+                      void startTrackedLogin(
+                        pendingProvider,
+                        undefined,
+                        activeLoginEntryAttemptRef.current?.id,
+                      );
+                    }}
                   >
-                    {intl.formatMessage({ id: "login.oauth.copyLoginLinkFallback" })}
+                    {intl.formatMessage({ id: "login.oauth.openInstanceAuthBrowser" })}
                   </button>
                 </div>
               ) : (
@@ -878,38 +888,9 @@ function LoginPanelLogo() {
   );
 }
 
-function getProviderPriority(provider: OAuthProviderMeta): number {
-  switch (provider.id) {
-    // 保持内置 provider 的稳定顺序；登录入口固定取 Z.ai，其余 provider 只服务于显式连接请求。
-    case ZAI_PROVIDER_ID:
-      return 0;
-    case BIGMODEL_PROVIDER_ID:
-      return 1;
-    default:
-      return 10 + provider.order;
-  }
-}
-
-export function resolveVisibleLoginProviders(
-  providers: OAuthProviderMeta[],
-  options?: { flavor?: ZCodeProductFlavor },
-): OAuthProviderMeta[] {
-  // [OmniCode] 批次3 T5：omnicode flavor 的登录首屏隐藏 zai_cn。官方凭据库**故意**排除
-  // zai_cn 会话（oauthCredentialRepo.materialFromSnapshot："中国区 OAuth 不能被当成全球区
-  // 业务凭据"，direct = loginProvider === family 对 zai_cn 永不成立，loadOAuthFamilyTokenSet
-  // 同样只认 zai/bigmodel）——zai_cn 登录"成功"却拿不到 zai 家族材料，表现为额度显示为空、
-  // agent 请求报 Account request credential is unavailable。登录按钮列表与"连接 Z.ai 继续使用"
-  // 几乎无法区分，是用户必踩的坑，故首屏不展示。provider adapter 与设置页显式连接入口保留
-  //（linkedBigModel 账号关联依赖 zai_cn 的上游授权）。官方 flavor 渲染零改动（硬红线）。
-  const visible =
-    (options?.flavor ?? ZCODE_PRODUCT_FLAVOR) === "omnicode"
-      ? providers.filter((provider) => provider.id !== ZAI_CN_PROVIDER_ID)
-      : providers;
-  // 保持 Z.ai 在前、BigModel 在后的稳定顺序。
-  return [...visible].sort((left, right) => {
-    return getProviderPriority(left) - getProviderPriority(right);
-  });
-}
+// [OmniCode] 批次3 T5（R1-P2-4）：登录首屏可见 provider 过滤抽离至 loginVisibleProviders.ts
+//（纯函数 + desktop 工程测试覆盖）；保留 WelcomeScreen 的既有导出面（历史导出者）。
+export { resolveVisibleLoginProviders } from "./loginVisibleProviders.js";
 
 // [OmniCode] 登录面回退（方案 A2）：以下三件 helper 自 v3.17.2 恢复（按钮文案、
 // 区域徽标、区域标签渲染），配合多 provider 列表渲染。

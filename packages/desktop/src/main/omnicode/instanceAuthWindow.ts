@@ -34,6 +34,10 @@ const AUTH_WINDOW_TIMEOUT_MS = 300_000;
 
 let currentWindow: BrowserWindow | null = null;
 let currentTimeout: NodeJS.Timeout | null = null;
+/** 当前窗口归属的实例分区（与 profileId 一一对应），用于单例复用判定。 */
+let currentProfileId: string | null = null;
+/** 当前窗口加载的授权 URL；同 URL 复用、换 URL 才销毁重建（R1-P2-2）。 */
+let currentUrl: string | null = null;
 
 function destroyCurrent(reason: string): void {
   if (currentTimeout) {
@@ -44,6 +48,8 @@ function destroyCurrent(reason: string): void {
     currentWindow.destroy();
     currentWindow = null;
   }
+  currentProfileId = null;
+  currentUrl = null;
   if (reason) {
     // 保留日志钩子；正常关闭与超时都走这里。
   }
@@ -59,7 +65,28 @@ export function openOmnicodeInstanceAuthWindow(input: OpenOmnicodeInstanceAuthWi
     return { ok: false };
   }
 
-  // 同一实例同时只允许一个授权窗口：新调用销毁旧窗口（与 Cockpit 行为一致）
+  // 同一实例同时只允许一个授权窗口（单例）。R1-P2-2：已存在同 profile、同 URL 的授权窗时
+  // 只聚焦抬前台，不销毁重建——连点"重新发起并跳转"或重复 openExternal 不再丢授权页内
+  // 未完成的输入（手机号/验证码、已过的确认页步骤）。URL 变了（新一轮 startOAuthWithPolling
+  // 换了 state）才销毁重建：旧 URL 属于已被替换的 flow，其回调 state 会被官方 handleDeepLink
+  // 拒收，留旧窗只会让用户在失效页上白等。300s 超时归属原窗口原流程，复用路径不重置。
+  if (
+    currentWindow &&
+    !currentWindow.isDestroyed() &&
+    currentProfileId === profileId &&
+    currentUrl === url
+  ) {
+    if (currentWindow.isMinimized()) {
+      currentWindow.restore();
+    }
+    currentWindow.show();
+    currentWindow.moveTop();
+    currentWindow.focus();
+    logger.info("[omnicode-auth-window] 已有同 URL 授权窗口，聚焦现有窗口（不重建）");
+    return { ok: true };
+  }
+
+  // 单例顶替：仅发生在 URL 变化（新授权流程）时
   destroyCurrent("");
 
   const win = new BrowserWindow({
@@ -78,6 +105,8 @@ export function openOmnicodeInstanceAuthWindow(input: OpenOmnicodeInstanceAuthWi
     },
   });
   currentWindow = win;
+  currentProfileId = profileId;
+  currentUrl = url;
 
   currentTimeout = setTimeout(() => {
     logger.warn("[omnicode-auth-window] 授权超时（300s），窗口已关闭");
