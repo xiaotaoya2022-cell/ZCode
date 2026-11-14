@@ -11,6 +11,8 @@
   简体中文 | <a href="README.en.md">English</a>
 </p>
 
+> **Fork 说明**：本仓库是 [OmniCode](https://github.com/xiaotaoya2022-cell/OmniCode)（多实例管理中枢）的源码主线 fork —— `main` 为 OmniCode 魔改主线，`official` 为官方镜像同步基线，上游为 [zai-org/ZCode](https://github.com/zai-org/ZCode)。产品下载、发布说明与许可声明见 [OmniCode 产品仓 README](https://github.com/xiaotaoya2022-cell/OmniCode#readme)。以下为官方 README 原样保留，官方构建与运行路径未做改动。
+
 ZCode 是 AI 编程工作台，提供桌面应用、浏览器界面和终端 Agent。本仓库包含客户端、后端服务、共享 UI，以及 Agent CLI 与运行时源码。
 
 ## 更新
