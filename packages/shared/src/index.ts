@@ -272,6 +272,9 @@ export type {
   OmnicodeConsoleEmbedLayoutInput,
   OmnicodeConsoleEmbedRect,
   OmnicodeConsolePreviewStateInput,
+  // [OmniCode] 批次3 停靠重构：内嵌 resize 手柄数学契约类型（B 套件 c）
+  OmnicodeEmbedResizeEdge,
+  OmnicodeEmbedResizeDragInput,
   // [OmniCode] 批次2.5 X1/X2：性能面板契约 + 登录态健康度（spec: docs/omnicode/console-extras.md）
   OmnicodePerfPanelStateInput,
   OmnicodePerfEventPayload,
@@ -332,6 +335,14 @@ export type {
   WSLDistro,
   WindowControlsOverlayReadyPayload,
   ZCodeStdioTapDevState,
+} from "./platform.js";
+// [OmniCode] 批次3 停靠重构：内嵌最低规格常量 + 每实例停靠解析 + resize 手柄数学
+//（运行时纯函数；renderer 卡片贴合/手柄与 main owned 编排共用，B 套件 a/b/c）
+export {
+  OMNICODE_EMBED_MIN_WIDTH,
+  OMNICODE_EMBED_MIN_HEIGHT,
+  resolveOmnicodeInstanceDocked,
+  resolveOmnicodeEmbedResizeHeightCss,
 } from "./platform.js";
 export type {
   CuaAccessibilitySettingsResult,

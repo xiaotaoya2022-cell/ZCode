@@ -182,16 +182,16 @@ declare global {
       adoptOmnicodeConsole?(payload: {
         name: string;
       }): Promise<{ profile: import("@zcode/shared").OmnicodeProfileSummaryInfo }>;
-      /** [OmniCode] 批次2 B2-3：读控制台 UI 状态（内嵌/桌面模式 + 预览开关，持久化） */
+      /** [OmniCode] 批次2 B2-3：读控制台 UI 状态（每实例停靠态 + 预览开关，持久化） */
       getOmnicodeConsoleUiState?(): Promise<import("@zcode/shared").OmnicodeConsoleUiState>;
-      /** [OmniCode] 批次2 B2-3：更新控制台 UI 状态（模式切换触发 owned 编排/解除） */
+      /** [OmniCode] 批次2 B2-3：更新控制台 UI 状态（dock 变化触发 owned 编排/解除） */
       setOmnicodeConsoleUiState?(
         payload: import("@zcode/shared").OmnicodeConsoleUiStatePatch,
       ): Promise<import("@zcode/shared").OmnicodeConsoleUiState>;
       /** [OmniCode] 批次2 B2-3：内嵌跟随——上报卡片画面区矩形（客户区 CSS px + 视口尺寸） */
       sendOmnicodeEmbedLayout?(
         payload: import("@zcode/shared").OmnicodeConsoleEmbedLayoutInput,
-      ): Promise<{ ok: boolean }>;
+      ): Promise<{ ok: boolean; scale: number | null }>;
       /** [OmniCode] 批次2 B2-3：实时预览订阅（总开关 + 视口内卡片集合） */
       setOmnicodePreviewState?(
         payload: import("@zcode/shared").OmnicodeConsolePreviewStateInput,

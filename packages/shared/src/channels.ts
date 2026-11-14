@@ -998,7 +998,7 @@ export interface PlatformChannelMap {
     request: OmnicodeConsoleAdoptInput;
     response: { profile: OmnicodeProfileSummaryInfo };
   };
-  // [OmniCode] 批次2 B2-3：控制台 UI 状态（mode/previewEnabled，持久化 console-ui.json）
+  // [OmniCode] 批次2 B2-3：控制台 UI 状态（每实例停靠态/预览开关，持久化 console-ui.json）
   [PlatformChannels.OmnicodeConsoleUiStateGet]: {
     request: void;
     response: OmnicodeConsoleUiState;
@@ -1008,9 +1008,11 @@ export interface PlatformChannelMap {
     response: OmnicodeConsoleUiState;
   };
   // [OmniCode] 批次2 B2-3：内嵌跟随——rects 为窗口客户区 CSS 像素（含 viewport 尺寸供 zoom 换算）
+  // [OmniCode] 批次3 停靠重构：响应携带本轮 CSS→DIP 纵向换算比例（renderer 侧 resize
+  // 手柄数学按比例钳制下限，保证换算后屏幕矩形 ≥96 DIP；不可得时为 null=按 1 兜底）。
   [PlatformChannels.OmnicodeConsoleEmbedLayout]: {
     request: OmnicodeConsoleEmbedLayoutInput;
-    response: { ok: boolean };
+    response: { ok: boolean; scale: number | null };
   };
   // [OmniCode] 批次2 B2-3：实时预览订阅（总开关 + 可见卡片集合）
   [PlatformChannels.OmnicodeConsolePreviewState]: {

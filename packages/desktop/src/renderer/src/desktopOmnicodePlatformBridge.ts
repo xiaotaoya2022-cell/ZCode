@@ -74,13 +74,16 @@ export const desktopOmnicodePlatformBridge = {
   // 或旧 preload——ConsoleHome 不渲染于官方 flavor，缺席面无消费方）。
   getOmnicodeConsoleUiState: (): Promise<OmnicodeConsoleUiState> =>
     window.zcode.getOmnicodeConsoleUiState?.() ??
-    Promise.resolve({ mode: "embedded", previewEnabled: true }),
+    // [OmniCode] 批次3 停靠重构：缺省=全部停靠（旧全局 mode 字段已退役）
+    Promise.resolve({ dockDefault: true, dockedByProfileId: {}, previewEnabled: true }),
   setOmnicodeConsoleUiState: (
     payload: OmnicodeConsoleUiStatePatch,
   ): Promise<OmnicodeConsoleUiState> =>
     requireBridge(window.zcode.setOmnicodeConsoleUiState?.(payload)),
-  sendOmnicodeEmbedLayout: (payload: OmnicodeConsoleEmbedLayoutInput): Promise<{ ok: boolean }> =>
-    window.zcode.sendOmnicodeEmbedLayout?.(payload) ?? Promise.resolve({ ok: false }),
+  sendOmnicodeEmbedLayout: (
+    payload: OmnicodeConsoleEmbedLayoutInput,
+  ): Promise<{ ok: boolean; scale: number | null }> =>
+    window.zcode.sendOmnicodeEmbedLayout?.(payload) ?? Promise.resolve({ ok: false, scale: null }),
   setOmnicodePreviewState: (
     payload: OmnicodeConsolePreviewStateInput,
   ): Promise<{ ok: boolean }> =>

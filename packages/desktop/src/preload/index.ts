@@ -445,7 +445,7 @@ contextBridge.exposeInMainWorld("zcode", {
           ipcRenderer.invoke(PlatformChannels.OmnicodeConsoleUiStateSet, payload),
         sendOmnicodeEmbedLayout: (
           payload: OmnicodeConsoleEmbedLayoutInput,
-        ): Promise<{ ok: boolean }> =>
+        ): Promise<{ ok: boolean; scale: number | null }> =>
           ipcRenderer.invoke(PlatformChannels.OmnicodeConsoleEmbedLayout, payload),
         setOmnicodePreviewState: (
           payload: OmnicodeConsolePreviewStateInput,

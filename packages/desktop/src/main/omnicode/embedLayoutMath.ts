@@ -1,14 +1,11 @@
 // [OmniCode] 批次2 B2-3：内嵌布局纯函数（spec: docs/omnicode/profile-runtime.md §批次2 D9）。
 // 双端共用：实例侧 embedLayout 矩形校验 + 管理器侧客户区→屏幕 DIP 换算。
 // 全部为无副作用纯函数，单测登记 scripts/engineering-test-files.json。
+// [OmniCode] 批次3 停靠重构：内嵌最低规格常量上移 @zcode/shared（renderer resize
+// 手柄数学共用同一事实源）；此处 re-export 保持既有 desktop 导入面不变。
+import { OMNICODE_EMBED_MIN_HEIGHT, OMNICODE_EMBED_MIN_WIDTH } from "@zcode/shared";
 
-/**
- * 内嵌窗口最低规格。低于 arrange 的 200×150（spec §4.2 "参考"语义）：内嵌卡片格子由
- * minmax(~280px) 网格 + 真实宽高比 letterbox 决定，21:9 等宽比例卡片画面区高度会低于
- * 150px，沿用 arrange 下限会拒绝合法格子；160×96 覆盖常规网格下限并仍拦截退化矩形。
- */
-export const OMNICODE_EMBED_MIN_WIDTH = 160;
-export const OMNICODE_EMBED_MIN_HEIGHT = 96;
+export { OMNICODE_EMBED_MIN_WIDTH, OMNICODE_EMBED_MIN_HEIGHT };
 
 /** 管理器/实例窗口句柄（HWND）十六进制形态："0x" + 1..16 位 hex（64 位指针上限）。 */
 const OMNICODE_HWND_HEX_PATTERN = /^0x[0-9a-f]{1,16}$/iu;
@@ -120,5 +117,29 @@ export function convertOmnicodeClientRectToScreen(
     y: Math.round(contentY + rect.y * scaleY),
     width: Math.max(0, Math.round(rect.width * scaleX)),
     height: Math.max(0, Math.round(rect.height * scaleY)),
+  };
+}
+
+/**
+ * [OmniCode] 批次3 停靠重构（B 套件 c 配套）：屏幕矩形钳制到内嵌最低规格（纯函数）。
+ * resize 手柄场景 renderer 侧已按 scale 钳制，此处兜底（scale 镜像滞后/损坏时）：
+ * 宽/高向上钳到 ≥160×96、x/y 保持不变——保持窗口与卡片可换算一致，而非丢弃矩形让
+ * 窗口停留旧位置（旧行为为直接丢弃，窗口会脱卡）。非有限值原样透传（由调用方
+ * isOmnicodeEmbedRectUsable 复核丢弃）。
+ */
+export function clampOmnicodeScreenRectToEmbedMinimum(rect: OmnicodeScreenRect): OmnicodeScreenRect {
+  if (
+    !Number.isFinite(rect.x) ||
+    !Number.isFinite(rect.y) ||
+    !Number.isFinite(rect.width) ||
+    !Number.isFinite(rect.height)
+  ) {
+    return rect;
+  }
+  return {
+    x: rect.x,
+    y: rect.y,
+    width: Math.max(OMNICODE_EMBED_MIN_WIDTH, rect.width),
+    height: Math.max(OMNICODE_EMBED_MIN_HEIGHT, rect.height),
   };
 }

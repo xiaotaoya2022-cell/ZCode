@@ -491,12 +491,18 @@ export interface OmnicodeInstanceEventPayload {
 
 /**
  * [OmniCode] 批次2 B2-3：控制台 UI 状态（管理器持久化 console-ui.json，spec §批次2 D9）。
- * mode 为全局开关：内嵌=实例窗口 owned 进卡片画面区；桌面=独立窗口+模糊预览。
+ * [OmniCode] 批次3 停靠重构：全局 mode（embedded/desktop 二值）退役，改为**每实例停靠态**
+ * ——docked=true 停靠（窗口 owned 进卡片画面区）、false 拖出（独立桌面窗口+模糊监控卡片）。
+ * 落盘形态 = 全局默认（dockDefault，迁移自旧 mode）+ 每实例覆盖表（dockedByProfileId，
+ * 缺省键 = 跟随 dockDefault）；`resolveOmnicodeInstanceDocked` 为唯一解析口径。
  * [OmniCode] 批次2.5 X1：perfPanelOpen（性能面板开关记忆，可选字段——旧档缺省=关，
  * spec: docs/omnicode/console-extras.md §X1）。
  */
 export interface OmnicodeConsoleUiState {
-  mode: "embedded" | "desktop";
+  /** 全局默认停靠态（旧档案 mode 一次性迁移：embedded→true / desktop→false）。 */
+  dockDefault: boolean;
+  /** 每实例停靠覆盖（profileId → docked；缺省键 = 跟随 dockDefault）。 */
+  dockedByProfileId: Record<string, boolean>;
   previewEnabled: boolean;
   perfPanelOpen?: boolean;
   /**
@@ -514,7 +520,12 @@ export interface OmnicodeConsoleUiState {
 
 /** UI 状态部分更新（字段缺省=不变；非法值在 main 侧归一后落盘）。 */
 export interface OmnicodeConsoleUiStatePatch {
-  mode?: "embedded" | "desktop";
+  /** 全局默认停靠态直改（UI 批量按钮走 dockAll，此字段供存储层/工具直接写）。 */
+  dockDefault?: boolean;
+  /** 批量停靠/拖出：dockDefault=v 且清空每实例覆盖表（收敛到全局语义）。 */
+  dockAll?: boolean;
+  /** 单实例停靠/拖出（写 dockedByProfileId 覆盖键）。 */
+  dockInstance?: { profileId: string; docked: boolean };
   previewEnabled?: boolean;
   perfPanelOpen?: boolean;
   autoClaimEnabled?: boolean;
@@ -554,6 +565,62 @@ export interface OmnicodeConsoleEmbedLayoutInput {
   viewportWidth: number;
   viewportHeight: number;
   rects: OmnicodeConsoleEmbedRect[];
+}
+
+/**
+ * [OmniCode] 批次3 停靠重构：内嵌窗口最低规格（单一事实源，desktop embedLayoutMath
+ * 转为 re-export 保持既有导入面）。低于 arrange 的 200×150：内嵌卡片格子由网格 minmax
+ * 与真实宽高比决定，21:9 卡片画面区高度会低于 150px；160×96 覆盖常规网格下限并仍拦截
+ * 退化矩形（resize 手柄拖拽同样受此约束）。
+ */
+export const OMNICODE_EMBED_MIN_WIDTH = 160;
+export const OMNICODE_EMBED_MIN_HEIGHT = 96;
+
+/**
+ * [OmniCode] 批次3 停靠重构（B 套件 a/b/c 贴合三件套之一——每实例停靠态解析）：
+ * 停靠态唯一解析口径——每实例覆盖表命中（布尔合法值）优先，否则回退全局默认；
+ * 双缺省（旧档字段缺失/损坏）回退停靠（true，与"默认 true=停靠"一致）。
+ * 纯函数：renderer（卡片隐藏底图/手柄/遮罩判定）与 main（owned 编排）共用。
+ */
+export function resolveOmnicodeInstanceDocked(
+  state: Pick<OmnicodeConsoleUiState, "dockDefault" | "dockedByProfileId">,
+  profileId: string,
+): boolean {
+  const override = state.dockedByProfileId?.[profileId];
+  if (typeof override === "boolean") return override;
+  return state.dockDefault !== false;
+}
+
+/** 内嵌画面区可拖拽调高的边缘（停靠卡片 resize 手柄命中区）。 */
+export type OmnicodeEmbedResizeEdge = "top" | "bottom" | "left" | "right";
+
+export interface OmnicodeEmbedResizeDragInput {
+  edge: OmnicodeEmbedResizeEdge;
+  /** 拖拽起点画面区高度（CSS px）。 */
+  startHeightCss: number;
+  /** 指针累计位移（CSS px；相对拖拽起点）。 */
+  dxCss: number;
+  dyCss: number;
+  /**
+   * CSS px → 屏幕 DIP 的纵向换算比例（main 随 EmbedLayout 上报响应回传
+   * contentHeight/viewportHeight；≤0 或缺失按 1 兜底）。
+   */
+  scaleY: number;
+}
+
+/**
+ * [OmniCode] 批次3 停靠重构（B 套件 c——停靠卡片 resize 手柄数学，纯函数）：
+ * 卡片为唯一权威（网格列宽固定 → 窗口宽度跟随卡片），四边手柄统一调"画面区高度"
+ * （上下边映射 dy、左右边映射 dx 的 1:1 手感），下限 = 内嵌最低高度换算回 CSS
+ *（OMNICODE_EMBED_MIN_HEIGHT / scaleY——保证换算后的屏幕矩形不低于 96 DIP，
+ * main 侧 clamp 只作防御、不产生"窗口高于卡片"的错位）。返回新画面区高度（CSS px）。
+ */
+export function resolveOmnicodeEmbedResizeHeightCss(input: OmnicodeEmbedResizeDragInput): number {
+  const scale = typeof input.scaleY === "number" && Number.isFinite(input.scaleY) && input.scaleY > 0 ? input.scaleY : 1;
+  const delta =
+    input.edge === "bottom" ? input.dyCss : input.edge === "top" ? -input.dyCss : input.edge === "right" ? input.dxCss : -input.dxCss;
+  const minHeightCss = OMNICODE_EMBED_MIN_HEIGHT / scale;
+  return Math.max(minHeightCss, input.startHeightCss + delta);
 }
 
 /** 实时预览订阅状态：总开关（默认开）+ 视口内运行中卡片集合（IntersectionObserver）。 */
@@ -1261,17 +1328,21 @@ export interface IPlatformService {
     input: OmnicodeConsoleAdoptInput,
   ): Promise<{ profile: OmnicodeProfileSummaryInfo }>;
   /**
-   * [OmniCode] 批次2 B2-3：读控制台 UI 状态（内嵌/桌面模式 + 实时预览开关，持久化）。
+   * [OmniCode] 批次2 B2-3：读控制台 UI 状态（每实例停靠态 + 实时预览开关，持久化）。
    * 仅管理器 Desktop。
    */
   getOmnicodeConsoleUiState?(): Promise<OmnicodeConsoleUiState>;
-  /** 更新控制台 UI 状态；mode 变化触发内嵌 owned / 解除编排（spec §批次2 D9）。仅管理器 Desktop。 */
+  /** 更新控制台 UI 状态；dock 字段变化触发 owned 编排/解除（spec §批次2 D9）。仅管理器 Desktop。 */
   setOmnicodeConsoleUiState?(input: OmnicodeConsoleUiStatePatch): Promise<OmnicodeConsoleUiState>;
   /**
    * [OmniCode] 批次2 B2-3：内嵌跟随——上报卡片画面区矩形（客户区 CSS 像素 + 视口尺寸），
-   * main 换算屏幕 DIP 后经桥 embedLayout 下发（renderer rAF+~60ms 节流）。仅管理器 Desktop。
+   * main 换算屏幕 DIP 后经桥 embedLayout 下发（renderer rAF+~60ms 节流）。响应携带本轮
+   * CSS→DIP 纵向换算比例（null=不可得，renderer 按 1 兜底）。仅管理器 Desktop。
    */
-  sendOmnicodeEmbedLayout?(input: OmnicodeConsoleEmbedLayoutInput): Promise<{ ok: boolean }>;
+  sendOmnicodeEmbedLayout?(input: OmnicodeConsoleEmbedLayoutInput): Promise<{
+    ok: boolean;
+    scale: number | null;
+  }>;
   /**
    * [OmniCode] 批次2 B2-3：实时预览订阅状态（总开关 + 视口内卡片集合；关=退订全部，
    * 卡片停留最后一帧灰暗化）。仅管理器 Desktop。
