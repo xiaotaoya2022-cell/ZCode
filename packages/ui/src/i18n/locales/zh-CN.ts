@@ -1675,6 +1675,9 @@ const zhCN: Record<string, string> = {
   "login.oauth.waiting": "等待 {provider} 完成认证...",
   "login.oauth.browserNotOpened": "浏览器没打开？",
   "login.oauth.copyLoginLink": "复制登录链接",
+  // [OmniCode] 批次3 T3：omnicode 实例窗口等待态主按钮（重新拉起内置专属授权窗）与小号复制兜底链接
+  "login.oauth.openInstanceAuthBrowser": "跳转至专属浏览器",
+  "login.oauth.copyLoginLinkFallback": "或复制登录链接",
   "login.oauth.copyLinkSuccess": "复制成功，请到浏览器中粘贴并打开",
   "login.oauth.copyLinkFailed": "复制登录链接失败，请重试",
   "login.oauth.loginFailure": "登录失败，请重试",
@@ -3904,6 +3907,10 @@ const zhCN: Record<string, string> = {
   "welcome.omnicodeInstancesHint":
     "创建独立实例并启动并行工作；每个实例有自己的登录态与数据，互不串扰。",
   "welcome.loginToggle": "连接账号以使用主实例（可选）",
+  // [OmniCode] 批次3 T4：omnicode 实例窗口合并后的单卡标题/副题（登录写入本实例自身数据根凭据）
+  "welcome.instanceLoginTitle": "连接账号以使用 ZCode",
+  "welcome.instanceLoginHint":
+    "登录后即可在此实例开始工作；实例的创建与管理请回到 OmniCode 管理器。",
   "settings.omnicodeProfiles.description":
     "为每个账号创建独立隔离的 ZCode 实例：凭据、会话、浏览器存储互不相通，重启不掉线。启动的实例与本窗口并行运行。",
   "settings.omnicodeProfiles.namePlaceholder": "实例名称（如：工作号）",
