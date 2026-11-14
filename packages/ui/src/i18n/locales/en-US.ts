@@ -4091,6 +4091,7 @@ const enUS: Record<string, string> = {
   "console.adoptionTitle":
     "Previous main setup detected — adopt it as an instance to keep its sign-in and history.",
   "console.adoptionAction": "Adopt",
+  "console.backToManager": "Back to manager",
   "console.adoptionConfirmTitle": "Adopt the previous main setup",
   "console.adoptionConfirmDescription":
     "A new instance pointing at the previous OmniCode console data directory will be created (zero-copy). Its sign-in state and conversation history are preserved as-is.",

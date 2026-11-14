@@ -519,6 +519,12 @@ function RootInner({
   const activeTab = activeTabId ? (tabs.find((tab) => tab.id === activeTabId) ?? null) : null;
   const activeWorkspaceTab = activeTab && isWorkspaceTab(activeTab) ? activeTab : null;
   const isSettingsTabActive = activeTab ? isSettingsTab(activeTab) : false;
+  // [OmniCode] 管理器身份判定（omnicode flavor ∧ 无实例 id，与下方 ConsoleHome 早返回
+  // 同口径）。提取为常量供三处复用：兜底 workspace effect 门禁（:1283 起）、
+  // settingsLayerProps 管理器 onBack/分区过滤注入、ConsoleHome 早返回门禁。
+  // 官方 flavor 该值恒为 false，所有引用分支与官方路径逐行原样。
+  const isOmnicodeManagerConsole =
+    ZCODE_PRODUCT_FLAVOR === "omnicode" && (platform.omnicodeInstanceId ?? null) === null;
   const {
     workspaceShellPath,
     workspaceIdentity: workspaceShellIdentity,
@@ -1291,6 +1297,10 @@ function RootInner({
       isStartupProviderLoginEntryOpen ||
       workspaceShellPath ||
       isSettingsTabActive ||
+      // [OmniCode] 管理器永不兜底建默认 workspace：早返回只挡渲染不挡 hooks，若不在此
+      // 门禁，启动空栈或设置 tab 关闭瞬间会在管理器数据根（~/.omnicode/console）凭空
+      // 创建“可干活”的默认 workspace，违背管理器纯管理中枢红线（批次2a 架构）。
+      isOmnicodeManagerConsole ||
       !allowOpenWorkspace ||
       didRequestFallbackWorkspaceRef.current
     ) {
@@ -1336,6 +1346,7 @@ function RootInner({
     allowOpenWorkspace,
     handleSelectConversationWorkspace,
     isBootstrappingInitialWorkspace,
+    isOmnicodeManagerConsole,
     isResolvingProviderStartupState,
     isResolvingStartupAuthState,
     isRestoring,
@@ -1611,13 +1622,34 @@ function RootInner({
     </ScopedErrorBoundary>
   );
 
+  // [OmniCode] 管理器设置页退出：无 workspace 时官方 onBack（激活最近 workspace）不适用，
+  // 这里注入 closeTab 语义——关闭设置 tab 后 activeTabId 归 null，早返回门禁重新生效，
+  // 渲染回到 ConsoleHome（调研 settings-architecture.md §1.4 指定的退出路径）。
+  const handleCloseManagerSettingsTab = useCallback(() => {
+    const state = tabStoreApi.getState();
+    const settingsTabId = state.tabs.find(isSettingsTab)?.id;
+    if (settingsTabId) {
+      state.closeTab(settingsTabId);
+    }
+  }, [tabStoreApi]);
+
   const settingsLayerProps = {
     isDesktop,
     isMacDesktop,
     isWindowsDesktop,
     isWebRemoteControl: Boolean(webRemoteControlWorkspaceSwitcher),
     captionWorkspacePath: activeWorkspacePath,
-    onBack: activeWorkspacePath ? handleBackFromSettings : undefined,
+    // [OmniCode] 管理器语境下 onBack 改为关闭设置 tab；官方路径保持
+    // activeWorkspacePath ? handleBackFromSettings : undefined 逐行原语义。
+    onBack: isOmnicodeManagerConsole
+      ? handleCloseManagerSettingsTab
+      : activeWorkspacePath
+        ? handleBackFromSettings
+        : undefined,
+    // [OmniCode] 管理器设置页无 workspace，返回钮文案不能沿用「返回工作区」。
+    backTitleMessageId: isOmnicodeManagerConsole ? "console.backToManager" : undefined,
+    // [OmniCode] 管理器语境分区过滤（无会话栈：只保留纯偏好 + 多实例分区）。
+    omnicodeManager: isOmnicodeManagerConsole,
     onOpenTask: handleOpenTaskFromSettings,
     onCreateTask: handleCreateTask,
     onOpenWorkspace: handleOpenWorkspace,
@@ -1633,8 +1665,10 @@ function RootInner({
   // 身份）才渲染 ConsoleHome；Profile 实例（omnicodeInstanceId 非空）走正常 ZCode 根
   // 渲染（工作台/欢迎登录屏，恢复官方路径；此前实例窗口也早返回 ConsoleHome，正是
   // “点击启动实例打开了另一个管理器”的根因，spec profile-runtime.md §批次2 D7）。
-  // 官方 flavor（production/preview）渲染路径与现状完全一致。
-  if (ZCODE_PRODUCT_FLAVOR === "omnicode" && (platform.omnicodeInstanceId ?? null) === null) {
+  // 批次3 设置入口：管理器开着设置 tab 时放行，落进下方既有
+  // 「!workspaceShellPath && isSettingsTabActive」全屏设置渲染分支（该分支本就不依赖
+  // workspace 存在）；官方 flavor 的 isOmnicodeManagerConsole 恒为 false，逐行原样。
+  if (isOmnicodeManagerConsole && !isSettingsTabActive) {
     return <ConsoleHome />;
   }
 
