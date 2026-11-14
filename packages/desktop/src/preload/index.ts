@@ -112,6 +112,11 @@ import type {
   OmnicodeConsolePreviewStateInput,
   OmnicodePerfPanelStateInput,
   OmnicodePerfEventPayload,
+  OmnicodeAccountSnapshotRequest,
+  OmnicodeAccountDashboardSnapshot,
+  OmnicodeAccountClaimRunRequest,
+  OmnicodeAccountClaimRunResult,
+  OmnicodeAccountClaimEventPayload,
   SSHConfigAliasOption,
   WebRemoteControlContext,
   WebRemoteControlReconnectWorkspaceRequest,
@@ -460,6 +465,22 @@ contextBridge.exposeInMainWorld("zcode", {
             callback(payload as OmnicodePerfEventPayload);
           ipcRenderer.on(PlatformChannels.OmnicodePerfEvent, handler);
           return () => ipcRenderer.removeListener(PlatformChannels.OmnicodePerfEvent, handler);
+        },
+        // [OmniCode] 批次3：登录态看板 / 赛博鸡蛋（数据层，spec:
+        // F:\OmniCode\docs\batch3\BATCH3-DESIGN-DISCUSSION.md §2/§3）
+        getOmnicodeAccountSnapshot: (
+          payload: OmnicodeAccountSnapshotRequest,
+        ): Promise<OmnicodeAccountDashboardSnapshot> =>
+          ipcRenderer.invoke(PlatformChannels.OmnicodeAccountSnapshotGet, payload),
+        runOmnicodeAccountClaim: (
+          payload: OmnicodeAccountClaimRunRequest,
+        ): Promise<OmnicodeAccountClaimRunResult> =>
+          ipcRenderer.invoke(PlatformChannels.OmnicodeAccountClaimRun, payload),
+        onOmnicodeAccountClaimEvent: (callback: (payload: OmnicodeAccountClaimEventPayload) => void) => {
+          const handler = (_event: unknown, payload: unknown) =>
+            callback(payload as OmnicodeAccountClaimEventPayload);
+          ipcRenderer.on(PlatformChannels.OmnicodeAccountClaimEvent, handler);
+          return () => ipcRenderer.removeListener(PlatformChannels.OmnicodeAccountClaimEvent, handler);
         },
       }
     : {}),
