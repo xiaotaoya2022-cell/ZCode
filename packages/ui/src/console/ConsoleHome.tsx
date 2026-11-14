@@ -3,10 +3,19 @@
 // 开关）+ 实例卡片网格（真实宽高比 letterbox 预览、双击放大、内嵌 owned-window 跟随）
 // + 旧控制台收养横幅 + 底栏（spec: docs/omnicode/profile-runtime.md §批次2 D9）。
 // 控制台自身不是可干活的 ZCode 实例（方案 A 拍板）；工作与登录都在实例窗口内完成。
-import { Download } from "lucide-react";
+import { Download, Globe } from "lucide-react";
+import { LOCALE_NATIVE_NAMES, SUPPORTED_LOCALES, type Locale } from "@zcode/shared";
+import { TID_LOCALE_TOGGLE } from "@zcode/shared/test-ids";
 import { ConsoleInstanceGrid } from "@/console/ConsoleInstanceGrid.js";
 import { DesktopOverlayWindowControls } from "@/DesktopOverlayWindowControls.js";
 import { Button } from "@/components/ui/button.js";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { useOmnicodeConsoleAdoption } from "@/settings/ProfileMultiInstanceSection.js";
 
@@ -19,18 +28,64 @@ export function ConsoleHome() {
       <DesktopOverlayWindowControls />
 
       <div className="relative z-10 mt-8 flex min-h-0 flex-1 flex-col gap-4">
-        <div className="flex shrink-0 flex-col gap-1">
-          <h1 className="text-ui-xl text-foreground">
-            {intl.formatMessage({ id: "console.homeTitle" })}
-          </h1>
-          <p className="text-ui-base text-foreground-subtle">
-            {intl.formatMessage({ id: "console.homeSubtitle" })}
-          </p>
+        <div className="flex shrink-0 items-start justify-between gap-3">
+          <div className="flex flex-col gap-1">
+            <h1 className="text-ui-xl text-foreground">
+              {intl.formatMessage({ id: "console.homeTitle" })}
+            </h1>
+            <p className="text-ui-base text-foreground-subtle">
+              {intl.formatMessage({ id: "console.homeSubtitle" })}
+            </p>
+          </div>
+          {/* [OmniCode] 批次3 T1：管理器首屏此前没有任何语言/设置入口（语言切换只在设置页
+              footer，而管理器永远不进设置页），用户观感"管理器不支持语言选择"。这里加最小
+              的语言下拉；[app-region:no-drag] 保证按钮不被顶部拖拽层吃掉点击。 */}
+          <div className="flex shrink-0 items-center gap-1 pt-1 [app-region:no-drag]">
+            <ConsoleHomeLocaleSwitcher />
+          </div>
         </div>
         <AdoptionBanner />
         <ConsoleInstanceGrid />
       </div>
     </main>
+  );
+}
+
+/**
+ * [OmniCode] 批次3 T1：管理器首屏语言切换下拉。复用 setLocalePreference（IntlProvider 的
+ * 持久化 + 跨窗口 broadcast 通道，切换后本窗口文案立即生效、实例窗口跟随广播）。
+ * 现成的 LocaleSwitcher 是单字符循环切换按钮（中/En/日…），5 语言可发现性差，不适合
+ * 管理器头部；这里按调研授权做轻量下拉，语言项显示各语言本名（不随界面语言翻译）。
+ */
+function ConsoleHomeLocaleSwitcher() {
+  const { intl, locale, setLocalePreference } = useZCodeIntl();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-md"
+          data-testid={TID_LOCALE_TOGGLE}
+          aria-label={intl.formatMessage({ id: "locale.switchLanguage" })}
+          title={intl.formatMessage({ id: "locale.switchLanguage" })}
+        >
+          <Globe className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-44">
+        {/* 当前生效语言高亮（locale 为解析后的具体语言；"跟随系统"偏好解析出的语言同样高亮） */}
+        <DropdownMenuRadioGroup
+          value={locale}
+          onValueChange={(value) => setLocalePreference(value as Locale)}
+        >
+          {SUPPORTED_LOCALES.map((item) => (
+            <DropdownMenuRadioItem key={item} value={item} lang={item}>
+              {LOCALE_NATIVE_NAMES[item]}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

@@ -180,6 +180,10 @@ function applyCommand(command: { type?: string; bounds?: unknown; path?: unknown
     case "focus":
       if (win.isMinimized()) win.restore();
       win.show();
+      // [OmniCode] 批次3 T2：Windows 前台锁会拦截后台进程的 focus 激活（SetForegroundWindow
+      // 限制），实例窗口可能仍被管理器或其他窗口盖住。moveTop 无条件把窗口提到 Z 序最前
+      //（只抬升不抢激活权，规避前台锁），focus 随后尽力激活；被拦时窗口至少已置顶可见。
+      win.moveTop();
       win.focus();
       break;
     case "quit":
