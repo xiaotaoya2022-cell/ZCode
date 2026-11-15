@@ -1,6 +1,6 @@
 # OmniCode Profile Runtime（原生多开与实例隔离）
 
-> 状态：2026-11-10 M1 实现依据 ｜ 2026-11-12 修订：身份通道改 argv/env 直传（D6，handoff 退役）＋启动确认/串行链真串行/启动=重启/三段式优雅停 ｜ 上位设计：《ZCode 原生魔改版架构与实现方案报告》§2（OmniCode 仓 docs/）
+> 状态：2026-11-10 M1 实现依据 ｜ 2026-11-12 修订：身份通道改 argv/env 直传（D6，handoff 退役）＋启动确认/串行链真串行/启动=重启/三段式优雅停 ｜ 2026-11-15 修订：锁冲突处置改自动观察者（D11，对话框退役）｜ 上位设计：《ZCode 原生魔改版架构与实现方案报告》§2（OmniCode 仓 docs/）
 > 适用：`packages/desktop` 桌面端。本文是行为改动的 spec 事实源；实现与本文冲突时，先改本文。
 
 ## 目标与边界
@@ -182,12 +182,17 @@
 
 ### 只读观察者模式（用户拍板"子代理式观察者"）
 
-- **入口**：锁冲突对话框（`handleSelectProject` 捕获结构化错误后，omnicode 实例内弹确认框）提供「只读打开」；官方 flavor / 管理器保持纯 toast 拒绝。
+- **入口（D8 原始）→ D11 修订：自动观察者，对话框退役（2026-11-15 用户拍板）**：锁冲突不再弹窗拦截。`handleSelectProject` 捕获 `omnicode.workspace-locked-by-other` 结构化错误后，omnicode 实例内按 `resolveOmnicodeLockConflictOpenAction`（`packages/ui/src/root/omnicodeLockConflictOpen.ts` 纯函数）**按序决策**：
+  1. 同工作区已有观察者 tab（`findWorkspaceObserverHolder`）→ **仅激活既有 tab**，不重复 toast（状态判定）；
+  2. 首次判负且路径可安全重试（非 WSL UNC——重试会二次弹出 WSL 路由确认框）→ **补一次完整打开流**（saveProject reuse 幂等；经 `selectProjectRef` 自引用调度，不递归）：锁主刚退出则守卫放行按 **Normal 打开**（竞态自愈）；重试仍判负落回第 3 步；
+  3. 其余 → **直接以观察者（只读）身份打开** + 非模态 toast「该工作区正被实例 {name} 使用，已进入只读观察」（`omnicode.observer.openedToast`，displayName 优先回退 profileId；同工作区 3s 去重窗口兜底并发重复打开的微任务交错）。
+  锁冲突对话框（`useConfirmDialog` 确认框形态）随之退役——通用确认框 hook 保留（logout/WSL 路由确认等仍用），仅 omnicode 锁冲突确认框分支移除，`omnicode.observer.dialog.*` 四键（en/zh）同步清理。观察者打开仍不获取锁、不走 `activateOrSetWorkspace`。官方 flavor / 管理器保持纯 toast 拒绝（D8 语义，本修订不触碰）。
+- **取舍（D11）**：①观察者态建立后**锁释放不自动升级为可写**（避免输入焦点/会话状态中途突变；升级走既有 P1-1 链路——重开该工作区即拿锁转可写）②竞态自愈只补一次（两次 RPC 上限，无递归）③WSL UNC 路径不自动重试（避免二次确认框），UNC 冲突直接进观察者④Host 守卫、restore 预检、task-row 灰显拦截、混部告知层均不受本修订影响。
 - **观察者 → 可写升级（B2 评审修复 P1-1）**：锁释放后同一工作区再走正常打开（saveProject 守卫放行）时，`handleSelectProject` 成功分支先调 `tabStore.clearOmnicodeObserver(path)` 清除观察者标记再 addTab——否则 merge 语义（`options?.omnicodeObserver ?? tab.omnicodeObserver`）会让 tab 永远保持只读，且该工作区因观察者标记不进 `openLocalWorkspaces` 锁集合（第三实例可再打开 = 双开）。清除后锁集合采集（useTabPersistence 300ms debounce 写回）恢复包含该工作区。
 - **标记传递链路**：`tabStore` 工作区 tab 记录字段 `omnicodeObserver?: { holderProfileId: string; holderDisplayName?: string }`（addTab options 注入；**不持久化**——`buildPersistedWorkspaceSessionEntries` / `buildRemoteWorkspacePersistPatch`（lastActiveWorkspace）/ `collectOpenLocalWorkspacePaths`（锁集合事实源）三处均排除观察者 tab，重启后由 restore 预检重新裁决）。观察者打开不调 saveProject（被占用工作区必然已在共享注册表/本实例项目库中）、不走 `activateOrSetWorkspace`（纯查看，留在当前窗口）。
 - **受限面（诚实清单）**：观察者 tab 经 `isWorkspaceReadOnly` 进入官方 readOnly 链路（`workspaceReadOnlyReason` → SessionPane `readOnly`），由此获得：①会话输入禁用（composer 不渲染，原输入区显示观察者原因）②agent 命令 / 重试 / 编辑 / 副屏会话 / 文件拖入会话全部禁用 ③新建任务、Git 面板、终端等入口按官方 readOnly IfWritable 拦截 ④文件树本身为只读导航树（open/reveal/copy/另存副本导出，**无新建/重命名/删除/上传操作可禁**——官方桌面 UI 不存在这些操作，如实记录而非虚构禁用面）。
 - **退出语义**：关闭观察者 tab = 纯查看退出，不触碰任何锁（观察者从未持锁、不在锁集合）。
-- **持有者展示实例名（B2 评审修复，兑现 C5）**：锁文件携带 `displayName`（实例名）——profileBootstrap 注入 `OMNICODE_PROFILE_NAME` env（与 `OMNICODE_INSTANCE_TITLE` 同源于 profile.json；spawn env 双保险），锁协调器获取锁时写入锁文件；锁查询返回的 owner / readTree 装饰 / `workspace-locked-by-other` 结构化错误 data 均携带。横幅 / 锁冲突对话框 / toast / task-row 灰显 / restore 拒绝全部插值实例名（displayName 优先），老锁文件无该字段回退 profileId（兼容）。
+- **持有者展示实例名（B2 评审修复，兑现 C5）**：锁文件携带 `displayName`（实例名）——profileBootstrap 注入 `OMNICODE_PROFILE_NAME` env（与 `OMNICODE_INSTANCE_TITLE` 同源于 profile.json；spawn env 双保险），锁协调器获取锁时写入锁文件；锁查询返回的 owner / readTree 装饰 / `workspace-locked-by-other` 结构化错误 data 均携带。横幅 / 观察者 toast / task-row 灰显 / restore 拒绝全部插值实例名（displayName 优先），老锁文件无该字段回退 profileId（兼容）。
 - **横幅**：SessionPane 顶部常驻琥珀色横幅「观察者模式（只读）— 该工作区正被 <实例名> 使用」（i18n en/zh，`omnicode.observer.*`）。
 - **官方 flavor 混部告知层（B2 评审修复 P1-4）**：官方 ZCode 不查锁不拦截（官方零影响铁律），但打开工作区成功后以 readTree 的 `omnicodeWorkspaceLocks` 装饰做一次**只读查询**——若该工作区正被 OmniCode 实例持有则 Toast 告知并发写入风险（查询失败静默；纯官方环境无共享锁目录，天然零打扰）。边界：告知不改任何官方行为，锁的强制语义仍只在 omnicode 实例内成立。
 
@@ -198,7 +203,7 @@
 3. **外部编辑器写**：文件树"用编辑器打开/系统文件管理器"在外部进程写工作区文件——应用内锁无法约束外部进程（与批次1 相同边界）。
 4. **restore 预检路径归一**：Host 锁条目存 resolve 后路径，renderer 以大小写不敏感+去尾分隔符宽松归一比对；跨盘符大小写差异漏筛时退化为旧"恢复+灰显"软语义（fail-open，不产生双开硬拒绝缺口——灰显 tab 本身不可进入）。
 5. **persistSession 窗口期（批次1 已知，保持）**：恢复完成到 renderer 首次写回 `openLocalWorkspaces` 之间，协调器只持 lastActiveWorkspace 单活动锁；全集锁待首次写回补齐（单测锁定该现状语义）。
-6. **task-row 灰显项不提供观察者入口**（点击保持拒绝+提示）；观察者入口只在打开流（对话框/拖拽/recent/deep-link/桥）的锁冲突对话框。
+6. **task-row 灰显项不提供观察者入口**（点击保持拒绝+提示；D11 修订保持该 D1 灰显语义不变——灰显行的拒绝在 task-row 层先于打开流发生，不进入 `handleSelectProject` 冲突分支）；观察者入口只在打开流（对话框/拖拽/recent/deep-link/桥→`handleSelectProject`）的冲突分支，D11 起为自动观察者（弹窗退役）。
 
 ## 批次2 B2-3：控制台网格 + 内嵌/桌面双模式 + 预览升级（D9，2026-11-13）
 
@@ -292,3 +297,41 @@ Win32 owned window 随 owner 销毁——管理器窗口直接销毁会**连带�
 
 - 验收清单批次2 D4-D7（全局内嵌/桌面模式语义）由 OmniCode 仓 ACCEPTANCE-CHECKLIST 停靠语义重写取代（每实例拖出/收回/批量/贴合三件套）。
 - 已知限制追加：①手柄 resize 仅调"高度"（网格列宽固定，宽度跟卡）；②scale 首拍前按 1 兜底——极端缩放下首拖一次可能有 ≤1 帧的钳制修正；③迁移后旧 mode 字段不复存在，回滚到批次2 代码会读不到模式（回退到缺省 embedded）；④停靠窗口四周 6px 手柄带露出（P1-2 内缩方案的固有观感——下限矩形场景窗口内缩后钳回 ≥160×96，可能与卡片边缘有 ≤12px 偏差）。
+
+## 后台降载：实例预览三档帧生产（批次6，2026-11-15——降帧 + 停帧已实现，挂起候选）
+
+设计准则（README slogan）：多开 N 倍的是性能开支，不是能力的价值。实例的"帧生产"只指实例侧预览缩略图管线（instanceBridgeClient 的 capturePage 循环，≈1.4fps/实例）——窗口级 renderer 帧、agent 会话、WS 连接、网络活动均不受影响。三档定义：**降帧（第一档）→ 停帧（第二档）→ 挂起（第三档，候选未实现）**。
+
+### 底座现状（摸底结论，2026-11-15 核实）
+
+- **Chromium 原生节流默认开启**：管理器主窗口与实例主窗口的 webPreferences 均未设 backgroundThrottling=false（desktopWindowChrome.ts 主窗配置注释明确"窗口保持默认节流；截图期只临时唤醒 owner renderer 与当前目标 guest"）。隐藏/最小化/被完全遮挡（Windows 原生遮挡检测，desktopWindowChrome.ts 有 occluded 行为记录）的窗口 rAF 停止、timer 降至 1Hz——窗口级帧生产底座已覆盖，**不需要重复造轮子**。
+- **setFrameRate 不可用**：仅 offscreen 渲染生效（屏幕窗口 no-op），本仓仅 docs/electron 文档示例出现。降帧档只能自控自家生产循环频率。
+- **既有"不可见即暂停"链路（前序批次已覆盖）**：①D3 预览订阅对账（consoleEmbedding.resolveOmnicodePreviewSubscriptions = 总开关 ∧ 视口可见 ∧ 已连接）——滚出视口卡片自动退订，实例侧不再 capturePage；②X1 pause-invisible（perfMonitor resolveOmnicodePerfTickAction，管理器全窗口隐藏时停 spawn/广播保 tick）；③停靠实例滚出视口 → hide 命令 + Electron 底座节流。
+- **真缺口（本批次修）**：实例侧 capture 循环此前只跳过 `isMinimized()`——**被 hide 的停靠实例**（订阅对账时序窗口/管理器侧漏退订时）与**被完全遮挡的桌面实例**（isVisible()=true 且非最小化）仍按 700ms 照常调用 capturePage 强制合成器出帧；**可见但失焦**的实例无任何降频（1.4fps 恒定）。v0 注释自认"窗口隐藏/最小化时 capturePage 可能拿不到新帧"——接受的是帧内容 stale，没有停掉生产开销。
+
+### 停帧档（第二档）
+
+- 实例窗口 `!isVisible() || isMinimized()` → 停止 capturePage 调用（帧生产归零，tick 心跳保留 ≈ 一次 setTimeout 回调成本，与 X1 pause-invisible 同先例）。决策纯函数 `resolveOmnicodeCaptureFramePolicy({visible,minimized,focused})` → `"paused"|"inactive"|"active"`（分支序 paused > inactive > active，单测锁定）。
+- **覆盖面**：停靠 hide（可见性直判，不再依赖订阅对账先收敛）、最小化。被完全遮挡的桌面实例 Chromium 层面已停帧生产（capturePage 拿不到新帧，本批次补的可见失焦降频使其归入低频采样，表现=冻结），从 main 进程无 direct API 判定遮挡（Windows 原生检测只影响 renderer 侧 visibilityState），不引入 renderer 回路探测。
+- **恢复语义**：恢复可见后下一 tick（≤700ms）立即重截——capturePage 对可见窗口总是取当前合成器帧，1-2 tick 内画面正确无黑帧/残影；`image.isEmpty()` 已有丢弃保护 + 本批次新增"capturePage 在飞期间窗口转不可见 → 丢弃该帧"的竞态防御（停帧期不混入旧帧）。
+- **业务红线**：停帧只停渲染帧与截屏——WS 连接、hello 心跳（HWND 上报）、agent 会话、网络活动全部照常。
+
+### 降帧档（第一档）
+
+- 可见但失焦（`isFocused()=false`，含遮挡窗口的常态失焦）→ capture 间隔 700ms → 2000ms（≈1.4fps→0.5fps，帧量 -64%）。间隔决策纯函数 `resolveOmnicodeCaptureIntervalMs`；频率闸门 = 距上一成功帧的 elapsed 判定（tick 心跳仍 700ms，空 tick 廉价）。常量 `CAPTURE_INTERVAL_MS` / `CAPTURE_INTERVAL_INACTIVE_MS` 导出供单测。
+- Electron 底座对"可见未聚焦"窗口不节流（Chromium 只节流 hidden/occluded），降帧属本仓自补，非底座能力。
+
+### 停帧态显示语义（X1 面板 + 卡片预览）
+
+- 实例侧停帧进入/退出翻转时经桥上行 `framePaused {paused}` 消息（翻转时一次，发送失败下 tick 重试；断连复位重连后重报），管理器广播 OmnicodeInstanceEvent 新事件类型 `framePaused`（@zcode/shared 载荷扩展）。
+- renderer 消费（useOmnicodeConsoleInstances pausedProfileIds）：卡片预览区左上角「已停帧」角标（与右上「预览已关闭」角标语义互斥共存）；X1 性能面板行名旁同款标注。**内存采样与停帧正交**——tasklist 管线照常，曲线继续推进；标注描述的是预览停帧而非采样停摆。下一帧缩略图到达/实例断开时消费方兜底清除停帧态（防事件丢失）。
+- i18n：`console.previewPausedBadge`（zh「已停帧」/ en "Preview paused"；ja/ko/ru 回退 en，与本域既有 previewOffBadge 同约定）。
+
+### 挂起档（第三档，候选，未实现）
+
+进程级 suspend（如 Win32 NtSuspendProcess / POSIX SIGSTOP）可把整实例进程树冻结到零 CPU，但会冻结 agent 会话/网络栈/时钟语义，恢复时序风险高（WS 断连误判、桥超时、任务卡死），且与"停业务红线"冲突。记录为候选：触发条件（长时间完全不可见 + 无活跃会话）与恢复协议（先桥握手再 resume）留待后续批次设计。
+
+### 测试与验收
+
+- 纯函数单测：`packages/desktop/test/omnicodeBatch6BackgroundFrame.test.ts`（三档决策全分支 + 优先序 + 间隔常量契约 + framePaused 翻转决策四态），登记 engineering-test-files.json。
+- 已知限制：①被遮挡窗口的帧内容冻结（底座行为，capturePage 拿不到新帧）而非报错；②framePaused 广播依赖实例桥连接，桥断开期间翻转不广播（重连后重报收敛）。
