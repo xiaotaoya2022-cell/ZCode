@@ -107,8 +107,12 @@ export function sortOmnicodeInstances<T extends OmnicodeInstanceSortItem>(
       return index >= 0 ? index : Number.POSITIVE_INFINITY;
     };
     sorted.sort((a, b) => {
-      const rankDiff = rankOf(a.id) - rankOf(b.id);
-      if (rankDiff !== 0) return rankDiff;
+      const rankA = rankOf(a.id);
+      const rankB = rankOf(b.id);
+      // ∞-∞ = NaN 陷阱（与 compareBySeqThenCreated 同款防御）：同为未登记（+∞）时
+      // 差值为 NaN，`NaN !== 0` 恒真会把 NaN 交还 comparator（V8 视作 0）——
+      // 未登记项之间跳过差值，直接落 seq/createdAt 兜底。
+      if (rankA !== rankB) return rankA - rankB;
       return compareBySeqThenCreated(a, b);
     });
     return sorted;

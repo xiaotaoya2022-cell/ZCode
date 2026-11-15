@@ -20,6 +20,7 @@ import {
   CAPTURE_INTERVAL_INACTIVE_MS,
   resolveOmnicodeCaptureFramePolicy,
   resolveOmnicodeCaptureIntervalMs,
+  resolveOmnicodeFrameGate,
   resolveOmnicodeFramePausedBroadcast,
   type OmnicodeCaptureFramePolicy,
 } from "../src/main/omnicode/instanceBridgeClient.js";
@@ -103,5 +104,38 @@ describe("omnicode background load: framePaused transition broadcast (pure)", ()
     expect(
       resolveOmnicodeFramePausedBroadcast({ policy: "inactive", lastNotifiedPaused: false }),
     ).toBeNull();
+  });
+});
+
+describe("omnicode background load: frame gate (clock rollback clamp)", () => {
+  it("正常档：间隔内跳过 / 间隔满放行（≥ 边界语义与既有 < interval 闸门一致）", () => {
+    // elapsed = 699ms < 700ms → 跳过本 tick
+    expect(
+      resolveOmnicodeFrameGate({ now: 5699, lastSentFrameAt: 5000, intervalMs: CAPTURE_INTERVAL_MS }),
+    ).toEqual({ open: false, resetAnchor: false });
+    // elapsed = 700ms ≥ 700ms → 放行
+    expect(
+      resolveOmnicodeFrameGate({ now: 5700, lastSentFrameAt: 5000, intervalMs: CAPTURE_INTERVAL_MS }),
+    ).toEqual({ open: true, resetAnchor: false });
+    // 降帧档间隔 2000ms：未满不放行
+    expect(
+      resolveOmnicodeFrameGate({
+        now: 5699,
+        lastSentFrameAt: 5000,
+        intervalMs: CAPTURE_INTERVAL_INACTIVE_MS,
+      }),
+    ).toEqual({ open: false, resetAnchor: false });
+  });
+
+  it("时钟回拨：now < lastSentFrameAt（伪造回拨时钟）→ 放行本 tick + 重置锚点（不冻结）", () => {
+    // 回拨后 now 比上一帧锚点小 3000ms：负差值恒小于间隔，旧实现会把全部 tick
+    // 跳过 → 缩略图冻结至墙钟追平回拨量；修复后本 tick 放行并要求重置锚点。
+    expect(
+      resolveOmnicodeFrameGate({ now: 2000, lastSentFrameAt: 5000, intervalMs: CAPTURE_INTERVAL_MS }),
+    ).toEqual({ open: true, resetAnchor: true });
+    // 调用方重置锚点后（lastSentFrameAt=0）：按新时钟重新起算，持续放行不冻结
+    expect(
+      resolveOmnicodeFrameGate({ now: 2000, lastSentFrameAt: 0, intervalMs: CAPTURE_INTERVAL_MS }),
+    ).toEqual({ open: true, resetAnchor: false });
   });
 });

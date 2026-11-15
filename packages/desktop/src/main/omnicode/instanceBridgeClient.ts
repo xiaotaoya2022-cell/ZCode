@@ -340,6 +340,29 @@ export function resolveOmnicodeFramePausedBroadcast(input: {
   return paused;
 }
 
+export interface OmnicodeFrameGateDecision {
+  /** true = 本 tick 放行产帧。 */
+  open: boolean;
+  /** true = 检测到时钟回拨，调用方须把 lastSentFrameAt 重置为 0（锚点失效自愈）。 */
+  resetAnchor: boolean;
+}
+
+/**
+ * 降帧闸门判定（纯函数）：elapsed = now - lastSentFrameAt 与当前档间隔比较。
+ * 时钟回拨（NTP 校正/VM 快照恢复）会让 elapsed 为负——负值夹 0 判锚点失效：
+ * 本 tick 放行 + 调用方重置 lastSentFrameAt=0（按新时钟重新起算，发送成功即重锚）。
+ * 否则负差值恒小于间隔，全部 tick 被跳过 → 缩略图冻结至墙钟追平回拨量。
+ */
+export function resolveOmnicodeFrameGate(input: {
+  now: number;
+  lastSentFrameAt: number;
+  intervalMs: number;
+}): OmnicodeFrameGateDecision {
+  const elapsed = input.now - input.lastSentFrameAt;
+  if (elapsed < 0) return { open: true, resetAnchor: true };
+  return { open: elapsed >= input.intervalMs, resetAnchor: false };
+}
+
 function startCaptureLoop(ws: WebSocket): void {
   if (captureTimer) return;
   captureTimer = setInterval(() => {
@@ -356,8 +379,15 @@ function startCaptureLoop(ws: WebSocket): void {
     syncOmnicodeFramePausedNotification(ws, policy);
     if (policy === "paused") return;
     // 降帧档：距上一帧不足当前档间隔则跳过本 tick（tick 心跳保持 700ms，空 tick
-    // 成本 ≈ 一次 setTimeout 回调，与 X1 pause-invisible 同先例）。
-    if (Date.now() - lastSentFrameAt < resolveOmnicodeCaptureIntervalMs(policy)) return;
+    // 成本 ≈ 一次 setTimeout 回调，与 X1 pause-invisible 同先例）。时钟回拨：负差值
+    // 夹 0 判锚点失效——重置后本 tick 放行按新时钟重新起算（自愈，不冻结缩略图）。
+    const gate = resolveOmnicodeFrameGate({
+      now: Date.now(),
+      lastSentFrameAt,
+      intervalMs: resolveOmnicodeCaptureIntervalMs(policy),
+    });
+    if (gate.resetAnchor) lastSentFrameAt = 0;
+    if (!gate.open) return;
     captureInFlight = true;
     // [OmniCode] 批次2 B2-3（T1）：帧附内容区尺寸（DIP）——管理器侧卡片按真实宽高比
     // letterbox（修"显示不完整"）。capturePage 与 getContentSize 同步读取，口径一致。
