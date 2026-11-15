@@ -3874,6 +3874,8 @@ const zhCN: Record<string, string> = {
   "console.undockedOverlayTitle": "已拖出 · 实例窗口独立运行",
   "console.undockedOverlayHint": "点击卡片聚焦真窗口",
   "console.previewOffBadge": "预览已关闭",
+  // [OmniCode] 后台降载：实例窗口不可见停帧中的预览标注
+  "console.previewPausedBadge": "已停帧",
   "console.backToGrid": "返回网格",
   "console.zoomInTitle": "放大单视图（双击卡片同效）",
   "console.resizeHandleTitle": "拖拽调整停靠窗口大小（最低 160×96）",
