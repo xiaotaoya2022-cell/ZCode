@@ -34,10 +34,19 @@ import {
   readComposerWorkspaceScope,
 } from "@/v4/composer/composerDraftStore.js";
 import { openFolderFromWorkspaceEntry } from "@/root/openWorkspaceFolderEntry.js";
+import {
+  observerToastDedupeKey,
+  resolveOmnicodeLockConflictOpenAction,
+  shouldSuppressRepeatedObserverToast,
+} from "@/root/omnicodeLockConflictOpen.js";
 import { useConversationWorkspaceActions } from "@/root/useConversationWorkspaceActions.js";
 import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
 import { notifyTaskNavigationCommitted } from "@/store/zcodeSessionStoreNavigation.js";
-import { type TabStore, type TabStoreState } from "@/store/tabStore.js";
+import {
+  findWorkspaceObserverHolder,
+  type TabStore,
+  type TabStoreState,
+} from "@/store/tabStore.js";
 import type { RootProps } from "@/root/types.js";
 import {
   hadPersistedPaneLayoutAtModuleLoad,
@@ -84,6 +93,14 @@ export function resolveNewTaskTargetFromRequest(
     workspaceIdentity: fallback.workspaceIdentity ?? null,
   };
 }
+
+/**
+ * [OmniCode] 批次3 锁冲突处置改造（D11 自动观察者）：观察者 toast 去重登记表。
+ * 主路径是状态判定（findWorkspaceObserverHolder——tab 已存在仅激活不提示）；
+ * 本表兜底并发重复打开（两次调用几乎同时判负、微任务交错各自进入 open-observer）
+ * 的重复提示：同工作区去重窗口（3s）内只 toast 一次。仅 renderer 内存态，无需清理。
+ */
+const observerToastShownAtByWorkspace = new Map<string, number>();
 
 export function useRootWorkspaceActions({
   intl,
@@ -148,6 +165,17 @@ export function useRootWorkspaceActions({
   useLayoutEffect(() => {
     remoteProjectOpener.current = openRemoteProjectWorkspace;
   });
+  // [OmniCode] D11 自动观察者：handleSelectProject 在自身 catch 中调度「竞态重试」，
+  // 需要自引用。赋值点在其 useCallback 声明之后的 useLayoutEffect（见下），
+  // 与 remoteProjectOpener 同一套读取最近已提交实现的 ref 模式。
+  const selectProjectRef = useRef<
+    | ((
+        path: string,
+        activateOtherWindow?: boolean,
+        options?: { isLockRaceRetry?: boolean },
+      ) => Promise<void>)
+    | null
+  >(null);
 
   useEffect(() => {
     useWorkbenchGroupStore.getState().configureClientMode(workbenchGroupClientMode);
@@ -579,7 +607,13 @@ export function useRootWorkspaceActions({
   );
 
   const handleSelectProject = useCallback(
-    async (path: string, activateOtherWindow = true) => {
+    async (
+      path: string,
+      activateOtherWindow = true,
+      // [OmniCode] D11 自动观察者：竞态重试标记——首次判负补一次完整打开流
+      // （锁主刚退出则按 Normal 打开）；重试仍判负即进观察者，不递归。
+      options?: { isLockRaceRetry?: boolean },
+    ) => {
       logger.info("[Root] handleSelectProject called with path:", path);
       const sequence = ++navigationSequence.current;
       const origin = tabStoreApi.getState();
@@ -602,8 +636,10 @@ export function useRootWorkspaceActions({
           current?.draftFocusVersion === originDraft?.draftFocusVersion
         );
       };
+      // [OmniCode] D11 自动观察者：catch 中的竞态重试需要知道路径是否 WSL UNC
+      // （UNC 不自动重试——重试会二次弹出 WSL 路由确认框），声明提升到 try 外。
+      const wslUncWorkspace = parseWslUncWorkspacePath(path);
       try {
-        const wslUncWorkspace = parseWslUncWorkspacePath(path);
         if (wslUncWorkspace && onOpenRemoteConnection) {
           const shouldOpenWslConnection = await requestConfirmation({
             title: intl.formatMessage({ id: "workspace.wslUncPrompt.title" }),
@@ -677,10 +713,16 @@ export function useRootWorkspaceActions({
         // 但 workspaceActionError 无渲染点——toast 让对话框/拖拽/右键入口的用户可见拒绝原因。
         const code = (err as { code?: string } | null)?.code;
         if (code === "omnicode.workspace-locked-by-other") {
-          // [OmniCode] B2-2 全入口锁强制 + 只读观察者（spec §批次2 D8）：omnicode 实例内
-          // 被他实例持锁的工作区不再"toast 后静默放弃"，弹锁冲突对话框提供「只读打开」——
-          // 观察者打开不获取锁、不走 activateOrSetWorkspace（纯查看，关闭即退出，不触碰锁）。
-          // 官方 flavor / 管理器（ConsoleHome 无此流程）保持原 toast 拒绝。
+          // [OmniCode] B2-2 全入口锁强制（spec §批次2 D8）→ 批次3 冲突处置改造（D11 自动
+          // 观察者，2026-11-15 用户拍板）：omnicode 实例内被他实例持锁的工作区不再弹锁冲突
+          // 对话框拦截（对话框退役），acquire 判负后按序决策（resolveOmnicodeLockConflict
+          // OpenAction 纯函数，单测锁定）：
+          // ① 同工作区已有观察者 tab → 仅激活，不重复 toast；
+          // ② 首次判负且路径可安全重试（非 WSL UNC——避免重试二次弹 WSL 确认框）→ 补一次
+          //    完整打开流：锁主刚退出则 saveProject 守卫放行，按 Normal 打开（自愈竞态）；
+          // ③ 其余 → 直接观察者（只读）打开 + 非模态 toast（观察者打开不获取锁、不走
+          //    activateOrSetWorkspace，纯查看，关闭 tab 即退出，不触碰锁）。
+          // 官方 flavor / 管理器（ConsoleHome 无此流程）保持原 toast 拒绝，不受本批影响。
           const omnicodeInstance =
             ZCODE_PRODUCT_FLAVOR === "omnicode" && (platform.omnicodeInstanceId ?? null) !== null;
           if (omnicodeInstance) {
@@ -696,16 +738,32 @@ export function useRootWorkspaceActions({
                 ? data.displayName.trim()
                 : undefined;
             const holderLabel = holderDisplayName ?? holderProfileId;
-            const openObserver = await requestConfirmation({
-              title: intl.formatMessage({ id: "omnicode.observer.dialog.title" }),
-              description: intl.formatMessage(
-                { id: "omnicode.observer.dialog.description" },
-                { name: holderLabel, path },
-              ),
-              confirmLabel: intl.formatMessage({ id: "omnicode.observer.dialog.openReadonly" }),
-              cancelLabel: intl.formatMessage({ id: "omnicode.observer.dialog.cancel" }),
+            const action = resolveOmnicodeLockConflictOpenAction({
+              existingObserverHolder: findWorkspaceObserverHolder(tabStoreApi.getState(), path),
+              isRaceRetry: options?.isLockRaceRetry === true,
+              suppressRaceRetry: wslUncWorkspace !== null,
             });
-            if (openObserver && isCurrent()) {
+            if (action.kind === "activate-existing-observer") {
+              // 边界①：同工作区已有观察者 tab → 仅激活（activateTabByPath 不触碰 options，
+              // 比 addTab merge 语义更窄；观察者 toast 不再重复）。
+              tabStoreApi.getState().activateTabByPath(path);
+              setWorkspaceActionError(null);
+              return;
+            }
+            if (action.kind === "retry-acquire") {
+              // 边界②：锁主退出竞态自愈——补一次完整打开流（saveProject reuse 幂等）。
+              // 重试成功 = Normal 打开；重试仍判负（isLockRaceRetry=true）→ 观察者。
+              const retry = selectProjectRef.current;
+              if (retry) {
+                void retry(path, activateOtherWindow, { isLockRaceRetry: true }).catch(
+                  (retryError) => {
+                    logger.error("[Root] 锁冲突竞态重试异常", retryError);
+                  },
+                );
+              }
+              return;
+            }
+            if (isCurrent()) {
               addTab(path, {
                 omnicodeObserver: {
                   holderProfileId,
@@ -714,10 +772,22 @@ export function useRootWorkspaceActions({
               });
               startDraftInWorkspace(path);
               setWorkspaceActionError(null);
-              toast(
-                intl.formatMessage({ id: "omnicode.observer.openedToast" }, { name: holderLabel }),
-                { variant: "info" },
-              );
+              // 观察者 toast 去重（D11 边界①兜底）：状态判定覆盖主路径；并发重复打开的
+              // 微任务交错由去重窗口兜底——同工作区 3s 内只提示一次。
+              const dedupeKey = observerToastDedupeKey(path);
+              const now = Date.now();
+              if (
+                !shouldSuppressRepeatedObserverToast(
+                  observerToastShownAtByWorkspace.get(dedupeKey),
+                  now,
+                )
+              ) {
+                observerToastShownAtByWorkspace.set(dedupeKey, now);
+                toast(
+                  intl.formatMessage({ id: "omnicode.observer.openedToast" }, { name: holderLabel }),
+                  { variant: "info" },
+                );
+              }
             }
             return;
           }
@@ -738,6 +808,10 @@ export function useRootWorkspaceActions({
       tabStoreApi,
     ],
   );
+  // [OmniCode] D11 自动观察者：竞态重试经 ref 自引用（声明见 hook 顶部 selectProjectRef）。
+  useLayoutEffect(() => {
+    selectProjectRef.current = handleSelectProject;
+  });
 
   const handleOpenWorkspace = useCallback(() => {
     if (!allowOpenWorkspace) {

@@ -183,5 +183,5 @@
   "packages/desktop/test/omnicodeBatch4GlobalPrefs.test.ts",
   "packages/desktop/test/omnicodeBatch3SessionRefresh.test.ts",
   "packages/desktop/test/omnicodeBatch5InstanceMetadata.test.ts",
-  "packages/desktop/test/omnicodeBatch6BackgroundFrame.test.ts"
+  "packages/desktop/test/omnicodeAutoObserverConflict.test.ts"
 ]
