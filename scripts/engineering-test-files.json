@@ -178,5 +178,6 @@
   "packages/desktop/test/omnicodeBatch3DashboardUi.test.ts",
   "packages/desktop/test/omnicodeReviewWorkspaceLock.test.ts",
   "packages/desktop/test/omnicodeReviewBridge.test.ts",
-  "packages/desktop/test/omnicodeBatch3WelcomeLogin.test.ts"
+  "packages/desktop/test/omnicodeBatch3WelcomeLogin.test.ts",
+  "packages/desktop/test/omnicodeBatch4GlobalPrefs.test.ts"
 ]
