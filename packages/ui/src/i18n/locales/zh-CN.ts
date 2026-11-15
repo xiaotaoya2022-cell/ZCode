@@ -391,6 +391,7 @@ const zhCN: Record<string, string> = {
   "project.restore": "恢复项目",
   "project.restoreDescription": "发现已删除的项目 {name} 使用相同文件夹，是否恢复？",
   "project.createTask": "新建任务",
+  "project.refreshSessions": "刷新会话列表",
   "project.actions": "项目操作",
   "project.unpin": "取消置顶",
   "project.pin": "置顶",

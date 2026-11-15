@@ -1,7 +1,7 @@
 import { SidebarNativeTooltip, ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { ProjectIdentityHoverCard } from "@/project-sidebar/ProjectIdentityHoverCard.js";
 import { remoteHostLabel } from "@/project-sidebar/RemoteHostSection.js";
-import { memo } from "react";
+import { useCallback, memo, useRef, useState } from "react";
 import type { useSortable } from "@dnd-kit/sortable";
 import {
   Ellipsis,
@@ -14,6 +14,7 @@ import {
   Settings,
   Trash2,
   MessageCirclePlus,
+  RefreshCw,
 } from "lucide-react";
 import { ProjectFolderIcon } from "@/project-sidebar/ProjectFolderIcon.js";
 import { sourceServerConnectionStateSchema } from "@zcode/shared";
@@ -44,6 +45,10 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu.js";
 import { ProjectTaskRows } from "@/project-sidebar/ProjectTaskRows.js";
+import {
+  createSessionRefreshState,
+  triggerSessionRefresh,
+} from "@/project-sidebar/refreshSessions.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { resolveRemoteConnectionPresentation } from "@/lib/remoteConnectionPresentation.js";
 import { RemoteConnectionStateIcon } from "@/remote-connection/RemoteConnectionStateIcon.js";
@@ -117,6 +122,15 @@ export const ProjectNodeContent = memo(function ProjectNodeContent({
   }) {
   const { intl } = useZCodeIntl();
   const msg = (id: string) => intl.formatMessage({ id: `project.${id}` });
+  // 批次3 会话同步 Phase 1：项目行「刷新会话列表」按钮。refresh 回调管道=
+  // useProjectTree.refreshDirectory（整树重拉直读 tasks-index），Host 同步器静默补行的
+  // 旧会话点击后立即可见；in-flight 重入合并 + 转圈态由纯函数 triggerSessionRefresh 编排
+  // （spec: F:\OmniCode\docs\batch3\research\session-sync-mechanism.md §四）。
+  const [sessionsRefreshing, setSessionsRefreshing] = useState(false);
+  const sessionRefreshState = useRef(createSessionRefreshState());
+  const refreshSessions = useCallback(() => {
+    triggerSessionRefresh(sessionRefreshState.current, refresh, setSessionsRefreshing);
+  }, [refresh]);
   // 修复原因：新项目行曾无条件显示本地文件夹；远程图标只读 Host 现有投影，复用统一五态。
   const remotePresentation = remoteHost
     ? resolveRemoteConnectionPresentation({
@@ -138,6 +152,13 @@ export const ProjectNodeContent = memo(function ProjectNodeContent({
   const more = intl.formatMessage({ id: "common.more" });
   // 原因：右键是快捷入口的补充；与更多菜单共用操作定义，避免再次删掉 hover 功能。
   const management: ProjectRowAction[] = [
+    // 刷新不依赖在线（本地树重拉 + 远端失败只进 hostReadErrors，与 15s 周期刷新同一安全语义）。
+    {
+      id: "refresh-sessions",
+      label: msg("refreshSessions"),
+      icon: RefreshCw,
+      run: refreshSessions,
+    },
     ...additionalActions,
     ...(onOpenDeviceSettings
       ? [
@@ -332,6 +353,22 @@ export const ProjectNodeContent = memo(function ProjectNodeContent({
                 data-testid="virtual-project-actions"
                 className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover/project-row:opacity-100 group-focus-within/project-row:opacity-100 [&:has([data-state=open])]:opacity-100 [@media(hover:none)]:opacity-100"
               >
+                {/* 批次3 会话同步：Host 静默补行不广播时用户手动重拉 tasks-index（Ellipsis 左侧）。
+                    转圈沿用 RefreshCw + animate-spin（EmbeddedBrowserPaneParts 同款），motion-reduce 静止。 */}
+                <TaskRowActionButton
+                  testId="virtual-project-refresh"
+                  label={msg("refreshSessions")}
+                  showTooltip
+                  className="text-foreground-subtle hover:text-foreground"
+                  onClick={refreshSessions}
+                >
+                  <RefreshCw
+                    className={cn(
+                      "size-3.5",
+                      sessionsRefreshing && "animate-spin motion-reduce:animate-none",
+                    )}
+                  />
+                </TaskRowActionButton>
                 <DropdownMenu modal={false}>
                   <ControlHintTooltip title={more}>
                     <DropdownMenuTrigger asChild>
