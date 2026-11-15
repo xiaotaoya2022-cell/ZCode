@@ -16,7 +16,9 @@ import { BrowserWindow } from "electron";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import {
   PlatformChannels,
+  sanitizeOmnicodeGlobalPrefsPayload,
   ZCODE_PRODUCT_FLAVOR,
+  type OmnicodeGlobalPrefsPayload,
   type OmnicodeInstanceEventPayload,
   type ZCodeProductFlavor,
 } from "@zcode/shared";
@@ -41,13 +43,27 @@ export interface OmnicodeInstanceBridgeCommand {
     // requestWindowHandle=索取 hello（HWND 兜底重报）
     | "embedLayout"
     | "releaseEmbed"
-    | "requestWindowHandle";
+    | "requestWindowHandle"
+    // [OmniCode] 批次4 全局偏好层（spec: docs/omnicode/global-preferences.md）：管理器
+    // → 实例的全局偏好下发（白名单键载荷已消毒；sourceInstanceId 供实例环形抑制）。
+    | "applyGlobalPrefs";
   /** arrange 命令的目标矩形（父进程由 workArea 计算后下发）。 */
   bounds?: { x: number; y: number; width: number; height: number };
   /** openWorkspace 命令的工作区目录路径。 */
   path?: string;
   /** embedLayout 命令的目标矩形集合（管理器换算屏幕 DIP 后下发，含全部内嵌实例）。 */
   rects?: { profileId: string; x: number; y: number; width: number; height: number }[];
+  /** applyGlobalPrefs 命令的白名单偏好载荷（发送前已消毒；实例侧再消毒一次）。 */
+  prefs?: OmnicodeGlobalPrefsPayload;
+  /** applyGlobalPrefs 的源身份（manager 或发起实例的 profileId；环形抑制依据）。 */
+  sourceInstanceId?: string;
+}
+
+/** [OmniCode] 批次4：实例 → 管理器的全局偏好上行消息（reportGlobalPrefs）。 */
+export interface OmnicodeInstanceBridgeReport {
+  type: "reportGlobalPrefs";
+  prefs: OmnicodeGlobalPrefsPayload;
+  sourceInstanceId: string;
 }
 
 export interface OmnicodeInstanceBridgeListeners {
@@ -61,6 +77,14 @@ export interface OmnicodeInstanceBridgeManagerHooks {
   onInstanceConnected?: (profileId: string) => void;
   onInstanceDisconnected?: (profileId: string) => void;
   onInstanceHello?: (profileId: string, hwndHex: string) => void;
+  /**
+   * [OmniCode] 批次4：实例上行全局偏好（载荷已在桥服务侧消毒，钩子内再走协调器二次消毒）。
+   */
+  onOmnicodeGlobalPrefsReport?: (
+    profileId: string,
+    prefs: OmnicodeGlobalPrefsPayload,
+    sourceInstanceId: string,
+  ) => void;
 }
 
 let managerHooks: OmnicodeInstanceBridgeManagerHooks | null = null;
@@ -183,7 +207,7 @@ export function startOmnicodeInstanceBridgeServer(
           return;
         }
         if (!parsed || typeof parsed !== "object") return;
-        const message = parsed as { type?: string; frame?: unknown; hwndHex?: unknown; width?: unknown; height?: unknown };
+        const message = parsed as { type?: string; frame?: unknown; hwndHex?: unknown; width?: unknown; height?: unknown; prefs?: unknown; sourceInstanceId?: unknown };
         if (message.type === "thumbnail" && typeof message.frame === "string") {
           const width = typeof message.width === "number" && message.width > 0 ? message.width : undefined;
           const height = typeof message.height === "number" && message.height > 0 ? message.height : undefined;
@@ -196,6 +220,15 @@ export function startOmnicodeInstanceBridgeServer(
         }
         if (message.type === "hello" && typeof message.hwndHex === "string") {
           managerHooks?.onInstanceHello?.(profileIdParam, message.hwndHex.trim());
+          return;
+        }
+        // [OmniCode] 批次4：全局偏好上行（reportGlobalPrefs）。桥服务侧先消毒载荷
+        //（白名单过滤；白名单外键到不了钩子），再交协调器落全局层并下行广播。
+        if (message.type === "reportGlobalPrefs") {
+          const prefs = sanitizeOmnicodeGlobalPrefsPayload(message.prefs);
+          const sourceInstanceId =
+            typeof message.sourceInstanceId === "string" ? message.sourceInstanceId : "";
+          managerHooks?.onOmnicodeGlobalPrefsReport?.(profileIdParam, prefs, sourceInstanceId);
         }
       });
       ws.on("close", () => {

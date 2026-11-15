@@ -30,6 +30,9 @@ import {
 } from "./profileRuntime.js";
 import { scanOmnicodeInstanceProcesses } from "./instanceReconcile.js";
 import { backupCredentialFile } from "./credentialBackups.js";
+// [OmniCode] 批次4 全局偏好层：spawn 前全局层白名单键注入实例 setting.json（spec:
+// docs/omnicode/global-preferences.md §spawn 注入；非管理器身份 no-op）
+import { injectOmnicodeGlobalPrefsForSpawn } from "./globalPrefs.js";
 // [OmniCode] 桥接服务直接从实现文件导入：经 contract.ts 会与本文件形成导出循环
 import { ensureOmnicodeInstanceBridgeServerStarted, sendOmnicodeInstanceCommand } from "./instanceBridgeServer.js";
 // [OmniCode] 批次3 停靠重构：arrange/restoreBounds 只投递未停靠实例（直接从实现文件
@@ -195,6 +198,11 @@ async function doLaunch(
   const dataBaseDir = record?.dataBaseDirOverride?.trim() || profileDir;
   await mkdir(join(profileDir, "electron-userdata"), { recursive: true });
   await mkdir(join(profileDir, "electron-session"), { recursive: true });
+  // [OmniCode] 批次4 全局偏好层：spawn 前把管理器全局层白名单键写入实例 setting.json
+  //（spec: docs/omnicode/global-preferences.md §spawn 注入——首帧即正确，无桥连接时序
+  // 依赖；未运行实例下次启动生效）。失败 fail-open（内部 try/catch，不阻断启动）；
+  // 非管理器身份/未装配协调器时为 no-op。
+  await injectOmnicodeGlobalPrefsForSpawn(join(dataBaseDir, ".zcode", "v2", "setting.json"));
   // [OmniCode] 启动前凭据备份（用户拍板轻量补强）：升级/迁移可能重写凭据库，
   // 启动前留一份快照保证可一键回滚；best-effort 不阻断启动（失败仅告警）。
   try {
