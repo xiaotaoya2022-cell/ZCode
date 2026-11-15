@@ -15,7 +15,10 @@ import {
   Undo2,
 } from "lucide-react";
 import type { OmnicodeConsoleUiState } from "@zcode/shared";
-import { resolveOmnicodeInstanceDocked } from "@zcode/shared";
+import {
+  moveOmnicodeInstanceInCustomOrder,
+  resolveOmnicodeInstanceDocked,
+} from "@zcode/shared";
 import { Button } from "@/components/ui/button.js";
 import { Switch } from "@/components/ui/switch.js";
 import { toast } from "@/components/ui/toast.js";
@@ -29,6 +32,11 @@ import {
   CreateInstanceDialog,
 } from "@/console/ConsoleInstanceCard.js";
 import { ConsolePerfPanel } from "@/console/ConsolePerfPanel.js";
+// [OmniCode] 实例元数据批次：拖拽换位 hook + 排序模式下拉（交互编排拆分，守行数上限）
+import {
+  ConsoleSortModeDropdown,
+  useOmnicodeCardDragSort,
+} from "@/console/ConsoleGridSorting.js";
 
 /** renderer 侧 embed 上报节流（main 侧 move/resize 再兜一层同规格，spec D9）。 */
 const EMBED_REPORT_THROTTLE_MS = 60;
@@ -55,6 +63,11 @@ export function ConsoleInstanceGrid() {
   const platform = usePlatform();
   const {
     profiles,
+    sortedProfiles,
+    sortMode,
+    customOrder,
+    setSortMode,
+    applyCustomOrder,
     loading,
     busy,
     frames,
@@ -64,6 +77,7 @@ export function ConsoleInstanceGrid() {
     handleLaunch,
     handleStop,
     handleClone,
+    handleRename,
     handleFocus,
     handleRevealDataDir,
     handleArrange,
@@ -505,12 +519,31 @@ export function ConsoleInstanceGrid() {
     onLaunch: handleLaunch,
     onStop: handleStop,
     onClone: handleClone,
+    onRename: handleRename,
     onRemove: handleRemove,
     onRevealDataDir: handleRevealDataDir,
     onFocus: handleFocus,
     onToggleEnlarge: (profile: { id: string; running: boolean }) =>
       toggleEnlarge(profile.id, profile.running),
   };
+
+  // ─── [OmniCode] 实例元数据批次：自定义排序拖拽 + 排序模式切换（交互编排拆分见
+  // ConsoleGridSorting.tsx——冲突裁决/落点语义/阈值判定注释集中在该文件头） ───
+  const { dragState, handleGridPointerDown, dragCommitAtRef } = useOmnicodeCardDragSort({
+    sortMode,
+    cardElementsRef,
+    commit: (dragId, targetId, position) => {
+      applyCustomOrder(
+        moveOmnicodeInstanceInCustomOrder(
+          customOrder,
+          sortedProfiles.map((profile) => profile.id),
+          dragId,
+          targetId,
+          position,
+        ),
+      );
+    },
+  });
 
   // [OmniCode] 批次3 停靠重构：平铺/还原只作用于未停靠运行实例（main 侧同样过滤——
   // arrange/restoreBounds 桥命令在实例侧会解除内嵌态，投给停靠实例会破坏贴合）。
@@ -523,7 +556,7 @@ export function ConsoleInstanceGrid() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-      {/* 工具行：新建 | 全部停靠/全部拖出（批量）| 平铺/还原（未停靠实例）| 实时预览开关 */}
+      {/* 工具行：新建 | 全部停靠/全部拖出（批量）| 平铺/还原（未停靠实例）| 排序模式 | 实时预览开关 */}
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" onClick={() => setCreateOpen(true)} disabled={busy}>
           <Plus className="size-3.5" />
@@ -572,6 +605,10 @@ export function ConsoleInstanceGrid() {
           <Undo2 className="size-3.5" />
           {intl.formatMessage({ id: "settings.omnicodeProfiles.restore" })}
         </Button>
+        {/* [OmniCode] 实例元数据批次：排序模式（seq=默认 / name / custom=拖拽；持久化
+            console-ui.json，托盘菜单与设置分区列表共用同一排序事实源）。切到 custom
+            时提示拖拽入口；其余模式拖拽手柄不渲染（禁用）。 */}
+        <ConsoleSortModeDropdown sortMode={sortMode} disabled={busy} onChange={setSortMode} />
         <label className="flex items-center gap-2 text-ui-sm text-foreground-subtle">
           <Switch
             checked={uiState.previewEnabled}
@@ -661,6 +698,7 @@ export function ConsoleInstanceGrid() {
         ) : (
           <div
             ref={gridRef}
+            onPointerDown={handleGridPointerDown}
             className={cn(
               "grid min-h-0 h-full gap-3 overflow-y-auto",
               enlargedId
@@ -668,7 +706,10 @@ export function ConsoleInstanceGrid() {
                 : "auto-rows-min grid-cols-[repeat(auto-fill,minmax(280px,1fr))] pb-1",
             )}
           >
-            {profiles
+            {/* [OmniCode] 实例元数据批次：sortedProfiles（seq 默认/名称/自定义三模式，
+                与设置分区列表、托盘菜单共用 shared 排序函数；custom 模式卡片 header
+                渲染拖拽手柄，落点以 primary 上/下边线提示） */}
+            {sortedProfiles
               .filter((profile) => !enlargedId || profile.id === enlargedId)
               .map((profile) => (
                 <ConsoleInstanceCard
@@ -683,6 +724,12 @@ export function ConsoleInstanceGrid() {
                   onDockChange={(docked) => handleInstanceDockChange(profile.id, docked)}
                   reportEmbedLayoutNow={reportEmbedLayoutNow}
                   embedScaleRef={embedScaleRef}
+                  dragHandle={sortMode === "custom" && !enlargedId}
+                  dragging={dragState?.dragId === profile.id}
+                  dropIndicator={
+                    dragState?.targetId === profile.id ? dragState.position : null
+                  }
+                  dragJustCommitted={dragCommitAtRef}
                   {...cardActionProps}
                 />
               ))}

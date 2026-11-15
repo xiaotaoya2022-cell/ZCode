@@ -3,8 +3,12 @@
 // 启动=重启/停止/克隆/删除/聚焦/打开数据目录/平铺/还原。控制台网格与设置页分区
 // 复用同一数据链（B2-1 useOmnicodeConsoleAdoption 同款共享约定）。
 // 平台方法缺席（官方 flavor / 旧 preload）时安全降级为空列表。
-import { useCallback, useEffect, useState } from "react";
-import type { OmnicodeProfileSummaryInfo } from "@zcode/shared";
+// [OmniCode] 实例元数据批次：排序态（sortMode/customOrder，console-ui.json 持久化）+
+// sortedProfiles（网格/设置列表共用 shared sortOmnicodeInstances 同一排序事实源）+
+// 重命名（客户端重名校验 trim 后同名拒绝 + main 侧白名单校验双保险）。
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { OmnicodeProfileSummaryInfo, OmnicodeInstanceSortMode } from "@zcode/shared";
+import { sortOmnicodeInstances } from "@zcode/shared";
 import { toast } from "@/components/ui/toast.js";
 import { useConfirmDialogStore } from "@/store/confirmDialogStore.js";
 import { usePlatform } from "@/hooks/usePlatform.js";
@@ -225,10 +229,90 @@ export function useOmnicodeConsoleInstances() {
     [intl, platform, requestConfirmation, runAction],
   );
 
+  // ─── [OmniCode] 实例元数据批次：重命名（卡片「更多」菜单 + 设置分区行内编辑共用） ───
+  // 客户端先校验（trim 非空 + trim 后同名拒绝，不区分大小写）给 i18n 提示；main 侧
+  // renameOmnicodeProfile 仍做同样白名单校验兜底（双保险）。改名后 refresh 使 name 经
+  // List 数据链直通网格/看板卡/设置列表；托盘重建与运行中实例窗口标题热更新在 main 侧。
+  const handleRename = useCallback(
+    (profile: OmnicodeProfileSummaryInfo, newName: string) => {
+      const trimmed = newName.trim();
+      if (!trimmed) {
+        toast(intl.formatMessage({ id: "settings.omnicodeProfiles.nameRequired" }), {
+          variant: "warning",
+        });
+        return;
+      }
+      const duplicate = profiles.some(
+        (entry) =>
+          entry.id !== profile.id && entry.name.trim().toLowerCase() === trimmed.toLowerCase(),
+      );
+      if (duplicate) {
+        toast(
+          intl.formatMessage({ id: "console.renameDuplicate" }, { name: trimmed }),
+          { variant: "warning" },
+        );
+        return;
+      }
+      void runAction(
+        () => platform.renameOmnicodeProfile!({ id: profile.id, name: trimmed }),
+        "console.toastRenamed",
+      );
+    },
+    [intl, platform, profiles, runAction],
+  );
+
+  // ─── [OmniCode] 实例元数据批次：排序态（console-ui.json；三视图共用 shared 排序函数） ───
+  const [sortMode, setSortModeState] = useState<OmnicodeInstanceSortMode>("seq");
+  const [customOrder, setCustomOrderState] = useState<string[]>([]);
+  useEffect(() => {
+    void platform
+      .getOmnicodeConsoleUiState?.()
+      .then((state) => {
+        if (!state) return;
+        setSortModeState(state.sortMode ?? "seq");
+        setCustomOrderState(state.customOrder ?? []);
+      })
+      .catch(() => {
+        /* 旧 preload / 读取失败：保持默认（seq 序） */
+      });
+  }, [platform]);
+
+  /** 切换排序模式（持久化 console-ui.json；本地乐观更新，落盘值漂移可忽略——单写者）。 */
+  const setSortMode = useCallback(
+    (mode: OmnicodeInstanceSortMode) => {
+      setSortModeState(mode);
+      void platform.setOmnicodeConsoleUiState?.({ sortMode: mode }).catch(() => {
+        /* 持久化失败不阻断本地切换（下次打开回落已落盘值） */
+      });
+    },
+    [platform],
+  );
+
+  /** 提交拖拽产生的自定义顺序（乐观本地更新 + console-ui.json customOrder 全量 patch）。 */
+  const applyCustomOrder = useCallback(
+    (order: readonly string[]) => {
+      setCustomOrderState([...order]);
+      void platform.setOmnicodeConsoleUiState?.({ customOrder: [...order] }).catch(() => {
+        /* 持久化失败不阻断本地顺序（下次操作会再写） */
+      });
+    },
+    [platform],
+  );
+
+  const sortedProfiles = useMemo(
+    () => sortOmnicodeInstances(profiles, { mode: sortMode, customOrder }),
+    [profiles, sortMode, customOrder],
+  );
+
   const runningCount = profiles.filter((profile) => profile.running).length;
 
   return {
     profiles,
+    sortedProfiles,
+    sortMode,
+    customOrder,
+    setSortMode,
+    applyCustomOrder,
     loading,
     busy,
     frames,
@@ -238,6 +322,7 @@ export function useOmnicodeConsoleInstances() {
     handleLaunch,
     handleStop,
     handleClone,
+    handleRename,
     handleFocus,
     handleRevealDataDir,
     handleArrange,
