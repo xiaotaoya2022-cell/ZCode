@@ -80,6 +80,11 @@ export function ConsoleInstanceCard(props: {
   dragHandle?: boolean;
   /** 本卡是否为拖拽中的卡（网格层状态回显：降低透明度让落点指示可读）。 */
   dragging?: boolean;
+  /**
+   * [OmniCode] 后台降载：实例预览停帧态（实例窗口 hide/最小化 → 停帧广播）。
+   * 停帧中卡片画面区左上角标注「已停帧」，区分"暂停预览"与"卡死/黑屏"。
+   */
+  framePaused?: boolean;
   /** 落点指示线位置（目标卡上/下半区；null=非目标）。 */
   dropIndicator?: "before" | "after" | null;
   /**
@@ -119,6 +124,8 @@ export function ConsoleInstanceCard(props: {
   // [OmniCode] 实例元数据批次：卡片「重命名」弹窗本地态（入口在「更多」菜单）。
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameDraft, setRenameDraft] = useState("");
+  // [OmniCode] 后台降载：实例停帧态（hook frames 同源事件流；true=实例窗口不可见停帧中）。
+  const framePaused = props.framePaused === true;
   const frameAspectRatio =
     frame?.width && frame?.height && frame.width > 0 && frame.height > 0
       ? `${frame.width} / ${frame.height}`
@@ -469,6 +476,13 @@ export function ConsoleInstanceCard(props: {
         {!previewEnabled && running ? (
           <span className="absolute right-2 top-2 rounded bg-black/80 px-1.5 py-0.5 text-ui-xs text-amber-500">
             {intl.formatMessage({ id: "console.previewOffBadge" })}
+          </span>
+        ) : null}
+        {/* [OmniCode] 后台降载：停帧态角标（实例窗口不可见 → 帧生产暂停，卡片冻结在
+            最后一帧；左上角标注与右侧「预览已关闭」角标互斥共存、不重叠） */}
+        {framePaused && running && previewEnabled ? (
+          <span className="absolute left-2 top-2 rounded bg-black/80 px-1.5 py-0.5 text-ui-xs text-foreground-subtle">
+            {intl.formatMessage({ id: "console.previewPausedBadge" })}
           </span>
         ) : null}
       </div>

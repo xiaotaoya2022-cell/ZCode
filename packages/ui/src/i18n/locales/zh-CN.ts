@@ -3874,6 +3874,8 @@ const zhCN: Record<string, string> = {
   "console.undockedOverlayTitle": "已拖出 · 实例窗口独立运行",
   "console.undockedOverlayHint": "点击卡片聚焦真窗口",
   "console.previewOffBadge": "预览已关闭",
+  // [OmniCode] 后台降载：实例窗口不可见停帧中的预览标注
+  "console.previewPausedBadge": "已停帧",
   "console.backToGrid": "返回网格",
   "console.zoomInTitle": "放大单视图（双击卡片同效）",
   "console.resizeHandleTitle": "拖拽调整停靠窗口大小（最低 160×96）",
@@ -4002,12 +4004,9 @@ const zhCN: Record<string, string> = {
   "omnicode.observer.banner": "观察者模式（只读）— 该工作区正被实例 {name} 使用",
   "omnicode.observer.readOnlyReason":
     "观察者模式（只读）：该工作区正被另一实例（{name}）持有，发送消息与文件写入已禁用。",
-  "omnicode.observer.dialog.title": "工作区被其他实例占用",
-  "omnicode.observer.dialog.description":
-    "工作区 {path} 正在实例 {name} 中打开。同时在此打开会导致会话数据损坏。可以选择以观察者身份只读打开（仅查看：不获取锁、不可编辑）。",
-  "omnicode.observer.dialog.openReadonly": "只读打开",
-  "omnicode.observer.dialog.cancel": "取消",
-  "omnicode.observer.openedToast": "已以观察者模式（只读）打开——持有者：实例 {name}。",
+  // [OmniCode] D11 自动观察者：锁冲突对话框退役——acquire 判负直接以只读观察者身份
+  // 打开并提示一次（占用者实例名；同工作区去重窗口内不重复提示）
+  "omnicode.observer.openedToast": "该工作区正被实例 {name} 使用，已进入只读观察。",
   "omnicode.observer.restoreRejected":
     "未恢复工作区 {path}：正被另一实例（{name}）占用。",
   // [OmniCode] B2 评审修复（P1-4 混部告知层）：官方 ZCode 打开被 OmniCode 实例持锁的

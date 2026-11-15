@@ -1,7 +1,12 @@
 // [OmniCode] 实例侧桥接客户端：回连控制台，接受窗口命令并按需上报缩略图帧。
 // 仅 Profile 实例身份启动时激活（OMNICODE_PROFILE_ID + OMNICODE_BRIDGE_* 由
 // profileBootstrap 从 spawn env 注入并自派生双保险，批次1 D6 后不再经 handoff 文件）。
-// 已知限制：窗口隐藏/最小化时 capturePage 可能拿不到新帧（v0 接受，网格停留最后一帧）。
+// [OmniCode] 后台降载：窗口不可见（停靠 hide/最小化）→ 停帧档（不再调用 capturePage，
+// 帧生产归零；v0 时代"隐藏窗口仍每 tick 调 capturePage"的开销消除）；可见但失焦 →
+// 降帧档（capture 间隔 700ms→2000ms）。Electron 底座对隐藏/遮挡窗口已有 Chromium
+// 原生节流（rAF 停 + timer 1Hz），但本 capture 循环是自家帧生产驱动器，底座管不到；
+// setFrameRate 仅 offscreen 渲染生效（屏幕窗口不可用），降帧只能自控生产频率。
+// 停帧只停渲染帧与截屏：WS 连接 / hello 心跳 / agent 会话 / 网络活动全部照常。
 // [OmniCode] 批次2 B2-3（T1/T2）：缩略图帧附内容区 {w,h}（卡片 letterbox）；hello 上报
 // 主窗口 HWND（管理器 owned-window 内嵌用）；embedLayout/releaseEmbed 内嵌布局命令
 //（校验/解除最大化/最低尺寸放宽 + skipTaskbar + 桌面基线保存，spec §批次2 D9）。
@@ -19,7 +24,9 @@ import {
 import { MIN_DESKTOP_WINDOW_WIDTH, MIN_DESKTOP_WINDOW_HEIGHT } from "../desktopWindowSize.js";
 import { handleOmnicodeGlobalPrefsApplyCommand } from "./globalPrefs.js";
 
-const CAPTURE_INTERVAL_MS = 700; // ≈1.4fps；JPEG q55 单帧约 40-80KB，本地回环无压力
+export const CAPTURE_INTERVAL_MS = 700; // ≈1.4fps；JPEG q55 单帧约 40-80KB，本地回环无压力
+/** [OmniCode] 后台降载·降帧档：可见但失焦（非活动）时的 capture 间隔（≈0.5fps）。 */
+export const CAPTURE_INTERVAL_INACTIVE_MS = 2000;
 const RECONNECT_DELAY_MS = 3000;
 const HELLO_POLL_INTERVAL_MS = 1000;
 
@@ -28,6 +35,10 @@ let captureTimer: NodeJS.Timeout | null = null;
 let helloTimer: NodeJS.Timeout | null = null;
 let thumbnailSubscribed = false;
 let captureInFlight = false;
+/** 最近一次成功发出缩略图帧的时刻（降帧档频率闸门）。 */
+let lastSentFrameAt = 0;
+/** 已向管理器广播的停帧态（只在翻转时广播一次；断连复位由重连后重新上报收敛）。 */
+let lastNotifiedPaused = false;
 /** 最近一次已上报的 HWND（变化时重发 hello——窗口销毁重建后句柄会变）。 */
 let lastReportedHwndHex: string | null = null;
 /** 内嵌中标记：embedLayout 成功后置位，releaseEmbed/编排冲突时复位。 */
@@ -251,12 +262,67 @@ function applyCommand(command: { type?: string; bounds?: unknown; path?: unknown
   }
 }
 
+// ─── [OmniCode] 后台降载 tick 决策（纯函数，单测登记 engineering-test-files.json） ───
+
+/** 帧生产档位：paused=停帧（不产帧）；inactive=降帧（低频产帧）；active=正常。 */
+export type OmnicodeCaptureFramePolicy = "paused" | "inactive" | "active";
+
+/**
+ * 帧生产档位决策（纯函数）。停帧档：窗口不可见（停靠 hide）或最小化 → 不再调用
+ * capturePage（可见性从窗口状态直接读取，无需 renderer 回路；Chromium 的 Windows
+ * 原生遮挡检测会让被完全遮挡窗口的 capturePage 拿不到新帧，表现自然回落为冻结，
+ * 归入降帧档的低频采样即可）。降帧档：可见但失焦（非活动）→ 低频采样。
+ * 分支序 paused > inactive > active。
+ */
+export function resolveOmnicodeCaptureFramePolicy(input: {
+  visible: boolean;
+  minimized: boolean;
+  focused: boolean;
+}): OmnicodeCaptureFramePolicy {
+  if (!input.visible || input.minimized) return "paused";
+  if (!input.focused) return "inactive";
+  return "active";
+}
+
+/**
+ * 档位 → capture 间隔。paused 时调用方根本不产帧（间隔无意义，回正常档常量）；
+ * inactive 档 2000ms（≈0.5fps，与正常档 700ms≈1.4fps 相比降 64% 帧量）。
+ */
+export function resolveOmnicodeCaptureIntervalMs(policy: OmnicodeCaptureFramePolicy): number {
+  return policy === "inactive" ? CAPTURE_INTERVAL_INACTIVE_MS : CAPTURE_INTERVAL_MS;
+}
+
+/**
+ * 停帧态广播决策（纯函数）：仅 policy=paused 的进入/退出翻转时返回应广播值，
+ * 稳态返回 null（不广播）。inactive/active 离开 paused 也算翻转（恢复广播）。
+ */
+export function resolveOmnicodeFramePausedBroadcast(input: {
+  policy: OmnicodeCaptureFramePolicy;
+  lastNotifiedPaused: boolean;
+}): boolean | null {
+  const paused = input.policy === "paused";
+  if (paused === input.lastNotifiedPaused) return null;
+  return paused;
+}
+
 function startCaptureLoop(ws: WebSocket): void {
   if (captureTimer) return;
   captureTimer = setInterval(() => {
     if (!thumbnailSubscribed || captureInFlight || ws.readyState !== 1) return;
     const win = getPrimaryInstanceWindow();
-    if (!win || win.isMinimized() || win.webContents.isDestroyed()) return;
+    if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return;
+    // [OmniCode] 后台降载：档位决策唯一口径（v0 的 isMinimized 单点检查升级为
+    // paused/inactive/active 三档；隐藏窗口在此档位下不再调用 capturePage）。
+    const policy = resolveOmnicodeCaptureFramePolicy({
+      visible: win.isVisible(),
+      minimized: win.isMinimized(),
+      focused: win.isFocused(),
+    });
+    syncOmnicodeFramePausedNotification(ws, policy);
+    if (policy === "paused") return;
+    // 降帧档：距上一帧不足当前档间隔则跳过本 tick（tick 心跳保持 700ms，空 tick
+    // 成本 ≈ 一次 setTimeout 回调，与 X1 pause-invisible 同先例）。
+    if (Date.now() - lastSentFrameAt < resolveOmnicodeCaptureIntervalMs(policy)) return;
     captureInFlight = true;
     // [OmniCode] 批次2 B2-3（T1）：帧附内容区尺寸（DIP）——管理器侧卡片按真实宽高比
     // letterbox（修"显示不完整"）。capturePage 与 getContentSize 同步读取，口径一致。
@@ -273,8 +339,21 @@ function startCaptureLoop(ws: WebSocket): void {
       .then((image) => {
         captureInFlight = false;
         if (image.isEmpty()) return;
+        // 停帧竞态防御：capturePage 在飞期间窗口转不可见（hide/最小化）→ 丢弃该帧，
+        // 不把旧帧/空帧混进停帧期；恢复可见后下一 tick 重截新鲜帧（capturePage 对
+        // 可见窗口总是取当前合成器帧，1-2 tick 内画面正确，无黑帧/残影）。
+        if (
+          resolveOmnicodeCaptureFramePolicy({
+            visible: win.isVisible(),
+            minimized: win.isMinimized(),
+            focused: win.isFocused(),
+          }) === "paused"
+        ) {
+          return;
+        }
         const frame = image.toJPEG(55).toString("base64");
         if (ws.readyState === 1 && frame.length > 0) {
+          lastSentFrameAt = Date.now();
           ws.send(
             JSON.stringify({
               type: "thumbnail",
@@ -289,6 +368,24 @@ function startCaptureLoop(ws: WebSocket): void {
       });
   }, CAPTURE_INTERVAL_MS);
   captureTimer.unref?.();
+}
+
+/**
+ * 停帧态翻转广播（实例 → 管理器）：只在 paused 进入/退出时发一次 framePaused；
+ * 发送成功才登记已通知态（失败下 tick 重试）。断连时复位（重连后重新上报收敛）。
+ */
+function syncOmnicodeFramePausedNotification(
+  ws: WebSocket,
+  policy: OmnicodeCaptureFramePolicy,
+): void {
+  const paused = resolveOmnicodeFramePausedBroadcast({ policy, lastNotifiedPaused });
+  if (paused === null || ws.readyState !== 1) return;
+  try {
+    ws.send(JSON.stringify({ type: "framePaused", paused }));
+    lastNotifiedPaused = paused;
+  } catch {
+    // 发送失败不登记（下一 tick 按同一翻转重试）；消息仅在状态翻转时产生，无风暴风险
+  }
 }
 
 /** Profile 实例身份启动时由 index.ts 在 app ready 后调用；非实例身份为 no-op。 */
@@ -326,6 +423,10 @@ export function startOmnicodeInstanceBridgeClient(): void {
       }
       stopHelloLoop();
       lastReportedHwndHex = null;
+      // [OmniCode] 后台降载：停帧广播态随连接复位——重连后下一 tick 按当前档位
+      // 重新上报（管理器侧 disconnected 已清停帧态，两侧收敛一致）。
+      lastNotifiedPaused = false;
+      lastSentFrameAt = 0;
       if (!reconnectTimer) {
         reconnectTimer = setTimeout(() => {
           reconnectTimer = null;

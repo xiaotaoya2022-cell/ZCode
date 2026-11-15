@@ -49,6 +49,9 @@ export function useOmnicodeConsoleInstances() {
 
   // 实例事件订阅：thumbnail 帧实时更新（1.4fps/实例，M2 视窗管线；B2-3 帧附 {w,h}）
   const [frames, setFrames] = useState<ReadonlyMap<string, OmnicodeInstanceFrame>>(new Map());
+  // [OmniCode] 后台降载：实例预览停帧态集合（实例窗口 hide/最小化 → 停帧广播；
+  // 恢复帧或断连时清除）。卡片/性能面板据此标注「已停帧」。
+  const [pausedProfileIds, setPausedProfileIds] = useState<ReadonlySet<string>>(new Set());
   // [OmniCode] 批次2.5 X3：托盘聚焦请求（main 广播 focusRequested → 网格滚动定位对应
   // 卡片并短暂高亮；nonce 让同一实例的连续两次请求都能触发效果，spec:
   // docs/omnicode/console-extras.md §X3）
@@ -57,6 +60,18 @@ export function useOmnicodeConsoleInstances() {
     const unsubscribe = platform.onOmnicodeInstanceEvent?.((payload) => {
       if (payload.type === "focusRequested") {
         setFocusRequest({ profileId: payload.profileId, nonce: Date.now() });
+        return;
+      }
+      if (payload.type === "framePaused") {
+        const paused = payload.paused === true;
+        setPausedProfileIds((previous) => {
+          const has = previous.has(payload.profileId);
+          if (paused === has) return previous;
+          const next = new Set(previous);
+          if (paused) next.add(payload.profileId);
+          else next.delete(payload.profileId);
+          return next;
+        });
         return;
       }
       if (payload.type === "thumbnail" && payload.frame) {
@@ -70,6 +85,13 @@ export function useOmnicodeConsoleInstances() {
           next.set(profileId, nextFrame);
           return next;
         });
+        // 帧到达 = 未停帧（恢复事件丢失时由此兜底清除停帧态）。
+        setPausedProfileIds((previous) => {
+          if (!previous.has(profileId)) return previous;
+          const next = new Set(previous);
+          next.delete(profileId);
+          return next;
+        });
       }
       if (payload.type === "disconnected") {
         // [OmniCode] B2 评审修复（P2-8）：断开实例的最后一帧不再保留——已停止实例
@@ -80,6 +102,12 @@ export function useOmnicodeConsoleInstances() {
           next.delete(payload.profileId);
           return next;
         });
+        setPausedProfileIds((previous) => {
+          if (!previous.has(payload.profileId)) return previous;
+          const next = new Set(previous);
+          next.delete(payload.profileId);
+          return next;
+        });
         void refresh();
       }
     });
@@ -87,7 +115,7 @@ export function useOmnicodeConsoleInstances() {
   }, [platform, refresh]);
 
   // [OmniCode] B2 评审修复（P2-8 兜底）：实例停止/删除后清非 running 实例的帧
-  //（disconnected 事件之外的停止路径——如管理器重启后的列表重建）。
+  //（disconnected 事件之外的停止路径——如管理器重启后的列表重建）。停帧态同步清除。
   useEffect(() => {
     setFrames((previous) => {
       if (previous.size === 0) return previous;
@@ -95,6 +123,19 @@ export function useOmnicodeConsoleInstances() {
       let changed = false;
       const next = new Map(previous);
       for (const profileId of next.keys()) {
+        if (!runningIds.has(profileId)) {
+          next.delete(profileId);
+          changed = true;
+        }
+      }
+      return changed ? next : previous;
+    });
+    setPausedProfileIds((previous) => {
+      if (previous.size === 0) return previous;
+      const runningIds = new Set(profiles.filter((profile) => profile.running).map((p) => p.id));
+      let changed = false;
+      const next = new Set(previous);
+      for (const profileId of next) {
         if (!runningIds.has(profileId)) {
           next.delete(profileId);
           changed = true;
@@ -316,6 +357,7 @@ export function useOmnicodeConsoleInstances() {
     loading,
     busy,
     frames,
+    pausedProfileIds,
     focusRequest,
     refresh,
     runningCount,
