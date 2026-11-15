@@ -6,9 +6,42 @@ import {
   type MarketingVisual,
 } from "@zcode/shared";
 
+// [OmniCode] 批次4 单点下沉（spec: docs/omnicode/omnicode-shared-services.md §G3）：
+// 共享取回通道由宿主注入（omnicode 实例 Host → main → 桥 → 管理器缓存）；仅对已过
+// allow 表的资产发起，返回字节须 sha256 复核（授权不下沉、失败回退直连）。
+export interface MarketingSharedAssetFetchInput {
+  src: string;
+  sha256: string;
+  kind: "image" | "video";
+}
+
+/** image/video 媒体字节 → data URL。magic 嗅探与既有 download() 内核同源；不符抛错。 */
+export function buildMarketingMediaDataUrl(bytes: Uint8Array, kind: "image" | "video"): string {
+  const buffer = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+  const mime =
+    kind === "video"
+      ? buffer.toString("ascii", 4, 8) === "ftyp"
+        ? "video/mp4"
+        : undefined
+      : buffer.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex"))
+        ? "image/png"
+        : buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff
+          ? "image/jpeg"
+          : buffer.toString("ascii", 0, 4) === "RIFF" && buffer.toString("ascii", 8, 12) === "WEBP"
+            ? "image/webp"
+            : undefined;
+  if (!mime) throw new Error("marketing_asset_type");
+  return `data:${mime};base64,${buffer.toString("base64")}`;
+}
+
 /** 下载授权只来自宿主已验证的投放响应；Renderer 不能自行授权地址。 */
 export function createMarketingAssetRegistry(
-  options: { fetch?: typeof fetch; allowLoopback?: boolean } = {},
+  options: {
+    fetch?: typeof fetch;
+    allowLoopback?: boolean;
+    // [OmniCode] 批次4 单点下沉：宿主注入的共享取回通道（管理器单点缓存）。抛错即回退直连。
+    sharedFetch?: (input: MarketingSharedAssetFetchInput) => Promise<Uint8Array>;
+  } = {},
 ) {
   const allowed = new Map<string, Set<string>>();
   const cache = new Map<string, { data: string; size: number }>();
@@ -63,28 +96,19 @@ export function createMarketingAssetRegistry(
     const bytes = Buffer.concat(chunks);
     if (createHash("sha256").update(bytes).digest("hex") !== asset.sha256)
       throw new Error("marketing_asset_integrity");
-    const mime =
-      kind === "video"
-        ? bytes.toString("ascii", 4, 8) === "ftyp"
-          ? "video/mp4"
-          : undefined
-        : bytes.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex"))
-          ? "image/png"
-          : bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
-            ? "image/jpeg"
-            : bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP"
-              ? "image/webp"
-              : undefined;
-    if (!mime) throw new Error("marketing_asset_type");
-    const data = `data:${mime};base64,${bytes.toString("base64")}`;
+    return bytes;
+  }
+  // [OmniCode] 批次4 单点下沉改造：download() 改返回字节，data URL 构造与内存缓存插入
+  // 收口到 readMedia——共享取回与直连下载两条路径共用同一套 48MB data-URL 缓存上限与
+  // 淘汰语义（原 download() 内联逻辑原样迁移，行为不变）。
+  function rememberMedia(key: string, data: string) {
     while (cacheBytes + data.length > 48 * 1024 * 1024 && cache.size) {
       const oldest = cache.keys().next().value!;
       cacheBytes -= cache.get(oldest)!.size;
       cache.delete(oldest);
     }
-    cache.set(`${kind}:${asset.sha256}`, { data, size: data.length });
+    cache.set(key, { data, size: data.length });
     cacheBytes += data.length;
-    return data;
   }
   return {
     allow,
@@ -107,10 +131,35 @@ export function createMarketingAssetRegistry(
       if (cached) return cached.data;
       const existing = pending.get(key);
       if (existing) return existing;
-      const promise = download(asset, kind);
+      const promise = (async () => {
+        // [OmniCode] 批次4 单点下沉：先试管理器共享缓存（授权已由 allow 表把关，返回
+        // 字节做 sha256 复核 + magic 嗅探），任何失败回退直连既有下载路径（管理器不可用不瘫）。
+        if (options.sharedFetch) {
+          try {
+            const sharedBytes = await options.sharedFetch({
+              src: asset.src,
+              sha256: asset.sha256,
+              kind,
+            });
+            const sharedBuffer = Buffer.from(sharedBytes);
+            if (
+              sharedBuffer.length <= (kind === "image" ? 8 : 16) * 1024 * 1024 &&
+              createHash("sha256").update(sharedBuffer).digest("hex") === asset.sha256
+            ) {
+              return buildMarketingMediaDataUrl(sharedBuffer, kind);
+            }
+          } catch {
+            /* 共享通道不可用/校验失败：静默回退直连（行为与无共享通道时一致）。 */
+          }
+        }
+        const bytes = await download(asset, kind);
+        return buildMarketingMediaDataUrl(bytes, kind);
+      })();
       pending.set(key, promise);
       try {
-        return await promise;
+        const data = await promise;
+        rememberMedia(key, data);
+        return data;
       } finally {
         pending.delete(key);
       }

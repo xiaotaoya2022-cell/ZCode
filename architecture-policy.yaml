@@ -2454,3 +2454,16 @@ exceptions:
     paths:
       - packages/ui/src/loginVisibleProviders.ts
     reason: 批次3 R1-P2-4 处置把 WelcomeScreen 既有纯函数 resolveVisibleLoginProviders 抽离为独立文件以便工程测试直接覆盖（omnicode flavor 登录首屏 zai_cn 过滤；函数体逐字节不变，仅移动落点，WelcomeScreen 保留 re-export 导出面）；采纳整个 ui 未受管模块不在本次范围内。
+  # [OmniCode] 批次4 单点下沉：营销资产共享缓存（spec: docs/omnicode/omnicode-shared-services.md）。
+  # omnicodeSharedAssets.ts 是请求契约 + 淘汰/去重纯函数（桥/Host 协议与管理器缓存共用，
+  # 同 omnicodeAuth/omnicodeInstanceSort 准入模式）；marketingAssetRegistry/contentBundleCache/
+  # cloudContentService 是既有上游文件的可选参数增补（sharedFetch 注入点 + 失败回退直连，
+  # 授权链路与模块边界不变）。采纳整个 shared/services 模块树不属于本特性。
+  - id: omnicode-shared-assets-asset-fetch
+    rule: unmanaged-new-file
+    paths:
+      - packages/shared/src/omnicodeSharedAssets.ts
+      - packages/services/src/marketing-touch/marketingAssetRegistry.ts
+      - packages/services/src/cloud-content/contentBundleCache.ts
+      - packages/services/src/cloud-content/cloudContentService.ts
+    reason: OmniCode batch-4 assetFetch sinks account-independent marketing asset downloads into the manager singleton; omnicodeSharedAssets.ts is the shared request contract + eviction/dedup pure helpers (same admission pattern as omnicodeAuth/omnicodeInstanceSort), and the three upstream service files only gain optional injected sharedFetch providers with direct-download fallback; authorization chain, owners and module boundaries unchanged, adopting whole shared/services trees is out of scope.

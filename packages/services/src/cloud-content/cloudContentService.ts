@@ -24,6 +24,9 @@ const MIME: Record<string, string> = {
 export function createCloudContentService(options: {
   cacheRoot: string;
   publishedAssets?: ReturnType<typeof createMarketingAssetRegistry>;
+  // [OmniCode] 批次4 单点下沉：透传给 contentBundleCache 的共享 zip 字节通道
+  //（调用前 bundle 已过 publishedAssets.allow 表；spec §G3.2）。
+  sharedBundleFetch?: (bundle: { format: "zip"; url: string; sha256: string; entry: string }) => Promise<Uint8Array>;
 }): ICloudContentService & { disposeAllAndWait(): Promise<void> } {
   let disposed = false;
   let usedCache = false;
@@ -35,6 +38,7 @@ export function createCloudContentService(options: {
     cacheRoot: options.cacheRoot,
     isTrustedUrl: trusted,
     signal: lifetime.signal,
+    ...(options.sharedBundleFetch ? { sharedFetch: options.sharedBundleFetch } : {}),
   });
   const server = createServer((request, response) => {
     void (async () => {

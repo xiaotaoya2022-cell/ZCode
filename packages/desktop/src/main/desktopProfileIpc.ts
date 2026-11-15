@@ -19,9 +19,11 @@ import {
   arrangeOmnicodeInstances,
   cloneOmnicodeProfile,
   createOmnicodeProfile,
+  createOmnicodeSharedAssetsCache,
   ensureOmnicodeInstanceBridgeServerStarted,
   getOmnicodeConsoleDataBaseDir,
   getOmnicodeProfileDir,
+  resolveOmnicodeAssetsCacheRoot,
   handleOmnicodeGlobalPrefsReportFromInstance,
   hasOmnicodeConsoleCredentials,
   isOmnicodeDataBaseDirAdopted,
@@ -185,6 +187,13 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
   // [OmniCode] 批次3：登录态看板数据快照 + 赛博鸡蛋领取执行（数据层，spec:
   // F:\OmniCode\docs\batch3\BATCH3-DESIGN-DISCUSSION.md §2/§3）
   registerDesktopOmnicodeAccountIpcHandlers();
+  // [OmniCode] 批次4 单点下沉（spec: docs/omnicode/omnicode-shared-services.md §G3.4）：
+  // 管理器共享资产缓存仅 omnicode flavor 装配（官方 flavor 零改动——钩子缺席时桥服务
+  // 回结构化错误，实例回退直连）。缓存根懒建：只在首个请求时创建目录。
+  const omnicodeSharedAssetsCache =
+    ZCODE_PRODUCT_FLAVOR === "omnicode"
+      ? createOmnicodeSharedAssetsCache({ cacheRoot: resolveOmnicodeAssetsCacheRoot() })
+      : null;
   setOmnicodeInstanceBridgeManagerHooks({
     onInstanceConnected: (profileId) => {
       notifyOmnicodeInstanceConnected(profileId);
@@ -199,6 +208,14 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
     onOmnicodeGlobalPrefsReport: (profileId, prefs, sourceInstanceId) => {
       void handleOmnicodeGlobalPrefsReportFromInstance(prefs, sourceInstanceId);
     },
+    // [OmniCode] 批次4 单点下沉：实例共享资产取回 → 管理器缓存解析（结构化失败由
+    // 缓存模块返回，不抛越钩子边界；实例侧按 ok=false 回退直连）。
+    ...(omnicodeSharedAssetsCache
+      ? {
+          onSharedAssetFetchRequest: (profileId: string, request: unknown) =>
+            omnicodeSharedAssetsCache.resolve(request),
+        }
+      : {}),
   });
   // 装配时初始化持久化模式（窗口引用由 index.ts 在主窗口创建后补挂）
   void setupOmnicodeConsoleEmbedding();

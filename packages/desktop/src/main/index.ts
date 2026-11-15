@@ -6,7 +6,10 @@ import { createRemoteConversationTelemetryDispatcher } from "@zcode/shared/conve
 import { installRequestSecurityDiagnostics } from "./request-security-edition/index.js";
 import { createLocalTtftExporter } from "./localTtftExporter.js";
 // [OmniCode] Profile 实例桥接客户端（spec: docs/omnicode/profile-runtime.md）
-import { startOmnicodeInstanceBridgeClient } from "./omnicode/instanceBridgeClient.js";
+import {
+  requestOmnicodeSharedAssetFromManager,
+  startOmnicodeInstanceBridgeClient,
+} from "./omnicode/instanceBridgeClient.js";
 /* eslint-disable max-lines */
 // [OmniCode] Profile 实例身份引导：必须先于一切早期 bootstrap（spec: docs/omnicode/profile-runtime.md）
 import "./omnicode/profileBootstrap.js";
@@ -125,6 +128,7 @@ import {
   ZCODE_PRODUCT_FLAVOR,
   isOmnicodeManagerProcess,
   isOmnicodeProfileInstanceEnv,
+  type OmnicodeSharedAssetRequest,
   ZCODE_AUTO_UPDATE_ENABLED,
   DEFAULT_ZCODE_ENDPOINT_ORIGIN,
   DEFAULT_LOCALE,
@@ -2340,6 +2344,15 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
             retry: (sourceServerId) =>
               remoteSessionManager.retryProviderProvisioning(sourceServerId),
           },
+          // [OmniCode] 批次4 单点下沉：共享营销资产取回（实例 main 经桥问管理器）。
+          // 仅实例身份装配——官方/控制台 Host 不注入，Host 侧收结构化错误即回退直连
+          //（spec: docs/omnicode/omnicode-shared-services.md §G3.3/§G3.5）。
+          ...(isOmnicodeProfileInstanceEnv()
+            ? {
+                handleSharedAssetFetchRequest: (request: OmnicodeSharedAssetRequest) =>
+                  requestOmnicodeSharedAssetFromManager(request),
+              }
+            : {}),
         },
         {
           taskRealtime: {

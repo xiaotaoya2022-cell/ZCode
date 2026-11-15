@@ -1,4 +1,8 @@
-import { normalizeRemoteConnectionError, sanitizeRemoteConnectionLog } from "@zcode/shared";
+import {
+  isOmnicodeProfileInstanceEnv,
+  normalizeRemoteConnectionError,
+  sanitizeRemoteConnectionLog,
+} from "@zcode/shared";
 import { createCredentialCipherBridge } from "@zcode/shared/credential-security";
 import { join } from "node:path";
 /* eslint-disable max-lines -- Host 入口集中编排 local/remote service wiring，本次退出保护需要在同一处桥接 host 上报。 */
@@ -353,6 +357,46 @@ function shareCredentialKeyWithDataRoot(targetBaseDir: string): Promise<void> {
       });
     } catch (error) {
       pendingCredentialKeyShares.delete(requestId);
+      reject(error instanceof Error ? error : new Error(String(error)));
+    }
+  });
+}
+
+// [OmniCode] 批次4 单点下沉（spec: docs/omnicode/omnicode-shared-services.md §G3.3）：
+// host → main 共享营销资产取回（仅实例身份装配进 createLocalServices；main 经桥问管理器）。
+// Host 侧 50s 安全网超时高于桥链路 40s 预算，只防悬挂泄漏；失败回退直连既有下载路径。
+interface PendingSharedAssetRequest {
+  resolve: (bytes: Uint8Array) => void;
+  reject: (error: Error) => void;
+}
+const pendingSharedAssetRequests = new Map<string, PendingSharedAssetRequest>();
+const SHARED_ASSET_HOST_TIMEOUT_MS = 50_000;
+
+function requestSharedMarketingAsset(input: {
+  src: string;
+  sha256: string;
+  kind: "image" | "video" | "bundle";
+}): Promise<Uint8Array> {
+  if (!parentPort) {
+    return Promise.reject(new Error("parentPort unavailable"));
+  }
+  const requestId = randomUUID();
+  return new Promise<Uint8Array>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingSharedAssetRequests.delete(requestId);
+      reject(new Error("shared_asset_timeout"));
+    }, SHARED_ASSET_HOST_TIMEOUT_MS);
+    timer.unref?.();
+    pendingSharedAssetRequests.set(requestId, { resolve, reject });
+    try {
+      parentPort.postMessage({
+        type: HostResponseTypes.SharedAssetFetchRequest,
+        requestId,
+        request: input,
+      });
+    } catch (error) {
+      clearTimeout(timer);
+      pendingSharedAssetRequests.delete(requestId);
       reject(error instanceof Error ? error : new Error(String(error)));
     }
   });
@@ -3432,6 +3476,20 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
     return;
   }
 
+  // [OmniCode] 批次4 单点下沉：共享资产取回应答（ok=false → 回退直连既有下载路径；
+  // 迟到/陌生 requestId 直接丢弃，防串扰）。
+  if (msg.type === HostMessageTypes.SharedAssetFetchResult) {
+    const pending = pendingSharedAssetRequests.get(msg.requestId);
+    if (!pending) return;
+    pendingSharedAssetRequests.delete(msg.requestId);
+    if (msg.ok && msg.dataBase64) {
+      pending.resolve(new Uint8Array(Buffer.from(msg.dataBase64, "base64")));
+    } else {
+      pending.reject(new Error(msg.error ?? "shared_asset_fetch_failed"));
+    }
+    return;
+  }
+
   if (msg.type === HostMessageTypes.CronRun) {
     if (databaseStartup?.coordinator.snapshot.phase !== "ready") {
       parentPort.postMessage({
@@ -4290,6 +4348,11 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
               },
               parentPort,
               credentialCipherProvider: credentialCipherBridge.cipher,
+              // [OmniCode] 批次4 单点下沉：仅实例身份 Host 注入共享营销资产取回通道
+              //（官方/控制台/远端 Host 不注入，行为与现状逐字节一致，spec §G3.5）。
+              ...(isOmnicodeProfileInstanceEnv()
+                ? { sharedMarketingAssetFetch: requestSharedMarketingAsset }
+                : {}),
               settingService,
               prepareLegacyAccountConnections,
               hostApiNetworkTransport,

@@ -124,6 +124,10 @@ export function createContentBundleCache(options: {
   isTrustedUrl: (url: URL) => boolean;
   fetch?: typeof globalThis.fetch;
   signal?: AbortSignal;
+  // [OmniCode] 批次4 单点下沉（spec: docs/omnicode/omnicode-shared-services.md §G3）：
+  // 宿主注入的共享 zip 字节通道（管理器单点缓存）。返回字节须与 bundle.sha256 复核；
+  // 抛错/不符回退直连 download()。解压/租约/本地 HTTP 服务仍在实例侧（§G3.6 已知限制）。
+  sharedFetch?: (bundle: ContentBundle) => Promise<Uint8Array>;
 }) {
   const leases = new Map<string, { digest: string; manifest: Manifest }>();
   let pending: Promise<unknown> = Promise.resolve();
@@ -142,6 +146,26 @@ export function createContentBundleCache(options: {
     )
       throw new Error("bundle_source");
     return url;
+  }
+  // [OmniCode] 批次4 单点下沉：先试宿主注入的共享 zip 字节通道（管理器单点缓存，授权
+  // 已由 cloudContentService.prepare 的 allow 表把关），字节经 sha256 复核；任何失败
+  // 静默回退直连 download()——管理器不可用/校验不符不瘫（行为与无共享通道时一致）。
+  async function downloadWithSharedFallback(bundle: ContentBundle): Promise<Buffer> {
+    if (options.sharedFetch) {
+      try {
+        const sharedBytes = Buffer.from(await options.sharedFetch(bundle));
+        if (
+          sharedBytes.length <= ZIP_LIMIT &&
+          hash(sharedBytes) === bundle.sha256 &&
+          (bundle.sizeBytes === undefined || sharedBytes.length === bundle.sizeBytes)
+        ) {
+          return sharedBytes;
+        }
+      } catch {
+        /* 共享通道不可用：回退直连。 */
+      }
+    }
+    return download(bundle);
   }
   async function download(bundle: ContentBundle): Promise<Buffer> {
     let url = trustedUrl(bundle.url);
@@ -267,7 +291,7 @@ export function createContentBundleCache(options: {
         if (!manifest) {
           if ([...leases.values()].some((lease) => lease.digest === bundle.sha256))
             throw new Error("bundle_active_cache_corrupt");
-          const bytes = await download(bundle);
+          const bytes = await downloadWithSharedFallback(bundle);
           const staging = await mkdtemp(join(stagingRoot, "bundle-"));
           try {
             manifest = await extract(bytes, staging);
