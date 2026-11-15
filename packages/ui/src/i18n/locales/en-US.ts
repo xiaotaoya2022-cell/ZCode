@@ -363,6 +363,7 @@ const enUS: Record<string, string> = {
   "project.new": "New project",
   "project.tasks": "Tasks",
   "project.createTask": "New task",
+  "project.refreshSessions": "Refresh session list",
   "project.showMore": "Show more",
   "project.restore": "Restore project",
   "project.worktrees": "Worktrees",
