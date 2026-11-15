@@ -293,6 +293,12 @@ export type {
   OmnicodeAccountClaimRunRequest,
   OmnicodeAccountClaimRunResult,
   OmnicodeAccountClaimEventPayload,
+  // [OmniCode] 批次3 UI 批次：赛博鸡蛋检测（门票叠数据源）+ 账号邮箱脱敏
+  OmnicodeAccountDetectionState,
+  OmnicodeAccountDetectionEntry,
+  OmnicodeAccountDetectionSummary,
+  OmnicodeAccountDetectResult,
+  OmnicodeAccountDetectRequest,
   DesktopCloseToTrayCapability,
   DesktopCommandId,
   CuaOsSupport,
@@ -344,6 +350,8 @@ export {
   resolveOmnicodeInstanceDocked,
   resolveOmnicodeEmbedResizeHeightCss,
 } from "./platform.js";
+// [OmniCode] 批次3 UI 批次：账号邮箱脱敏（main 检测结果与 renderer 看板卡共用）
+export { maskOmnicodeAccountEmail } from "./platform.js";
 export type {
   CuaAccessibilitySettingsResult,
   CuaPermissionKind,

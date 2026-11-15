@@ -116,6 +116,9 @@ import type {
   OmnicodeAccountClaimRunRequest,
   OmnicodeAccountClaimRunResult,
   OmnicodeAccountClaimEventPayload,
+  // [OmniCode] 批次3 UI 批次：赛博鸡蛋检测（门票叠数据源）
+  OmnicodeAccountDetectRequest,
+  OmnicodeAccountDetectResult,
   SSHConfigAliasOption,
   WebRemoteControlContext,
   WebRemoteControlReconnectWorkspaceRequest,
@@ -478,6 +481,11 @@ contextBridge.exposeInMainWorld("zcode", {
           ipcRenderer.on(PlatformChannels.OmnicodeAccountClaimEvent, handler);
           return () => ipcRenderer.removeListener(PlatformChannels.OmnicodeAccountClaimEvent, handler);
         },
+        // [OmniCode] 批次3 UI 批次：赛博鸡蛋检测（逐账号 preview，main 侧汇聚）
+        getOmnicodeAccountDetect: (
+          payload: OmnicodeAccountDetectRequest,
+        ): Promise<OmnicodeAccountDetectResult> =>
+          ipcRenderer.invoke(PlatformChannels.OmnicodeAccountDetectGet, payload),
       }
     : {}),
   // [OmniCode] 失败态恢复入口：手动粘贴完整 OAuth 回调 URL，main 复用 handleDeepLink 路由

@@ -6,6 +6,8 @@ import type {
   OmnicodeAccountClaimRunRequest,
   OmnicodeAccountClaimRunResult,
   OmnicodeAccountDashboardSnapshot,
+  OmnicodeAccountDetectRequest,
+  OmnicodeAccountDetectResult,
   OmnicodeAccountSnapshotRequest,
   OmnicodeConsoleEmbedLayoutInput,
   OmnicodeConsolePreviewStateInput,
@@ -111,4 +113,9 @@ export const desktopOmnicodePlatformBridge = {
     handler: (payload: OmnicodeAccountClaimEventPayload) => void,
   ): (() => void) =>
     window.zcode.onOmnicodeAccountClaimEvent?.(handler) ?? (() => {}),
+  // [OmniCode] 批次3 UI 批次：赛博鸡蛋检测（逐账号 preview，main 侧汇聚）
+  getOmnicodeAccountDetect: (
+    payload: OmnicodeAccountDetectRequest,
+  ): Promise<OmnicodeAccountDetectResult> =>
+    requireBridge(window.zcode.getOmnicodeAccountDetect?.(payload)),
 };

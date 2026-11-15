@@ -93,6 +93,9 @@ import type {
   OmnicodeAccountClaimRunRequest,
   OmnicodeAccountClaimRunResult,
   OmnicodeAccountClaimEventPayload,
+  // [OmniCode] 批次3 UI 批次：赛博鸡蛋检测（门票叠数据源）
+  OmnicodeAccountDetectRequest,
+  OmnicodeAccountDetectResult,
   OmnicodeProfileIdInput,
   OpenInEditorOptions,
   PostUpdateReleaseNotesPayload,
@@ -311,6 +314,9 @@ export const PlatformChannels = {
   OmnicodeAccountClaimRun: "zcode:omnicode-account-claim-run",
   // [OmniCode] 批次3：领取执行进度事件广播（main → renderer；逐张动效数据源）
   OmnicodeAccountClaimEvent: "zcode:omnicode-account-claim-event",
+  // [OmniCode] 批次3 UI 批次：赛博鸡蛋检测（逐账号 preview，main 汇总；低频触发：
+  // 启动一次/手动/30min 自动轮询。spec 同上 §3）
+  OmnicodeAccountDetectGet: "zcode:omnicode-account-detect-get",
   /** Renderer → Main：用 Chromium 打印引擎把当前页面 print 媒体版面导出为 PDF */
   PrintToPdf: "zcode:print-to-pdf",
   /** Renderer → Main：检查并按需请求系统麦克风权限 */
@@ -1047,6 +1053,11 @@ export interface PlatformChannelMap {
   [PlatformChannels.OmnicodeAccountClaimEvent]: {
     request: OmnicodeAccountClaimEventPayload;
     response: void;
+  };
+  // [OmniCode] 批次3 UI 批次：赛博鸡蛋检测（逐账号 preview，main 侧汇聚）
+  [PlatformChannels.OmnicodeAccountDetectGet]: {
+    request: OmnicodeAccountDetectRequest;
+    response: OmnicodeAccountDetectResult;
   };
   [PlatformChannels.PrintToPdf]: {
     request: void;
