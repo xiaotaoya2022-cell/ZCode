@@ -222,6 +222,14 @@ async function dispatchOmnicodeGlobalPrefsChange(prefs: OmnicodeGlobalPrefsPaylo
   if (!shouldDispatchOmnicodeGlobalPrefs(normalized)) return;
   if (deps.identity === "manager") {
     broadcastOmnicodeGlobalPrefsDownstream(normalized, OMNICODE_GLOBAL_PREFS_MANAGER_SOURCE_ID);
+    // 管理器自身改 theme 也要落侧车（与上行接收路径同一写盘内核）：manager 的 renderer
+    // 已自写 localStorage，但快照读的是侧车——只广播不落盘时，任一实例回连即被推回旧
+    // 主题（跨实例漂移，直到某实例用户再改主题才收敛）。fire-and-forget，不阻断广播。
+    if (normalized.theme !== undefined) {
+      void writeOmnicodeGlobalPrefsSidecarTheme(normalized.theme).catch((error) => {
+        deps.logger.warn("[omnicode] manager theme 侧车写入失败（不阻断同步）:", error);
+      });
+    }
     return;
   }
   // 实例：上行上报（fire-and-forget；未连接丢弃——下次变更再报，连接即推快照兜底收敛）。
@@ -287,6 +295,19 @@ export function broadcastOmnicodeGlobalPrefsDownstream(
 }
 
 // ─── 上行接收（管理器侧） ───
+
+/**
+ * 上行 sourceInstanceId 认证绑定：桥握手已验的 profileId 是唯一可信身份，客户端
+ * 自报 sourceInstanceId 不可信（同机实例可伪造他人 id → 该实例把下行误判回声、
+ * 漏收本次同步；连接快照兜底收敛，但有界漂移窗口）。真身非空即覆盖自报值；
+ * 空真身（理论不可达）回退自报值，保持既有兜底形态。
+ */
+export function bindOmnicodeGlobalPrefsSourceInstanceId(
+  authenticatedProfileId: string,
+  reportedSourceInstanceId: string,
+): string {
+  return authenticatedProfileId || reportedSourceInstanceId || "";
+}
 
 export interface OmnicodeGlobalPrefsApplyResult {
   status: "applied" | "echo-ignored" | "noop";

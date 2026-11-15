@@ -21,6 +21,7 @@ import {
   sanitizeOmnicodeGlobalPrefsPayload,
 } from "@zcode/shared";
 import {
+  bindOmnicodeGlobalPrefsSourceInstanceId,
   getOmnicodeGlobalPrefsIdentity,
   handleOmnicodeGlobalPrefsApplyCommand,
   handleOmnicodeGlobalPrefsReportFromInstance,
@@ -238,6 +239,43 @@ describe("omnicode batch4 global prefs: coordinator routing & ring suppression",
     expect(harness.applies.at(-1)?.prefs).toEqual({ localePreference: "system" });
   });
 
+  it("manager 自身派发 theme → sidecar 文件内容同步更新（连接即推快照不回灌旧主题）", async () => {
+    const sidecarRoot = mkdtempSync(join(tmpdir(), "omnicode-prefs-"));
+    const previousDataBaseDir = process.env.ZCODE_DATA_BASE_DIR;
+    process.env.ZCODE_DATA_BASE_DIR = sidecarRoot;
+    try {
+      const harness = createCoordinatorHarness({ identity: "manager" });
+      initOmnicodeGlobalPrefsCoordinator(harness.deps);
+      harness.setConnected([SELF_PROFILE_ID]);
+      // 初态：侧车不存在（无主题记忆）
+      expect(await readOmnicodeGlobalPrefsSidecarTheme()).toBeUndefined();
+      // 管理器用户改主题 A→B：下行广播立即投出（与侧车写盘时序解耦）
+      noteOmnicodeRendererStateBroadcastForGlobalPrefs("state:theme", "zai-dark");
+      expect(harness.applies.map((entry) => entry.prefs)).toEqual([{ theme: "zai-dark" }]);
+      // 派发分支 fire-and-forget 落侧车（与上行接收路径同一写盘内核）：轮询等原子写完成
+      let sidecarTheme: string | undefined;
+      for (let i = 0; i < 50 && sidecarTheme === undefined; i += 1) {
+        sidecarTheme = await readOmnicodeGlobalPrefsSidecarTheme();
+        if (sidecarTheme === undefined) {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+      }
+      expect(sidecarTheme).toBe("zai-dark");
+      // 非 theme 载荷（locale）不触碰侧车（只 theme 键写盘）
+      noteOmnicodeRendererStateBroadcastForGlobalPrefs("state:locale", {
+        preference: "zh-CN",
+        resolvedLocale: "zh-CN",
+      });
+      expect(harness.applies.at(-1)?.prefs).toEqual({ locale: "zh-CN", localePreference: "zh-CN" });
+      expect(await readOmnicodeGlobalPrefsSidecarTheme()).toBe("zai-dark");
+    } finally {
+      if (previousDataBaseDir === undefined) delete process.env.ZCODE_DATA_BASE_DIR;
+      else process.env.ZCODE_DATA_BASE_DIR = previousDataBaseDir;
+      rmSync(sidecarRoot, { recursive: true, force: true });
+      resetOmnicodeGlobalPrefsCoordinatorForTest();
+    }
+  });
+
   it("manager 身份：SyncAppSettings patch 观察 → 白名单过滤后下行", () => {
     const harness = createCoordinatorHarness({ identity: "manager" });
     initOmnicodeGlobalPrefsCoordinator(harness.deps);
@@ -388,6 +426,20 @@ describe("omnicode batch4 global prefs: coordinator routing & ring suppression",
       rmSync(sidecarRoot, { recursive: true, force: true });
       resetOmnicodeGlobalPrefsCoordinatorForTest();
     }
+  });
+
+  it("reportGlobalPrefs sourceInstanceId 认证绑定：伪造他人 id 被真身覆盖（P2 回归）", () => {
+    // 桥握手已验 profileId 是唯一可信身份：客户端自报他人 id 一律改写为真身
+    expect(bindOmnicodeGlobalPrefsSourceInstanceId(SELF_PROFILE_ID, OTHER_PROFILE_ID)).toBe(
+      SELF_PROFILE_ID,
+    );
+    // 真身与自报一致（正常路径）原样通过
+    expect(bindOmnicodeGlobalPrefsSourceInstanceId(SELF_PROFILE_ID, SELF_PROFILE_ID)).toBe(
+      SELF_PROFILE_ID,
+    );
+    // 空真身（理论不可达——握手失败根本到不了钩子）回退自报值，保持既有兜底形态
+    expect(bindOmnicodeGlobalPrefsSourceInstanceId("", OTHER_PROFILE_ID)).toBe(OTHER_PROFILE_ID);
+    expect(bindOmnicodeGlobalPrefsSourceInstanceId("", "")).toBe("");
   });
 
   it("manager 收上行：system 偏好只落 localePreference；空/全非法载荷 noop", async () => {

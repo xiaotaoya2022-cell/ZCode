@@ -24,6 +24,7 @@ import {
   getOmnicodeConsoleDataBaseDir,
   getOmnicodeProfileDir,
   resolveOmnicodeAssetsCacheRoot,
+  bindOmnicodeGlobalPrefsSourceInstanceId,
   handleOmnicodeGlobalPrefsReportFromInstance,
   hasOmnicodeConsoleCredentials,
   isOmnicodeDataBaseDirAdopted,
@@ -205,8 +206,13 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
     onInstanceHello: (profileId, hwndHex) => notifyOmnicodeInstanceHello(profileId, hwndHex),
     // [OmniCode] 批次4：实例上行全局偏好（载荷已在桥服务侧消毒；协调器内二次消毒 +
     // 管理器写全局层 + state:* 热应用 + 下行广播，spec: docs/omnicode/global-preferences.md）。
+    // sourceInstanceId 绑定认证身份：钩子首参 = 桥握手已验 profileIdParam，真身覆盖
+    // 客户端自报值（伪造他人 id 会让目标实例误判回声、漏收该次同步）。
     onOmnicodeGlobalPrefsReport: (profileId, prefs, sourceInstanceId) => {
-      void handleOmnicodeGlobalPrefsReportFromInstance(prefs, sourceInstanceId);
+      void handleOmnicodeGlobalPrefsReportFromInstance(
+        prefs,
+        bindOmnicodeGlobalPrefsSourceInstanceId(profileId, sourceInstanceId),
+      );
     },
     // [OmniCode] 批次4 单点下沉：实例共享资产取回 → 管理器缓存解析（结构化失败由
     // 缓存模块返回，不抛越钩子边界；实例侧按 ok=false 回退直连）。

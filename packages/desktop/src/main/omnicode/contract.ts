@@ -71,6 +71,7 @@ export type { OmnicodeSharedAssetsCacheDeps } from "./sharedAssetsCache.js";
 export { requestOmnicodeSharedAssetFromManager } from "./instanceBridgeClient.js";
 export type { OmnicodeSharedAssetFetchReply } from "./instanceBridgeClient.js";
 export {
+  bindOmnicodeGlobalPrefsSourceInstanceId,
   getOmnicodeGlobalPrefsIdentity,
   handleOmnicodeGlobalPrefsReportFromInstance,
   initOmnicodeGlobalPrefsCoordinator,
