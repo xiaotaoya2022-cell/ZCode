@@ -9,7 +9,7 @@
 // - 桥 rename 命令：manager → 实例帧（title = "ZCode [新名]"）。
 // - 锁 displayName 热更新：心跳重写锁文件 displayName + 最新注册表名读取（env 快照过期兜底）。
 import { mkdtemp, readFile, rm, mkdir, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -145,6 +145,40 @@ describe("omnicode batch5: sortOmnicodeInstances 三模式", () => {
       customOrder: [PID_B, PID_A, PID_C],
     });
     expect(full.map((item) => item.id)).toEqual([PID_B, PID_A, PID_C]);
+  });
+
+  it("custom 模式：全部未登记（rank ∞-∞ = NaN）不吞 tie-break，落 seq/createdAt 兜底", () => {
+    // customOrder 过期（指向已删除实例）+ 新实例未登记：两两 rank 差都是 ∞-∞ = NaN。
+    // 旧实现 `NaN !== 0` 为真把 NaN 交还 comparator（V8 视作 0）→ 未登记项之间
+    // 既不按 customOrder 也不落 seq/createdAt 兜底；修复后必须收敛到 seq 序。
+    const unregistered = [
+      { id: PID_B, name: "b", seq: 1, createdAt: "2026-01-01T00:00:00Z" },
+      { id: PID_C, name: "c", seq: 2, createdAt: "2026-01-02T00:00:00Z" },
+      { id: PID_A, name: "a", seq: 3, createdAt: "2026-01-03T00:00:00Z" },
+    ];
+    expect(
+      sortOmnicodeInstances(unregistered, { mode: "custom", customOrder: ["pdeleted000", "pgone11111"] }).map(
+        (item) => item.id,
+      ),
+    ).toEqual([PID_B, PID_C, PID_A]);
+    // seq 缺失形态：同为未登记且无 seq → createdAt 兜底（再看 id 终兜底）
+    const noSeq = [
+      { id: PID_C, name: "c", createdAt: "2026-01-02T00:00:00Z" },
+      { id: PID_A, name: "a", createdAt: "2026-01-03T00:00:00Z" },
+      { id: PID_B, name: "b", createdAt: "2026-01-01T00:00:00Z" },
+    ];
+    expect(
+      sortOmnicodeInstances(noSeq, { mode: "custom", customOrder: [] }).map((item) => item.id),
+    ).toEqual([PID_B, PID_C, PID_A]);
+    // 混合形态：已登记项按 rank 在前，未登记项之间仍落 seq 兜底
+    const mixed = [
+      { id: PID_A, name: "a", seq: 5, createdAt: "2026-01-03T00:00:00Z" },
+      { id: PID_B, name: "b", seq: 2, createdAt: "2026-01-01T00:00:00Z" },
+      { id: PID_C, name: "c", seq: 1, createdAt: "2026-01-02T00:00:00Z" },
+    ];
+    expect(
+      sortOmnicodeInstances(mixed, { mode: "custom", customOrder: [PID_A] }).map((item) => item.id),
+    ).toEqual([PID_A, PID_C, PID_B]);
   });
 
   it("sortOmnicodeInstances 不改变输入数组", () => {
@@ -504,6 +538,29 @@ describe("omnicode batch5: 锁占用者名热更新", () => {
     // 不传名（undefined）时保留既有 displayName（向后兼容）
     expect(heartbeatWorkspaceLock("F:/ws/lock-a", PID_A, process.pid)).toBe(true);
     expect(readWorkspaceLockOwner("F:/ws/lock-a")?.displayName).toBe("新名");
+  });
+
+  it("心跳重写为原子发布（tmp+rename）：锁文件恒为完整 JSON，零 .tmp 孤儿残留", () => {
+    expect(acquireWorkspaceLock("F:/ws/lock-b", PID_B, process.pid, "原子写前").ok).toBe(true);
+    // 多拍心跳：每拍都走 temp 落盘 + rename 原子发布
+    for (let i = 0; i < 5; i += 1) {
+      expect(heartbeatWorkspaceLock("F:/ws/lock-b", PID_B, process.pid, `原子写后${i}`)).toBe(true);
+    }
+    const locksDir = join(sharedRoot, "workspace-locks");
+    const lockFiles = readdirSync(locksDir).filter((name) => name.endsWith(".json"));
+    expect(lockFiles).toHaveLength(1);
+    // 锁文件内容恒为完整 JSON（rename 原子发布，读者永不见半截写入）
+    const lockPath = join(locksDir, lockFiles[0] ?? "");
+    const parsed = JSON.parse(readFileSync(lockPath, "utf8")) as {
+      displayName?: string;
+      profileId?: string;
+    };
+    expect(parsed.profileId).toBe(PID_B);
+    expect(parsed.displayName).toBe("原子写后4");
+    // 零 .tmp 孤儿残留（rename 成功即清；异常路径由实现内 catch 兜底）
+    expect(readdirSync(locksDir).filter((name) => name.includes(".tmp."))).toEqual([]);
+    // 读端语义不变：owner/装饰读取照常
+    expect(readWorkspaceLockOwner("F:/ws/lock-b")?.displayName).toBe("原子写后4");
   });
 
   it("readLatestOmnicodeProfileDisplayName：读 profile.json 最新 name（env 快照过期兜底）", async () => {

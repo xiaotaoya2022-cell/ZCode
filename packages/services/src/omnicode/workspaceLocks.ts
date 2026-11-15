@@ -6,7 +6,7 @@
 // 获取：fs "wx" 旗标（CREATE_NEW 原子语义）——"先读后写"不出现在流程里（spec §并发与竞态）。
 // 自愈：heartbeatAt 超 LOCK_STALE_MS 或 pid 不存活 → 无主锁，读取时懒清理。
 // 同实例（profileId 相同）的多个窗口不互斥：由单进程官方运行时自行串行（spec §决策 D3）。
-import { existsSync, mkdirSync, readdirSync, closeSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, closeSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
@@ -246,6 +246,31 @@ export function acquireWorkspaceLock(
   }
 }
 
+/**
+ * [OmniCode] 终审 P2 修复：锁文件原子重写（与 desktop atomicJson 同内核语义——
+ * temp 落盘 + rename 原子发布）。裸 writeFileSync（truncate+write）存在半截写入
+ * 窗口，并发读者（readLockEntry/listWorkspaceLocks）会拿到无法解析的 JSON；本批
+ * 起心跳每次都重写（displayName 自愈），放大面改由原子写收口。per-lock 单写者
+ * （profileId+pid 归属校验）无需 per-path 写锁；temp 名含 pid+纳秒防碰撞，失败
+ * 清理不掩盖原始错误（调用方 coordinator 已 try/catch，下拍重试）。
+ */
+function atomicWriteLockFile(lockPath: string, payload: string): void {
+  const tempPath = `${lockPath}.tmp.${process.pid}.${Date.now()}${Math.random()
+    .toString(36)
+    .slice(2, 6)}`;
+  try {
+    writeFileSync(tempPath, payload, "utf8");
+    renameSync(tempPath, lockPath);
+  } catch (error) {
+    try {
+      rmSync(tempPath, { force: true });
+    } catch {
+      // temp 清理失败不掩盖原始错误
+    }
+    throw error;
+  }
+}
+
 /** 心跳：仅当锁归属当前实例时续期。返回是否仍持有。 */
 export function heartbeatWorkspaceLock(
   workspacePath: string,
@@ -263,7 +288,7 @@ export function heartbeatWorkspaceLock(
     heartbeatAt: Date.now(),
     ...(freshName ? { displayName: freshName } : {}),
   };
-  writeFileSync(lockPath, JSON.stringify(updated), "utf8");
+  atomicWriteLockFile(lockPath, JSON.stringify(updated));
   return true;
 }
 
