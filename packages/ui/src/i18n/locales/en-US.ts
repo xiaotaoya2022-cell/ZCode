@@ -4137,8 +4137,6 @@ const enUS: Record<string, string> = {
   "console.undockedOverlayTitle": "Undocked · the instance window runs independently",
   "console.undockedOverlayHint": "Click the card to focus the real window",
   "console.previewOffBadge": "Preview off",
-  // [OmniCode] 后台降载：实例窗口不可见停帧中的预览标注
-  "console.previewPausedBadge": "Preview paused",
   "console.backToGrid": "Back to grid",
   "console.zoomInTitle": "Zoom to single view (same as double-clicking the card)",
   "console.resizeHandleTitle": "Drag to resize the docked window (160×96 minimum)",

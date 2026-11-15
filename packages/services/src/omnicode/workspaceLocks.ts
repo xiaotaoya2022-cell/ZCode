@@ -142,10 +142,12 @@ export interface WorkspaceLockedByOtherErrorData {
 }
 
 /**
- * [OmniCode] B2-2 打开守卫判定（纯函数，spec: docs/omnicode/profile-runtime.md §批次2 D8）：
- * 输入某工作区的锁占用事实 + 本实例身份 + 用户是否选择「只读打开」，输出打开决策——
+ * [OmniCode] B2-2 打开守卫判定（纯函数，spec: docs/omnicode/profile-runtime.md §批次2 D8；
+ * D11 修订：renderer 冲突处置改自动观察者——守卫本身不变，reject 仍是 omnicode 打开流
+ * 的唯一守卫态，observer 态由 renderer 侧 resolveOmnicodeLockConflictOpenAction 自主决策）：
+ * 输入某工作区的锁占用事实 + 本实例身份 + 是否请求观察者打开，输出打开决策——
  * - 无锁 / 自持（同 profileId，含同实例多窗口）→ open：正常打开，锁仍由协调器按打开集合对账获取；
- * - 被他实例持有 → reject：拒绝可写打开（saveProject 守卫抛结构化错误冒泡，UI 弹锁冲突对话框）；
+ * - 被他实例持有 → reject：拒绝可写打开（saveProject 守卫抛结构化错误冒泡，UI 按冲突处置走观察者）；
  * - 被他实例持有且 observerRequested → observer：只读观察者打开（不获取锁、不进锁集合）。
  */
 export type WorkspaceOpenGuardDecision =
