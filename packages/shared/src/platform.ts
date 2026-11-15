@@ -632,6 +632,22 @@ export function resolveOmnicodeEmbedResizeHeightCss(input: OmnicodeEmbedResizeDr
   return Math.max(minHeightCss, input.startHeightCss + delta);
 }
 
+/**
+ * [OmniCode] 批次3 UI 批次：账号邮箱脱敏（纯函数，main 检测结果与 renderer 看板卡共用）。
+ * 规则对齐演示稿 `xia***@z.ai`：本地部分保留前 3 个字符（不足 3 全保留）+ "***"，
+ * 域名原样；无本地部分的畸形输入原样返回；空/非字符串返回 undefined（UI 显示 "——"）。
+ * 展示字段，非安全边界——凭据红线（token/设备号不进 IPC）与它无关。
+ */
+export function maskOmnicodeAccountEmail(email: unknown): string | undefined {
+  if (typeof email !== "string") return undefined;
+  const trimmed = email.trim();
+  const at = trimmed.lastIndexOf("@");
+  if (at <= 0) return trimmed.length > 0 ? trimmed : undefined;
+  const local = trimmed.slice(0, at);
+  const domain = trimmed.slice(at);
+  return `${local.slice(0, 3)}***${domain}`;
+}
+
 /** 实时预览订阅状态：总开关（默认开）+ 视口内运行中卡片集合（IntersectionObserver）。 */
 export interface OmnicodeConsolePreviewStateInput {
   previewEnabled: boolean;
@@ -801,6 +817,73 @@ export type OmnicodeAccountClaimEventPayload =
       /** 用户中断（skip 剩余）时为 true。 */
       aborted: boolean;
     };
+
+// ─── [OmniCode] 批次3 UI 批次：赛博鸡蛋检测（门票叠数据源）。检测 = 对每个可用账号
+// 调 preview（走既有 billingClient，实例不必在运行）；结果在 main 侧汇聚后经
+// OmnicodeAccountDetectGet 出 IPC。邮箱在 main 侧脱敏后才进载荷（PII 最小化）。
+
+/** 单账号检测状态（与 balance 的 balanceState 语义不同：多了 claimable/no_claim）。 */
+export type OmnicodeAccountDetectionState =
+  | "claimable"
+  | "no_claim"
+  | "skipped_no_device_mid"
+  | "missing_jwt"
+  | "failed"
+  | "unknown";
+
+/** 检测单账号条目（preview 结果 + 身份展示字段）。 */
+export interface OmnicodeAccountDetectionEntry {
+  profileId: string;
+  profileName: string;
+  /** 展示名：identity.displayName 优先，否则 profileName。 */
+  displayName: string;
+  /** 脱敏邮箱（maskOmnicodeAccountEmail；读不到缺省）。 */
+  maskedEmail?: string;
+  state: OmnicodeAccountDetectionState;
+  /** state==="claimable" 时必有：priority 首张可领计划的 plan_id。 */
+  planId?: string;
+  /** 可领计划名（preview 有值才有）。 */
+  planName?: string;
+  /** 预估到账额度（preview entitlements grant_units 求和；缺省=未知）。 */
+  grantedUnits?: number;
+  /** state≠claimable/no_claim 时的稳定原因键（omnicode.claim.failure.* 口径）。 */
+  reasonKey?: string;
+}
+
+/**
+ * 检测结果汇聚（纯函数 aggregateOmnicodeClaimDetection 的输出；按账号数计桶，
+ * 不含任何账号明细——明细看 accounts）。
+ */
+export interface OmnicodeAccountDetectionSummary {
+  /** 参与检测的账号总数。 */
+  total: number;
+  /** 可领账号数（门票叠张数）。 */
+  claimable: number;
+  /** 无可领投放（今日已领/无蛋）。 */
+  noClaim: number;
+  /** 资格类跳过（缺设备号/缺 JWT——绝不代生成，风控红线）。 */
+  skipped: number;
+  /** preview 请求失败（网络/HTTP/响应畸形）。 */
+  failed: number;
+  /** 读档失败等未知态。 */
+  unknown: number;
+  /** 可领账号预估额度合计（全部缺省值时缺省，不编造 0）。 */
+  estimatedGrantedUnits?: number;
+}
+
+/** 检测结果（OmnicodeAccountDetectGet 响应；检测本身低频：启动一次/手动触发/30min 自动轮询）。 */
+export interface OmnicodeAccountDetectResult {
+  /** 本轮检测完成时刻（epoch ms）。 */
+  detectedAt: number;
+  summary: OmnicodeAccountDetectionSummary;
+  accounts: OmnicodeAccountDetectionEntry[];
+}
+
+/** 检测入参（预留；当前无参数，保持与快照通道同构的入参形状）。 */
+export interface OmnicodeAccountDetectRequest {
+  /** 预留扩展位。 */
+  reason?: "startup" | "manual";
+}
 
 export function createOpenInEditorRemoteTarget(
   target: RemoteTarget,
@@ -1373,6 +1456,11 @@ export interface IPlatformService {
    * TTL 缓存，force 绕过）。仅管理器 Desktop。
    */
   getOmnicodeAccountSnapshot?(input: OmnicodeAccountSnapshotRequest): Promise<OmnicodeAccountDashboardSnapshot>;
+  /**
+   * [OmniCode] 批次3 UI 批次：赛博鸡蛋检测（逐账号 preview，main 侧汇聚；低频——管理器
+   * 启动一次/手动触发/自动领取 30min 轮询）。仅管理器 Desktop。
+   */
+  getOmnicodeAccountDetect?(input: OmnicodeAccountDetectRequest): Promise<OmnicodeAccountDetectResult>;
   /**
    * [OmniCode] 批次3：启动一次赛博鸡蛋逐张领取（mode 仅作执行标注，共用节奏器；
    * 启动即回 runId，进度/结算经事件广播）。仅管理器 Desktop。

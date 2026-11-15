@@ -55,6 +55,8 @@ import { readOmnicodeLoginHealths } from "./omnicode/loginHealth.js";
 import { applyOmnicodePerfPanelState } from "./omnicode/perfMonitor.js";
 import { getOmnicodeAccountDashboardSnapshot } from "./omnicode/accountDashboard.js";
 import { startOmnicodeAccountClaimRun } from "./omnicode/claimRunner.js";
+import { detectOmnicodeClaimableAccounts } from "./omnicode/accountDetection.js";
+import { createOmnicodeClaimAutoPollDeps, startOmnicodeClaimAutoPoll } from "./omnicode/claimAutoPoll.js";
 import { assertValidProfileId } from "./omnicode/contract.js";
 
 export function registerDesktopOmnicodeProfileIpcHandlers(): void {
@@ -320,7 +322,11 @@ function registerDesktopOmnicodeConsoleAdoptionIpcHandlers(): void {
  * - AccountSnapshotGet：看板快照（凭据快照 + billing/balance；main 侧 30min TTL 缓存，
  *   force=true 绕过强刷）。永不 reject（单账号失败归 entry 级原因键）。
  * - AccountClaimRun：启动逐张领取（mode: manual/auto 共用节奏器；启动即回 runId，
- *   进度/结算经 OmnicodeAccountClaimEvent 全窗口广播）。不做轮询定时器（UI 批次做）。
+ *   进度/结算经 OmnicodeAccountClaimEvent 全窗口广播）。
+ * - AccountDetectGet：赛博鸡蛋检测（逐账号 preview，main 侧汇聚；UI 批次入口——
+ *   管理器启动一次/手动触发）。
+ * - 自动领取轮询：autoClaimEnabled（console-ui.json）开启时 main 侧 30min 一拍，
+ *   检测到可领账号 → claimRunner(mode auto)；共享节奏器，UI 无绕过路径。
  * 红线：token/设备号不进任何载荷/日志（billing 客户端只在请求头内使用一次）。
  */
 function registerDesktopOmnicodeAccountIpcHandlers(): void {
@@ -354,4 +360,12 @@ function registerDesktopOmnicodeAccountIpcHandlers(): void {
       });
     },
   );
+
+  // [OmniCode] 批次3 UI 批次：赛博鸡蛋检测（逐账号 preview，main 侧汇聚 + 邮箱脱敏）
+  ipcMain.handle(PlatformChannels.OmnicodeAccountDetectGet, async () =>
+    detectOmnicodeClaimableAccounts(),
+  );
+
+  // 自动领取 30min 轮询（开关每次 tick 重读 console-ui；关闭态零网络请求）
+  startOmnicodeClaimAutoPoll(createOmnicodeClaimAutoPollDeps(broadcastOmnicodeAccountClaimEvent));
 }
