@@ -1,7 +1,9 @@
-# 控制台附加能力（批次 2.5，X1-X4）
+# 控制台附加能力（批次 2.5，X1-X4 + 批次 3，X5-X6）
 
 > spec-first 事实源：本文件定义 X1 性能监控面板 / X2 登录态健康度徽标 / X3 托盘实例快捷菜单 /
-> X4 控制台轻美化的数据源、降级语义与菜单行为。设计来源 `F:\OmniCode\docs\batch2\BATCH3-EXTRAS-PLAN.md`。
+> X4 控制台轻美化 / X5 账号看板 / X6 赛博鸡蛋一键领取的数据源、降级语义与菜单行为。
+> 设计来源 `F:\OmniCode\docs\batch2\BATCH3-EXTRAS-PLAN.md`（X1-X4）、
+> `F:\OmniCode\docs\batch3\BATCH3-DESIGN-DISCUSSION.md` §2/§3（X5-X6）。
 > 红线：全部改动限于**管理器侧**（main 新模块 + ConsoleHome/UI 层 + i18n + shared 契约），
 > 不改实例侧运行链路/锁/身份；不改实例桥协议（X3 的 `focusRequested` 是 main→renderer 事件
 > 广播通道的新载荷值，非桥协议）。
@@ -137,3 +139,72 @@
    重新登录一次后即为 env 密文，恢复可见。
 4. X3 托盘实例项点击的"聚焦卡片"依赖管理器窗口存活；主窗口销毁期间点击只显示/重建主窗口。
 5. X3/X4 与 X1 面板均未做 GUI 运行时实测（本环境无显示），归 omni.4 发版前人工验收清单。
+
+## X5. 账号看板（批次 3，登录态/账号管理第二视图）
+
+### 视图与入口
+
+- ConsoleHome 头部加「账号看板」切换钮（图标循环切换，网格↔看板二视图）。**视图态存
+  内存不落盘**：管理器主语义 = 实例管理中枢（批次2a 方案 A——首屏永远是网格），看板是
+  瞬时检视面，重启回落网格；避免 console-ui.json 加字段/迁移，重启语义可预期。
+- 看板视图挂载时整体卸载实例网格。网格卸载收尾上报**空 embedLayout 矩形集 + 清空预览
+  订阅**（main dispatchEmbedLayout 对「不在上报集中」的 owned 窗口走 P2-9 隐藏语义），
+  避免看板视图下停靠窗口悬停残留；切回网格时挂载 effect 重新上报即恢复贴合。
+
+### 数据源与刷新节奏（数据层复用，UI 零直接网络）
+
+- 数据 = `OmnicodeAccountSnapshotGet`（凭据快照 × billing/balance；main 30min TTL 缓存，
+  force 绕过强刷）。挂载拉一次；「全部刷新」= force 强刷。
+- 汇总条（总数/健康/临期/异常/未知 + 最后刷新时间）：分档计数与 X2 徽标**同一口径**
+  （Profile 列表 loginHealth，纯函数 `resolveOmnicodeLoginHealthCounts` 单测锁定）；
+  不重实现分级（唯一口径在 main `readOmnicodeLoginHealths`）。
+- 卡片字段 = Cockpit 口径（套餐名/额度分桶求和/重置时间/套餐到期/最后刷新）+ OmniCode
+  增强：登录健康度四态徽标（**复用 X2 LoginHealthBadge 组件**，不重写）、实例归属与
+  运行态点。余量分档配色沿用 Cockpit：<10% 红、<30% 黄、<60% 中性、其余蓝。
+- 异常卡引导优先于数字：missing_jwt=未登录、skipped_no_device_mid=缺设备号（红线：绝不
+  代生成）、failed=查询失败（原因键文案显示 + 打开实例引导）、unknown=旧密文/读不到。
+- 「刷新」单卡钮的取舍：数据层只有整表快照一个杠杆——单卡刷新也是 force 整表强刷
+  （本卡转刷新态、其余卡静默更新），频率红线由 TTL + main 串行编排兜住。
+- 平台方法缺席（官方 flavor / 旧 preload）：整视图降级为不可用提示，不报错。
+
+## X6. 赛博鸡蛋一键领取（批次 3，左下浮层）
+
+### 检测（门票叠数据源）
+
+- 检测 = 对每个可用账号调 preview（走既有 billingClient，实例不必在运行——凭据在盘上），
+  main 侧逐 profile 串行后经 `aggregateOmnicodeClaimDetection` 汇聚（纯函数，单测锁定），
+  邮箱在 main 侧脱敏（`maskOmnicodeAccountEmail`）后才进 IPC 载荷。
+- 触发节奏（红线，无循环重试）：管理器启动一次（浮层挂载拉取）+ 设置分区「手动检测一次」
+  + 自动领取开启时 main 侧 30min 轮询（`claimAutoPoll`，每 tick 重读 console-ui 的
+  autoClaimEnabled——开关翻转即时生效；关闭态零网络请求）。
+- 新通道 `OmnicodeAccountDetectGet`（request→response）；自动领取的结果经既有
+  `OmnicodeAccountClaimEvent` 全窗口广播到达 renderer（runId 区分 manual/auto run）。
+
+### 浮层交互（对标演示稿 02 节）
+
+- 无蛋/无票空闲态**整个浮层不渲染**（左下角干净无痕）；有可领账号 = 门票叠（每账号一张，
+  4 个错落位钳制 + ×N 角标，hover 散开见各账号——纯 CSS transform，纯函数
+  `buildOmnicodeTicketStackLayout` 单测锁定）。
+- 点击门票叠 → `OmnicodeAccountClaimRun(mode manual)`：订阅 ClaimEvent 播逐张动效
+  （当前张飞出→「账号 +到账额度」chip + 顶部「领取中 x/N」），随时「跳过动画」
+  （停动效等待真实结果，到齐即结算）；右键菜单「静默全部领取」= 同 mode manual 不播动效。
+  结束态「今日已领取 N 份额度·合计 +X」（纯函数 `summarizeOmnicodeClaimSettlement`
+  单测锁定；全部缺省数值时合计不编造 0）。
+- 自动领取（mode auto）：领取中不打扰（无动效，逐张静默清票）；完成后左下角结算徽章
+  「今日已自动领取 N 份」，点开明细 = console-ui claimHistory 的今日 auto 条目
+  （`summarizeOmnicodeAutoSettlementFromHistory` 单测锁定——自动领取可能发生在管理器
+  窗口关闭期间，挂载时按历史补徽章）。
+- 领取历史列表落在设置「自动化」分区（见下）。
+
+### 设置「自动化」分区（omnicodeAutomation，desktop-only）
+
+- settingsPageConfig 新分区 + 管理器白名单追加（与 omnicodeProfiles desktop-only 同构）。
+- 内容：自动领取总开关（读写 console-ui `autoClaimEnabled`；开关旁说明文案——检测到每日
+  免费额度时以低风控节奏自动领取，各账号用自己的凭据与设备号）+「手动检测一次」（走
+  DetectGet，toast 汇报 N 可领）+ 领取历史列表（时间/账号/plan/结果/额度，FIFO 50）。
+
+### 红线（不变）
+
+- token/设备号不进任何 IPC 载荷/日志；管理器绝不生成/共享设备号；领取节奏全部在
+  main 数据层（claimPacer 300-1500ms 抖动 + 连发保护），UI 无绕过路径；1001-1005
+  terminal 失败码显示原因、不自动重试。
