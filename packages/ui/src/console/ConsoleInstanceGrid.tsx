@@ -71,6 +71,7 @@ export function ConsoleInstanceGrid() {
     loading,
     busy,
     frames,
+    pausedProfileIds,
     focusRequest,
     refresh,
     runningCount,
@@ -648,6 +649,7 @@ export function ConsoleInstanceGrid() {
             profiles={profiles}
             onClose={() => handlePerfToggle(false)}
             onUnavailable={handlePerfUnavailable}
+            pausedProfileIds={pausedProfileIds}
           />
         ) : null}
         {enlargedId ? (
@@ -716,6 +718,7 @@ export function ConsoleInstanceGrid() {
                   key={profile.id}
                   profile={profile}
                   frame={frames.get(profile.id)}
+                  framePaused={pausedProfileIds.has(profile.id)}
                   enlarged={enlargedId === profile.id}
                   focusHighlighted={focusHighlightId === profile.id}
                   registerScreen={registerScreen}

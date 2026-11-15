@@ -488,10 +488,10 @@ export interface OmnicodeConsoleAdoptInput {
   name: string;
 }
 
-/** [OmniCode] 控制台 main → renderer 的实例事件（缩略图帧 / 连接态）。 */
+/** [OmniCode] 控制台 main → renderer 的实例事件（缩略图帧 / 连接态 / 停帧态）。 */
 export interface OmnicodeInstanceEventPayload {
   profileId: string;
-  type: "thumbnail" | "connected" | "disconnected" | "focusRequested";
+  type: "thumbnail" | "connected" | "disconnected" | "focusRequested" | "framePaused";
   /** type=thumbnail 时的 JPEG base64 */
   frame?: string;
   /**
@@ -500,6 +500,12 @@ export interface OmnicodeInstanceEventPayload {
    */
   width?: number;
   height?: number;
+  /**
+   * [OmniCode] 后台降载：type=framePaused 时的预览停帧态（true=停帧中，false=恢复）。
+   * 实例窗口不可见（停靠 hide / 最小化）时实例侧停帧，翻转即广播一次；
+   * 下一帧缩略图到达时消费方也应清除停帧态（兜底，防事件丢失）。
+   */
+  paused?: boolean;
 }
 
 /**

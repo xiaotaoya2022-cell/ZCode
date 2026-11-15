@@ -212,7 +212,7 @@ export function startOmnicodeInstanceBridgeServer(
           return;
         }
         if (!parsed || typeof parsed !== "object") return;
-        const message = parsed as { type?: string; frame?: unknown; hwndHex?: unknown; width?: unknown; height?: unknown; prefs?: unknown; sourceInstanceId?: unknown };
+        const message = parsed as { type?: string; frame?: unknown; hwndHex?: unknown; width?: unknown; height?: unknown; prefs?: unknown; sourceInstanceId?: unknown; paused?: unknown };
         if (message.type === "thumbnail" && typeof message.frame === "string") {
           const width = typeof message.width === "number" && message.width > 0 ? message.width : undefined;
           const height = typeof message.height === "number" && message.height > 0 ? message.height : undefined;
@@ -225,6 +225,16 @@ export function startOmnicodeInstanceBridgeServer(
         }
         if (message.type === "hello" && typeof message.hwndHex === "string") {
           managerHooks?.onInstanceHello?.(profileIdParam, message.hwndHex.trim());
+          return;
+        }
+        // [OmniCode] 后台降载：实例停帧态翻转上行 → 广播 renderer（卡片/性能面板标注
+        // "已停帧"；下一帧缩略图到达时消费方兜底清除，防事件丢失）。
+        if (message.type === "framePaused" && typeof message.paused === "boolean") {
+          broadcastOmnicodeInstanceEvent({
+            profileId: profileIdParam,
+            type: "framePaused",
+            paused: message.paused,
+          });
           return;
         }
         // [OmniCode] 批次4：全局偏好上行（reportGlobalPrefs）。桥服务侧先消毒载荷

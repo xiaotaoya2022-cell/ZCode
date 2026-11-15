@@ -4134,6 +4134,8 @@ const enUS: Record<string, string> = {
   "console.undockedOverlayTitle": "Undocked · the instance window runs independently",
   "console.undockedOverlayHint": "Click the card to focus the real window",
   "console.previewOffBadge": "Preview off",
+  // [OmniCode] 后台降载：实例窗口不可见停帧中的预览标注
+  "console.previewPausedBadge": "Preview paused",
   "console.backToGrid": "Back to grid",
   "console.zoomInTitle": "Zoom to single view (same as double-clicking the card)",
   "console.resizeHandleTitle": "Drag to resize the docked window (160×96 minimum)",
@@ -4264,13 +4266,10 @@ const enUS: Record<string, string> = {
     "Observer mode (read-only) — this workspace is in use by instance {name}",
   "omnicode.observer.readOnlyReason":
     "Observer mode (read-only): this workspace is currently held by another instance ({name}). Sending messages and file writes are disabled.",
-  "omnicode.observer.dialog.title": "Workspace locked by another instance",
-  "omnicode.observer.dialog.description":
-    "The workspace {path} is currently open in instance {name}. Opening it here at the same time can corrupt session data. You can open it read-only as an observer (view only — no lock is taken, nothing can be edited).",
-  "omnicode.observer.dialog.openReadonly": "Open read-only",
-  "omnicode.observer.dialog.cancel": "Cancel",
+  // [OmniCode] D11 auto-observer: lock-conflict dialog retired — acquire failure opens the
+  // workspace directly as a read-only observer and toasts once (instance display name)
   "omnicode.observer.openedToast":
-    "Opened in observer mode (read-only) — held by instance {name}.",
+    "This workspace is in use by instance {name}; opened as a read-only observer.",
   "omnicode.observer.restoreRejected":
     "Workspace {path} was not restored: it is held by another instance ({name}).",
   // [OmniCode] Review fix (P1-4 mixed deployment notice): pure informational toast shown by

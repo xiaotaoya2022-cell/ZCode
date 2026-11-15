@@ -37,10 +37,16 @@ export function ConsolePerfPanel(props: {
   profiles: OmnicodeProfileSummaryInfo[];
   onClose: () => void;
   onUnavailable: () => void;
+  /**
+   * [OmniCode] 后台降载：实例预览停帧态集合。停帧只停预览帧生产（实例侧 capturePage），
+   * 内存采样（tasklist 管线）正交不受影响——曲线照常推进，行名旁以「已停帧」标注
+   * 区分预览暂停与采样异常。
+   */
+  pausedProfileIds?: ReadonlySet<string>;
 }) {
   const { intl } = useZCodeIntl();
   const platform = usePlatform();
-  const { profiles, onClose, onUnavailable } = props;
+  const { profiles, onClose, onUnavailable, pausedProfileIds } = props;
 
   // ─── 采样事件订阅：renderer 侧环形缓冲（纯函数 pushOmnicodePerfSample 累积） ───
   const [state, setState] = useState<ConsolePerfPanelState>({
@@ -151,6 +157,12 @@ export function ConsolePerfPanel(props: {
                   <span className="min-w-0 flex-1 truncate text-ui-xs text-foreground" title={profile.name}>
                     {profile.name}
                   </span>
+                  {/* [OmniCode] 后台降载：停帧实例标注（预览停帧 ≠ 采样停——内存曲线照常推进） */}
+                  {pausedProfileIds?.has(profile.id) ? (
+                    <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-ui-xs text-foreground-subtle">
+                      {intl.formatMessage({ id: "console.previewPausedBadge" })}
+                    </span>
+                  ) : null}
                   {/* spark：纯 SVG polyline（不引图表库） */}
                   <svg
                     width={SPARK_WIDTH}
