@@ -32,9 +32,11 @@ import {
   reconcileOmnicodeRunningInstances,
   readOmnicodeProcessMemoryMBs,
   removeOmnicodeProfile,
+  renameOmnicodeProfile,
   resolveOmnicodeConsoleAdoptionAvailable,
   restoreOmnicodeInstances,
   sendOmnicodeInstanceCommand,
+  sendOmnicodeInstanceRename,
   startOmnicodeCredentialBackupScheduler,
   stopOmnicodeProfile,
 } from "./omnicode/contract.js";
@@ -52,6 +54,9 @@ import {
   writeOmnicodeConsoleUiState,
 } from "./omnicode/consoleEmbedding.js";
 import { mergeOmnicodeConsoleUiState } from "./omnicode/consoleUiState.js";
+// [OmniCode] 实例元数据批次：改名/排序态变化触发托盘名称缓存刷新 + 菜单重建（直接从
+// 实现文件导入，与 consoleUiState 同款约定——经 contract.ts 不含 trayMenu 导出）。
+import { refreshOmnicodeTrayNameCache } from "./omnicode/trayMenu.js";
 import { setOmnicodeInstanceBridgeManagerHooks } from "./omnicode/instanceBridgeServer.js";
 import { readOmnicodeLoginHealths } from "./omnicode/loginHealth.js";
 import { applyOmnicodePerfPanelState } from "./omnicode/perfMonitor.js";
@@ -127,6 +132,19 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
 
   ipcMain.handle(PlatformChannels.OmnicodeProfileClone, async (_event, input: { id: string; name: string }) => {
     const profile = await cloneOmnicodeProfile(input.id, input.name);
+    return { profile: { ...profile, running: false } };
+  });
+
+  // [OmniCode] 实例元数据批次：重命名实例（profileId 稳定性红线：id/凭据/数据根/锁/
+  // dock 覆盖表全部按旧 id 工作）。涟漪同步：①网格/看板卡与设置列表走 List 数据链
+  // （renderer 刷新后 name 直通）②托盘菜单名称缓存刷新 + 重建③运行中实例窗口标题
+  // 热更新（桥 rename 命令：win.setTitle + renderer document.title 广播）④锁占用者名
+  // ——锁获取/心跳时由实例 Host 读最新 profile.json（readLatestOmnicodeProfileDisplayName），
+  // 无需经桥，此处不额外触发。
+  ipcMain.handle(PlatformChannels.OmnicodeProfileRename, async (_event, input: { id: string; name: string }) => {
+    const profile = await renameOmnicodeProfile(input.id, input.name);
+    sendOmnicodeInstanceRename(input.id, profile.name);
+    refreshOmnicodeTrayNameCache();
     return { profile: { ...profile, running: false } };
   });
 
@@ -223,6 +241,14 @@ function registerDesktopOmnicodeConsoleViewportIpcHandlers(): void {
       if (current.previewEnabled !== merged.previewEnabled) {
         // 保留 renderer 最近上报的可见集合，只翻总开关（清零会丢订阅直到下一拍上报）
         applyOmnicodePreviewEnabled(merged.previewEnabled);
+      }
+      // [OmniCode] 实例元数据批次：排序态变化（sortMode/customOrder）同步托盘菜单顺序
+      //（三处一致：托盘与网格/设置列表共用同一排序函数与同一持久化态）。
+      if (
+        current.sortMode !== merged.sortMode ||
+        JSON.stringify(current.customOrder ?? []) !== JSON.stringify(merged.customOrder ?? [])
+      ) {
+        refreshOmnicodeTrayNameCache();
       }
       return merged;
     },

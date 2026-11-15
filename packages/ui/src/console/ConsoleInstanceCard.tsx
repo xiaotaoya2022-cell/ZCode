@@ -13,6 +13,7 @@ import {
   Maximize2,
   Monitor,
   MoreHorizontal,
+  Pencil,
   Play,
   Square,
   SquareArrowDownLeft,
@@ -70,6 +71,22 @@ export function ConsoleInstanceCard(props: {
   reportEmbedLayoutNow?: () => void;
   /** [OmniCode] 批次3（B 套件 c）：CSS→DIP 纵向换算比例（main 随上报响应回传）。 */
   embedScaleRef?: { current: number };
+  /** [OmniCode] 实例元数据批次：重命名（卡片「更多」菜单入口；校验/持久化在 hook/main）。 */
+  onRename?: (profile: OmnicodeProfileSummaryInfo, newName: string) => void;
+  /**
+   * [OmniCode] 实例元数据批次：自定义排序拖拽手柄（卡片 header；仅 custom 排序模式启用）。
+   * 拖拽判定/落点计算/提交在网格层（pointerdown 冒泡 + data-omnicode-drag-handle 定位）。
+   */
+  dragHandle?: boolean;
+  /** 本卡是否为拖拽中的卡（网格层状态回显：降低透明度让落点指示可读）。 */
+  dragging?: boolean;
+  /** 落点指示线位置（目标卡上/下半区；null=非目标）。 */
+  dropIndicator?: "before" | "after" | null;
+  /**
+   * [OmniCode] 实例元数据批次：拖拽提交时刻（网格层 ref）——拖拽 pointerup 后紧随的
+   * click 事件被吞（桌面态点击=聚焦的误触源）；无拖拽时为 0。
+   */
+  dragJustCommitted?: { current: number };
 } & ConsoleInstanceCardActions) {
   const { intl } = useZCodeIntl();
   const {
@@ -88,12 +105,20 @@ export function ConsoleInstanceCard(props: {
     onLaunch,
     onStop,
     onClone,
+    onRename,
     onRemove,
     onRevealDataDir,
     onFocus,
     onToggleEnlarge,
+    dragHandle,
+    dragging,
+    dropIndicator,
+    dragJustCommitted,
   } = props;
-  const { id, name, running, notes, pid } = profile;
+  const { id, name, running, notes, pid, seq } = profile;
+  // [OmniCode] 实例元数据批次：卡片「重命名」弹窗本地态（入口在「更多」菜单）。
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameDraft, setRenameDraft] = useState("");
   const frameAspectRatio =
     frame?.width && frame?.height && frame.width > 0 && frame.height > 0
       ? `${frame.width} / ${frame.height}`
@@ -171,6 +196,9 @@ export function ConsoleInstanceCard(props: {
   };
 
   const handleCardClick = () => {
+    // [OmniCode] 实例元数据批次：拖拽提交后紧随的 click 吞掉（250ms 窗口）——桌面态
+    // 点击=聚焦，拖拽结束时指针已移动到目标卡上，放行会把「换位」误判成「聚焦目标卡」。
+    if (dragJustCommitted && Date.now() - dragJustCommitted.current < 250) return;
     // 拖出态：点击卡片 = 聚焦真窗口。停靠态画面区中心被实例窗口覆盖（main 下发矩形
     // 已四边内缩 6px——仅四边手柄带露出可命中，中心区域点击仍落在实例窗口），
     // 故本处理只在拖出态生效（批次3 终审 P1-2 勘误：旧注释"点击到不了这里"与手柄
@@ -211,11 +239,24 @@ export function ConsoleInstanceCard(props: {
           : "hover:border-border",
         !docked && running && "cursor-pointer",
         focusHighlighted && "border-primary ring-1 ring-primary",
+        dragging && "opacity-45",
+        dropIndicator === "before" && "border-t-2 border-t-primary",
+        dropIndicator === "after" && "border-b-2 border-b-primary",
         enlarged && "h-full",
       )}
     >
-      {/* 顶条（28-32px：停靠模式下管理器自绘控制钮区，实例窗口贴下方画面区） */}
-      <header className="flex h-8 shrink-0 items-center gap-2 border-b border-border px-2">
+      {/* 顶条（28-32px：停靠模式下管理器自绘控制钮区，实例窗口贴下方画面区）。
+          [OmniCode] 实例元数据批次：custom 排序模式下的拖拽手柄（grid 层 pointerdown
+          冒泡定位；按钮/输入被排除，手柄只认 header 本体）——停靠态画面区被真窗口
+          覆盖、桌面态点击=聚焦、resize 手柄在画面区四边，全部与本手柄无冲突。 */}
+      <header
+        data-omnicode-drag-handle={dragHandle ? id : undefined}
+        title={dragHandle ? intl.formatMessage({ id: "console.dragSortTitle" }) : undefined}
+        className={cn(
+          "flex h-8 shrink-0 items-center gap-2 border-b border-border px-2",
+          dragHandle && "cursor-grab select-none active:cursor-grabbing",
+        )}
+      >
         <span
           className={cn(
             "inline-block size-2 shrink-0 rounded-full",
@@ -313,6 +354,18 @@ export function ConsoleInstanceCard(props: {
                 <Copy className="size-3.5" />
                 {intl.formatMessage({ id: "console.menuClone" })}
               </DropdownMenuItem>
+              {/* [OmniCode] 实例元数据批次：卡片管理钮区「重命名」（弹窗校验 + 桥热更新在 main） */}
+              {onRename ? (
+                <DropdownMenuItem
+                  onClick={() => {
+                    setRenameDraft(profile.name);
+                    setRenameOpen(true);
+                  }}
+                >
+                  <Pencil className="size-3.5" />
+                  {intl.formatMessage({ id: "console.menuRename" })}
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuItem onClick={() => onRevealDataDir(profile)}>
                 <FolderOpen className="size-3.5" />
                 {intl.formatMessage({ id: "console.menuRevealDataDir" })}
@@ -420,9 +473,16 @@ export function ConsoleInstanceCard(props: {
         ) : null}
       </div>
 
-      {/* 底部：备注 / 登录态徽标（批次2.5 X2）/ 运行态 */}
+      {/* 底部：备注 / 登录态徽标（批次2.5 X2）/ 运行态。
+          [OmniCode] 实例元数据批次：序号角标 "#N"（语言中立、克制的弱文本——seq 是
+          默认排序依据，角标让排序结果可解释；无 seq 的旧档不显示）。 */}
       <footer className="flex shrink-0 items-center justify-between gap-2 border-t border-border px-2 py-1 text-ui-xs text-foreground-subtlest">
         <span className="min-w-0 truncate">{notes || ""}</span>
+        {typeof seq === "number" ? (
+          <span className="shrink-0" title={`#${seq}`}>
+            #{seq}
+          </span>
+        ) : null}
         <LoginHealthBadge running={running} loginHealth={profile.loginHealth} />
         <span className="shrink-0">
           {running
@@ -433,6 +493,20 @@ export function ConsoleInstanceCard(props: {
             : intl.formatMessage({ id: "settings.omnicodeProfiles.stopped" })}
         </span>
       </footer>
+      {/* [OmniCode] 实例元数据批次：重命名弹窗（与新建弹窗同形态；校验在提交回调） */}
+      {renameOpen && onRename ? (
+        <RenameInstanceDialog
+          initialName={renameDraft}
+          creating={busy}
+          onNameChange={setRenameDraft}
+          onCancel={() => setRenameOpen(false)}
+          onSubmit={() => {
+            if (renameDraft.trim().length === 0) return;
+            onRename(profile, renameDraft);
+            setRenameOpen(false);
+          }}
+        />
+      ) : null}
     </section>
   );
 }
@@ -557,6 +631,63 @@ export function CreateInstanceDialog(props: {
           </Button>
           <Button size="sm" onClick={onSubmit} disabled={creating || newName.trim().length === 0}>
             {intl.formatMessage({ id: "console.createAndLaunch" })}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * [OmniCode] 实例元数据批次：重命名实例弹窗（卡片「更多」菜单与设置分区共用形态）。
+ * 重名校验在提交回调（hook 客户端校验 + main 白名单双保险），空名提交钮禁用。
+ */
+export function RenameInstanceDialog(props: {
+  initialName: string;
+  creating: boolean;
+  onNameChange: (value: string) => void;
+  onCancel: () => void;
+  onSubmit: () => void;
+}) {
+  const { intl } = useZCodeIntl();
+  const { initialName, creating, onNameChange, onCancel, onSubmit } = props;
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-black/60"
+      role="presentation"
+      onClick={onCancel}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="w-[min(400px,92vw)] rounded-xl border border-popover-border bg-popover p-5 shadow-lg"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <h3 className="text-ui-base font-semibold text-foreground">
+          {intl.formatMessage({ id: "console.renameTitle" })}
+        </h3>
+        <p className="mt-1 text-ui-sm text-foreground-subtle">
+          {intl.formatMessage({ id: "console.renameBody" })}
+        </p>
+        <div className="mt-4">
+          <Input
+            autoFocus
+            value={initialName}
+            onChange={(event) => onNameChange(event.target.value)}
+            placeholder={intl.formatMessage({ id: "settings.omnicodeProfiles.namePlaceholder" })}
+            disabled={creating}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") onSubmit();
+              if (event.key === "Escape") onCancel();
+            }}
+          />
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={onCancel} disabled={creating}>
+            {intl.formatMessage({ id: "console.dialogCancel" })}
+          </Button>
+          <Button size="sm" onClick={onSubmit} disabled={creating || initialName.trim().length === 0}>
+            {intl.formatMessage({ id: "console.renameSave" })}
           </Button>
         </div>
       </div>

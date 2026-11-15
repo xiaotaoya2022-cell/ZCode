@@ -12,6 +12,7 @@ import {
 import { usePlatform } from "@/hooks/usePlatform.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
+import { cn } from "@/components/lib/utils.js";
 
 /**
  * [OmniCode] 批次2 B2-1（T5）：旧控制台收养状态与处理（可复用导出——B2-3 控制台
@@ -87,6 +88,7 @@ export function ProfileMultiInstanceSection() {
 
   const {
     profiles,
+    sortedProfiles,
     loading,
     busy,
     frames,
@@ -94,10 +96,25 @@ export function ProfileMultiInstanceSection() {
     handleLaunch,
     handleStop,
     handleClone,
+    handleRename,
     handleFocus,
     handleArrange,
     handleRemove,
   } = useOmnicodeConsoleInstances();
+
+  // [OmniCode] 实例元数据批次：设置分区行内编辑（点击实例名进入编辑；Enter/失焦提交，
+  // Esc 取消）。重名校验在 handleRename（客户端 + main 白名单双保险）。
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const commitInlineRename = useCallback(
+    (profile: OmnicodeProfileSummaryInfo) => {
+      setRenamingId(null);
+      if (renameDraft.trim() && renameDraft.trim() !== profile.name) {
+        handleRename(profile, renameDraft);
+      }
+    },
+    [handleRename, renameDraft],
+  );
 
   const handleCreate = useCallback(() => {
     const name = newName.trim();
@@ -218,7 +235,9 @@ export function ProfileMultiInstanceSection() {
           </p>
         ) : (
           <ul className="flex flex-col divide-y divide-border rounded-md border border-border">
-            {profiles.map((profile) => (
+            {/* [OmniCode] 实例元数据批次：sortedProfiles——与网格/托盘菜单共用 shared
+                排序函数与同一 console-ui.json 排序态（seq 默认/名称/自定义）。 */}
+            {sortedProfiles.map((profile) => (
               <li key={profile.id} className="flex flex-col px-3 py-2">
                 <InstanceListRowThumbnail
                   profile={profile}
@@ -229,8 +248,37 @@ export function ProfileMultiInstanceSection() {
                     className={`inline-block size-2 shrink-0 rounded-full ${profile.running ? "bg-emerald-500" : "bg-foreground-subtlest"}`}
                   />
                   <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate text-ui-base text-foreground">{profile.name}</span>
+                    {/* [OmniCode] 实例元数据批次：行内编辑（点击实例名进入编辑态） */}
+                    {renamingId === profile.id ? (
+                      <Input
+                        autoFocus
+                        value={renameDraft}
+                        onChange={(event) => setRenameDraft(event.target.value)}
+                        disabled={busy}
+                        className="max-w-64"
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") commitInlineRename(profile);
+                          if (event.key === "Escape") setRenamingId(null);
+                        }}
+                        onBlur={() => commitInlineRename(profile)}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className={cn(
+                          "w-fit max-w-full truncate text-left text-ui-base text-foreground hover:text-foreground-subtle",
+                        )}
+                        title={intl.formatMessage({ id: "console.renameInlineTitle" })}
+                        onClick={() => {
+                          setRenameDraft(profile.name);
+                          setRenamingId(profile.id);
+                        }}
+                      >
+                        {profile.name}
+                      </button>
+                    )}
                     <span className="truncate text-ui-xs text-foreground-subtlest">
+                      {typeof profile.seq === "number" ? `#${profile.seq} · ` : ""}
                       {profile.running
                         ? intl.formatMessage(
                             { id: "settings.omnicodeProfiles.running" },
