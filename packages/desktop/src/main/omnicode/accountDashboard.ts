@@ -31,7 +31,9 @@ import type {
   OmnicodeAccountBalanceState,
   OmnicodeAccountDashboardEntry,
   OmnicodeAccountDashboardSnapshot,
+  OmnicodeAccountIdentityInfo,
 } from "@zcode/shared";
+import { maskOmnicodeAccountEmail } from "@zcode/shared";
 
 /** 快照 TTL（30 分钟；防频繁请求 + 尊重额度与风控）。 */
 export const OMNICODE_ACCOUNT_SNAPSHOT_TTL_MS = 30 * 60 * 1000;
@@ -51,9 +53,18 @@ export function resolveOmnicodeSnapshotCacheHit(
 /** 模块级缓存（管理器进程内存态；进程重启即重建，无需持久化）。 */
 let cachedSnapshot: { snapshot: OmnicodeAccountDashboardSnapshot } | null = null;
 
+/**
+ * [OmniCode] 批次3 终审修复（P2-④）：进行中的整表快照拉取（单飞去重）。并发 force
+ *（单卡刷新双击 / 单卡刷新 × 全部刷新交错）直接复用同一个进行中 Promise——同一账号
+ * 不会出现 2 个并发 balance 请求，逐账号串行编排口径不被破坏。函数本身永不 reject
+ *（逐账号失败归 entry 状态），Promise 结束即清空。
+ */
+let snapshotFetchInFlight: Promise<OmnicodeAccountDashboardSnapshot> | null = null;
+
 /** 单测注入点：清空缓存（生产路径不使用）。 */
 export function resetOmnicodeAccountDashboardCacheForTest(): void {
   cachedSnapshot = null;
+  snapshotFetchInFlight = null;
 }
 
 /** balance 查询单账号结果（内部中间态）。 */
@@ -93,6 +104,23 @@ export function assembleOmnicodeAccountBalanceView(
   };
 }
 
+/**
+ * [OmniCode] 批次3 终审修复（P2-③）：看板条目 identity 装配时 main 侧统一脱敏邮箱
+ * （`xia***@z.ai`，maskOmnicodeAccountEmail 纯函数复用）——与检测链口径一致
+ *（accountDetection 装配前脱敏），raw 邮箱不再进 IPC 载荷；渲染层
+ * AccountDashboardCard 的脱敏保留为兜底（脱敏串重掩码幂等，无二次伤害）。
+ * displayName/avatarUrl/customerNumber 为展示字段原样保留（凭据红线不涉及其它字段）。
+ */
+function maskOmnicodeDashboardIdentity(
+  identity: OmnicodeAccountIdentityInfo | undefined,
+): OmnicodeAccountIdentityInfo | undefined {
+  if (!identity) return undefined;
+  const maskedEmail = maskOmnicodeAccountEmail(identity.email);
+  const { email: _rawEmail, ...rest } = identity;
+  if (maskedEmail === undefined) return Object.keys(rest).length > 0 ? rest : undefined;
+  return { ...rest, email: maskedEmail };
+}
+
 /** 单账号完整装配（纯函数）：凭据快照 + balance 尝试 → 看板条目。 */
 export function assembleOmnicodeAccountDashboardEntry(input: {
   profileId: string;
@@ -103,7 +131,7 @@ export function assembleOmnicodeAccountDashboardEntry(input: {
   identityFallback?: ReturnType<typeof parseOmnicodeUserInfo>;
 }): OmnicodeAccountDashboardEntry {
   const balanceView = assembleOmnicodeAccountBalanceView(input.balanceAttempt);
-  const identity = input.accountData.identity ?? input.identityFallback;
+  const identity = maskOmnicodeDashboardIdentity(input.accountData.identity ?? input.identityFallback);
   return {
     profileId: input.profileId,
     profileName: input.profileName,
@@ -163,7 +191,8 @@ export async function fetchOmnicodeAccountBalanceAttempt(input: {
 
 /**
  * 全量快照（Profile 列表 IPC 数据源，永不 reject）：逐 profile 串行——凭据快照（只读）
- * → policy 门 → balance API。TTL 缓存命中直接返回（force 绕过）。
+ * → policy 门 → balance API。TTL 缓存命中直接返回（force 绕过）；已有进行中的拉取
+ * 直接复用（P2-④ 单飞去重，见 snapshotFetchInFlight 注释）。
  * 单账号失败→该 entry 归 failed/unknown + 原因键，不影响其余账号。
  */
 export async function getOmnicodeAccountDashboardSnapshot(
@@ -173,6 +202,23 @@ export async function getOmnicodeAccountDashboardSnapshot(
   if (cachedSnapshot && resolveOmnicodeSnapshotCacheHit(cachedSnapshot.snapshot.fetchedAt, now(), options.force === true)) {
     return { ...cachedSnapshot.snapshot, fromCache: true };
   }
+  if (snapshotFetchInFlight) return snapshotFetchInFlight;
+  const run = (async (): Promise<OmnicodeAccountDashboardSnapshot> => {
+    return fetchOmnicodeAccountDashboardSnapshot({ ...options, now });
+  })();
+  snapshotFetchInFlight = run;
+  try {
+    return await run;
+  } finally {
+    if (snapshotFetchInFlight === run) snapshotFetchInFlight = null;
+  }
+}
+
+/** 整表快照实际编排（供 getOmnicodeAccountDashboardSnapshot 的单飞包装调用）。 */
+async function fetchOmnicodeAccountDashboardSnapshot(
+  options: { force?: boolean; fetchImpl?: typeof fetch; now: () => number },
+): Promise<OmnicodeAccountDashboardSnapshot> {
+  const now = options.now;
   const profiles = await listOmnicodeProfiles().catch(() => [] as never[]);
   const accounts: OmnicodeAccountDashboardEntry[] = [];
   for (const profile of profiles) {

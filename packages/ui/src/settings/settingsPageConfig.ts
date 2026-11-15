@@ -281,10 +281,18 @@ export function createSettingsPageConfig({
   const showComputerUse = isDesktop || isMacDesktop || isWindowsDesktop;
   const settingsSections = BASE_SETTINGS_SECTIONS.filter((section) => {
     if (section.id === "computerUse" && !showComputerUse) return false;
-    // [OmniCode] Profile 多实例仅桌面可用（依赖 Electron spawn 能力）
-    if (section.id === "omnicodeProfiles" && !isDesktop) return false;
-    // [OmniCode] 自动化分区仅桌面可用（依赖 omnicode 数据层/IPC 面）
-    if (section.id === "omnicodeAutomation" && !isDesktop) return false;
+    // [OmniCode] 批次3 终审修复（P2-②）：omnicode 分区（多实例/自动化）仅管理器语境
+    // 可见——此前仅 isDesktop 门控，官方 desktop flavor 的设置页出现这两个分区且
+    // 点开呈"可用"假象（自动化分区依赖 omnicode 数据根/IPC 面，官方端一律缺席）。
+    // omnicodeProfiles 同款基线问题一并补门控；方向 = 给官方 flavor **隐藏**分区，
+    // 官方代码零改动（红线）。实例身份窗口（omnicode flavor ∧ 实例）同样隐藏：
+    // 实例内再做实例管理无意义，且其 omnicodeManager=false。
+    if (
+      (section.id === "omnicodeProfiles" || section.id === "omnicodeAutomation") &&
+      (!isDesktop || !omnicodeManager)
+    ) {
+      return false;
+    }
     // [OmniCode] 管理器语境只保留纯偏好 + 多实例分区（判据：管理器无会话栈）
     if (omnicodeManager && !OMINCODE_MANAGER_VISIBLE_SETTINGS_SECTIONS.has(section.id)) {
       return false;

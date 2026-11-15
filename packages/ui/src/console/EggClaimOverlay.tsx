@@ -212,8 +212,10 @@ export function EggClaimOverlay() {
           return;
         }
         manualRunIdRef.current = result.runId ?? null;
-        // total 由 started 事件带出（ClaimRun 响应只有 runId）
-        setRunTotal(0);
+        // [OmniCode] 批次3 终审修复（P2-①）：total 直接取 ClaimRun 响应——started 事件
+        // 在 invoke resolve 前同步广播（manualRunId 尚未登记，事件走 auto 分支），此前
+        // runTotal 恒 0（HUD「x/0」）。started 分支保留 runTotal 对齐（防御旧 main）。
+        setRunTotal(typeof result.total === "number" && result.total > 0 ? result.total : 0);
         outcomesRef.current = [];
         setOutcomes([]);
         setFlownIds(new Set());

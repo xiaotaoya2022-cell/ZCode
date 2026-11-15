@@ -39,6 +39,7 @@
   "packages/desktop/test/omnicodeBatch25Extras.test.ts",
   "packages/desktop/test/omnicodeBatch3AccountData.test.ts",
   "packages/desktop/test/omnicodeBatch2ConsoleViewport.test.ts",
+  "packages/desktop/test/omnicodeReviewBatch3Final.test.ts",
   "packages/desktop/test/e2eAppOutputStage.test.ts",
   "packages/desktop/test/omnicodeBatch2WorkspaceLock.test.ts",
   "packages/desktop/test/e2eAtomicJsonFile.test.ts",
