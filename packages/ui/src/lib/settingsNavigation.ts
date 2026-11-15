@@ -28,7 +28,10 @@ export type SettingsSectionId =
   | "automations"
   | "shortcuts"
   // [OmniCode] Profile 多实例管理（desktop-only，spec: docs/omnicode/profile-runtime.md）
-  | "omnicodeProfiles";
+  | "omnicodeProfiles"
+  // [OmniCode] 自动化（自动领取/领取历史/手动检测；desktop-only，spec:
+  // F:/OmniCode/docs/batch3/BATCH3-DESIGN-DISCUSSION.md §3）
+  | "omnicodeAutomation";
 
 export type SettingsUsageTabTarget = "app" | "codingPlan";
 export type SettingsPluginTabTarget = "plugins" | "mcps" | "skills" | "commands";
@@ -97,7 +100,8 @@ function isSettingsSectionId(value: string): value is SettingsSectionId {
     value === "computerUse" ||
     value === "automations" ||
     value === "shortcuts" ||
-    value === "omnicodeProfiles"
+    value === "omnicodeProfiles" ||
+    value === "omnicodeAutomation"
   );
 }
 

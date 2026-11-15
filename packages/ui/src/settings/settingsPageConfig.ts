@@ -221,6 +221,14 @@ const BASE_SETTINGS_SECTIONS: SettingsSectionDefinition[] = [
     titleId: "settings.omnicodeProfiles.title",
     groupId: "dataAndStats",
   },
+  // [OmniCode] 自动化（自动领取/领取历史/手动检测；desktop-only，spec:
+  // F:/OmniCode/docs/batch3/BATCH3-DESIGN-DISCUSSION.md §3）
+  {
+    id: "omnicodeAutomation",
+    icon: WandSparkles,
+    titleId: "settings.omnicodeAutomation.title",
+    groupId: "dataAndStats",
+  },
   // 暂时隐藏设置页里的 Migration 入口，只保留页面实现，后续可以直接恢复这一项。
   // {
   //   id: "migration",
@@ -260,6 +268,8 @@ const OMINCODE_MANAGER_VISIBLE_SETTINGS_SECTIONS = new Set<SettingsSectionId>([
   "appearance",
   "shortcuts",
   "omnicodeProfiles",
+  // [OmniCode] 批次3 UI 批次：自动化分区（自动领取开关/领取历史/手动检测）
+  "omnicodeAutomation",
 ]);
 
 export function createSettingsPageConfig({
@@ -273,6 +283,8 @@ export function createSettingsPageConfig({
     if (section.id === "computerUse" && !showComputerUse) return false;
     // [OmniCode] Profile 多实例仅桌面可用（依赖 Electron spawn 能力）
     if (section.id === "omnicodeProfiles" && !isDesktop) return false;
+    // [OmniCode] 自动化分区仅桌面可用（依赖 omnicode 数据层/IPC 面）
+    if (section.id === "omnicodeAutomation" && !isDesktop) return false;
     // [OmniCode] 管理器语境只保留纯偏好 + 多实例分区（判据：管理器无会话栈）
     if (omnicodeManager && !OMINCODE_MANAGER_VISIBLE_SETTINGS_SECTIONS.has(section.id)) {
       return false;
