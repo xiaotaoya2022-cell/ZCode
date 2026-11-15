@@ -15,11 +15,13 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { BrowserWindow } from "electron";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import {
+  omnicodeSharedAssetRequestSchema,
   PlatformChannels,
   sanitizeOmnicodeGlobalPrefsPayload,
   ZCODE_PRODUCT_FLAVOR,
   type OmnicodeGlobalPrefsPayload,
   type OmnicodeInstanceEventPayload,
+  type OmnicodeSharedAssetRequest,
   type ZCodeProductFlavor,
 } from "@zcode/shared";
 
@@ -49,7 +51,10 @@ export interface OmnicodeInstanceBridgeCommand {
     | "applyGlobalPrefs"
     // [OmniCode] 实例元数据批次：改名热更新——实例 main 热更新窗口原生标题 + 广播
     // renderer document.title（title = "ZCode [新名]"，manager 侧构造）。
-    | "rename";
+    | "rename"
+    // [OmniCode] 批次4 单点下沉：assetFetch 的应答（管理器 → 实例；requestId 关联
+    // 实例侧 pending 请求。spec: docs/omnicode/omnicode-shared-services.md §G3.3）。
+    | "assetFetchResult";
   /** arrange 命令的目标矩形（父进程由 workArea 计算后下发）。 */
   bounds?: { x: number; y: number; width: number; height: number };
   /** openWorkspace 命令的工作区目录路径。 */
@@ -62,6 +67,10 @@ export interface OmnicodeInstanceBridgeCommand {
   sourceInstanceId?: string;
   /** rename 命令的实例窗口新标题（"ZCode [新名]"，manager 侧构造）。 */
   title?: string;
+  /** assetFetchResult 命令的请求关联 id（实例侧 pending 表主键）。 */
+  assetRequestId?: string;
+  /** assetFetchResult 命令的结果载荷（ok=false 时实例回退直连）。 */
+  assetResult?: { ok: boolean; dataBase64?: string; error?: string };
 }
 
 /** [OmniCode] 批次4：实例 → 管理器的全局偏好上行消息（reportGlobalPrefs）。 */
@@ -69,6 +78,13 @@ export interface OmnicodeInstanceBridgeReport {
   type: "reportGlobalPrefs";
   prefs: OmnicodeGlobalPrefsPayload;
   sourceInstanceId: string;
+}
+
+// [OmniCode] 批次4 单点下沉：实例 → 管理器的共享资产取回请求（requestId 关联应答）。
+export interface OmnicodeInstanceBridgeAssetFetchRequest {
+  type: "assetFetch";
+  requestId: string;
+  request: OmnicodeSharedAssetRequest;
 }
 
 export interface OmnicodeInstanceBridgeListeners {
@@ -90,6 +106,14 @@ export interface OmnicodeInstanceBridgeManagerHooks {
     prefs: OmnicodeGlobalPrefsPayload,
     sourceInstanceId: string,
   ) => void;
+  /**
+   * [OmniCode] 批次4 单点下沉：实例共享资产取回请求（载荷已在桥服务侧按
+   * omnicodeSharedAssetRequestSchema 校验）。钩子缺席时桥服务回结构化错误（实例回退直连）。
+   */
+  onSharedAssetFetchRequest?: (
+    profileId: string,
+    request: OmnicodeSharedAssetRequest,
+  ) => Promise<{ ok: boolean; dataBase64?: string; error?: string }>;
 }
 
 let managerHooks: OmnicodeInstanceBridgeManagerHooks | null = null;
@@ -244,6 +268,45 @@ export function startOmnicodeInstanceBridgeServer(
           const sourceInstanceId =
             typeof message.sourceInstanceId === "string" ? message.sourceInstanceId : "";
           managerHooks?.onOmnicodeGlobalPrefsReport?.(profileIdParam, prefs, sourceInstanceId);
+        }
+        // [OmniCode] 批次4 单点下沉：实例共享资产取回请求。先按 shared 契约校验形态
+        //（https 直链/sha256/kind 白名单），再交管理器缓存解析；应答只回请求实例。
+        // 钩子缺席（官方 flavor）或解析失败都回结构化错误 → 实例回退直连（不瘫）。
+        if (message.type === "assetFetch") {
+          const parsedRequest = omnicodeSharedAssetRequestSchema.safeParse(
+            (message as { request?: unknown }).request,
+          );
+          const requestId = (message as { requestId?: unknown }).requestId;
+          const reply = (result: { ok: boolean; dataBase64?: string; error?: string }) => {
+            const socket = connectionsByProfileId.get(profileIdParam);
+            if (socket && socket.readyState === 1) {
+              socket.send(
+                JSON.stringify({
+                  type: "assetFetchResult",
+                  ...(typeof requestId === "string" && requestId ? { assetRequestId: requestId } : {}),
+                  assetResult: result,
+                }),
+              );
+            }
+          };
+          if (!parsedRequest.success || typeof requestId !== "string" || !requestId) {
+            reply({ ok: false, error: "asset_request" });
+            return;
+          }
+          void Promise.resolve()
+            .then(() =>
+              managerHooks?.onSharedAssetFetchRequest?.(profileIdParam, parsedRequest.data),
+            )
+            .then((result) =>
+              reply(result ?? { ok: false, error: "asset_unavailable" }),
+            )
+            .catch((error: unknown) =>
+              reply({
+                ok: false,
+                error: error instanceof Error && error.message ? error.message : "asset_fetch",
+              }),
+            );
+          return;
         }
       });
       ws.on("close", () => {

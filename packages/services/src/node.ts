@@ -1276,6 +1276,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function createLocalServices(options: {
   /** Desktop 注入 Main 的私有加解密桥；系统主密钥不进入 Host/CLI。 */
   credentialCipherProvider?: CredentialCipher;
+  // [OmniCode] 批次4 单点下沉（spec: docs/omnicode/omnicode-shared-services.md §G3）：
+  // 宿主注入的共享营销资产取回通道（管理器单点缓存）。仅 omnicode 实例身份 Host 装配；
+  // 抛错即回退直连既有下载路径。授权不下沉：调用前资产已过实例快照 allow 表。
+  sharedMarketingAssetFetch?: (input: {
+    src: string;
+    sha256: string;
+    kind: "image" | "video" | "bundle";
+  }) => Promise<Uint8Array>;
   /** 已鉴权 Desktop stdio 连接提供的私有回查频道；不作为公共 service 暴露。 */
   topicResourceRelayChannel?: (request: unknown) => IChannel;
   parentPort?: Parameters<typeof createBroadcastService>[0];
@@ -3050,6 +3058,15 @@ export function createLocalServices(options: {
   const sqliteReposToClose: Array<{ close(): void }> = [];
   const marketingAssets = createMarketingAssetRegistry({
     allowLoopback: ZCODE_ENV === "test" || process.env.NODE_ENV === "development",
+    // [OmniCode] 批次4 单点下沉（spec: docs/omnicode/omnicode-shared-services.md §G3）：
+    // 仅实例身份 Host 注入共享取回通道（管理器单点缓存）；官方/控制台/远端 Host 不注入，
+    // 行为与现状逐字节一致。授权不下沉——readMedia 仍先过实例 allow 表。
+    ...(options?.sharedMarketingAssetFetch
+      ? {
+          sharedFetch: (input: { src: string; sha256: string; kind: "image" | "video" }) =>
+            options.sharedMarketingAssetFetch!(input),
+        }
+      : {}),
   });
   const services = new ServiceCollection()
     .register(
@@ -3079,6 +3096,17 @@ export function createLocalServices(options: {
       createCloudContentService({
         publishedAssets: marketingAssets,
         cacheRoot: join(getContentAppConfigDir(), "cache", "content-bundles", randomUUID()),
+        // [OmniCode] 批次4 单点下沉：bundle 共享 zip 字节走同一通道（kind=bundle）。
+        ...(options?.sharedMarketingAssetFetch
+          ? {
+              sharedBundleFetch: (bundle: { url: string; sha256: string }) =>
+                options.sharedMarketingAssetFetch!({
+                  src: bundle.url,
+                  sha256: bundle.sha256,
+                  kind: "bundle",
+                }),
+            }
+          : {}),
       }),
     )
     .register(IGitService, gitService)

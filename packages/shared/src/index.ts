@@ -97,6 +97,17 @@ export type {
   OmnicodeInstanceSortItem,
   OmnicodeInstanceSortMode,
 } from "./omnicodeInstanceSort.js";
+// [OmniCode] 批次4 单点下沉：共享营销资产请求契约 + 缓存淘汰/去重纯函数
+//（spec: docs/omnicode/omnicode-shared-services.md §G3）
+export {
+  OMNICODE_SHARED_ASSET_KINDS,
+  OMNICODE_SHARED_ASSET_MAX_BYTES,
+  createOmnicodeAssetInflightDedup,
+  omnicodeSharedAssetKindSchema,
+  omnicodeSharedAssetRequestSchema,
+  resolveOmnicodeAssetsCacheEviction,
+} from "./omnicodeSharedAssets.js";
+export type { OmnicodeSharedAssetKind, OmnicodeSharedAssetRequest } from "./omnicodeSharedAssets.js";
 export { ZCODE_VERSION, ZCODE_COMMIT, ZCODE_BUILD_TIME } from "./version.js";
 export type { HelloMessage, HelloAckMessage } from "./handshake.js";
 export type { ArmsRumEnv, ZCodeEnv, ZCodeProductFlavor } from "./env.js";

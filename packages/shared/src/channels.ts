@@ -808,6 +808,9 @@ export const HostMessageTypes = {
   NetworkCapture: "network-capture",
   /** main → host：Main 的实时界面语言变化（Host 用于 ZCode endpoint 的 X-Client-Language） */
   ApplicationLocaleChanged: "application-locale-changed",
+  // [OmniCode] 批次4 单点下沉：main → host：shared-asset-fetch-request 的应答
+  //（ok=false 时 Host 回退直连既有下载路径，见 docs/omnicode/omnicode-shared-services.md §G3.3）。
+  SharedAssetFetchResult: "shared-asset-fetch-result",
 } as const;
 
 /** host process → main process 的反馈消息类型 */
@@ -917,6 +920,10 @@ export const HostResponseTypes = {
   ProviderProvisioningExecutionResult: "provider-provisioning-execution-result",
   /** host → main：数据同步页按设备读取或重试 Provisioning lane。 */
   ProviderProvisioningLaneRequest: "provider-provisioning-lane-request",
+  // [OmniCode] 批次4 单点下沉（spec: docs/omnicode/omnicode-shared-services.md §G3.3）：
+  // host → main：请求经管理器桥取共享营销资产（仅 omnicode 实例身份装配；官方/控制台
+  // Host 不注入处理依赖，main 回结构化错误，Host 回退直连既有下载路径）。
+  SharedAssetFetchRequest: "shared-asset-fetch-request",
 } as const;
 
 // ============================================================================

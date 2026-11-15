@@ -12,6 +12,7 @@
 //（校验/解除最大化/最低尺寸放宽 + skipTaskbar + 桌面基线保存，spec §批次2 D9）。
 import WebSocket from "ws";
 import { app, BrowserWindow } from "electron";
+import { randomUUID } from "node:crypto";
 import { PlatformChannels } from "@zcode/shared";
 import process from "node:process";
 import {
@@ -45,6 +46,19 @@ let lastReportedHwndHex: string | null = null;
 let embedActive = false;
 /** [OmniCode] 批次4：当前回连 socket（全局偏好上行上报通道；断开置空）。 */
 let activeReportSocket: WebSocket | null = null;
+// [OmniCode] 批次4 单点下沉：共享资产取回的在途请求表（requestId → pending）。
+const pendingSharedAssetRequests = new Map<
+  string,
+  { resolve: (result: OmnicodeSharedAssetFetchReply) => void; timer: NodeJS.Timeout }
+>();
+/** 共享资产取回应答载荷（ok=false 时实例 Host 回退直连）。 */
+export type OmnicodeSharedAssetFetchReply = {
+  ok: boolean;
+  dataBase64?: string;
+  error?: string;
+};
+/** 共享资产取回总预算：管理器自身下载超时 30s + 回环两跳开销（spec §G3.3）。 */
+export const SHARED_ASSET_FETCH_TIMEOUT_MS = 40_000;
 
 function getPrimaryInstanceWindow(): BrowserWindow | undefined {
   // 实例是单主窗口应用（primaryWindowCoordinator 单飞）
@@ -164,7 +178,28 @@ function releaseEmbed(win: BrowserWindow): void {
   restoreDesktopWindowConstraints(win);
 }
 
-function applyCommand(command: { type?: string; bounds?: unknown; path?: unknown; rects?: unknown; prefs?: unknown; sourceInstanceId?: unknown; title?: unknown }): void {
+function applyCommand(command: { type?: string; bounds?: unknown; path?: unknown; rects?: unknown; prefs?: unknown; sourceInstanceId?: unknown; title?: unknown; assetRequestId?: unknown; assetResult?: unknown }): void {
+  // [OmniCode] 批次4 单点下沉：assetFetch 应答不依赖窗口存在性——按 requestId 关联
+  // pending 表（响应到达时在途表必有项，迟到/陌生 requestId 直接丢弃防串扰）。
+  if (command.type === "assetFetchResult") {
+    const requestId =
+      typeof command.assetRequestId === "string" ? command.assetRequestId : "";
+    const pending = pendingSharedAssetRequests.get(requestId);
+    if (!pending) return;
+    pendingSharedAssetRequests.delete(requestId);
+    clearTimeout(pending.timer);
+    const result = command.assetResult as OmnicodeSharedAssetFetchReply | undefined;
+    pending.resolve(
+      result && typeof result === "object"
+        ? {
+            ok: result.ok === true,
+            ...(typeof result.dataBase64 === "string" ? { dataBase64: result.dataBase64 } : {}),
+            ...(typeof result.error === "string" ? { error: result.error } : {}),
+          }
+        : { ok: false, error: "asset_reply" },
+    );
+    return;
+  }
   // [OmniCode] 批次2 B2-1（T4）：openWorkspace 不依赖窗口存在性——冷启动早期的请求也
   // 要能投递（Root 的 onOpenWorkspacePath 由 preload 先缓存后回放，天然容忍 renderer
   // 未就绪）。其余命令仍以主窗口存在为前提。
@@ -421,6 +456,13 @@ export function startOmnicodeInstanceBridgeClient(): void {
       if (activeReportSocket === ws) {
         activeReportSocket = null;
       }
+      // [OmniCode] 批次4 单点下沉：断连即失败全部在途共享资产请求（调用方回退直连，
+      // 不等重连——重连耗时会让资产渲染比直连更慢）。
+      for (const pending of pendingSharedAssetRequests.values()) {
+        clearTimeout(pending.timer);
+        pending.resolve({ ok: false, error: "bridge_disconnected" });
+      }
+      pendingSharedAssetRequests.clear();
       stopHelloLoop();
       lastReportedHwndHex = null;
       // [OmniCode] 后台降载：停帧广播态随连接复位——重连后下一 tick 按当前档位
@@ -459,4 +501,43 @@ export function reportOmnicodeGlobalPrefsToManager(
   } catch {
     return false;
   }
+}
+
+/**
+ * [OmniCode] 批次4 单点下沉：实例 → 管理器共享资产取回（requestId 关联，超时/断连即
+ * 失败 → 调用方回退直连）。仅在实例身份桥接激活时可用；未回连立刻失败（不等待重连——
+ * 等待会让资产渲染比直连更慢）。
+ */
+export function requestOmnicodeSharedAssetFromManager(
+  request: { src: string; sha256: string; kind: "image" | "video" | "bundle" },
+  timeoutMs: number = SHARED_ASSET_FETCH_TIMEOUT_MS,
+): Promise<OmnicodeSharedAssetFetchReply> {
+  const ws = activeReportSocket;
+  if (!ws || ws.readyState !== 1) {
+    return Promise.resolve({ ok: false, error: "bridge_disconnected" });
+  }
+  const requestId = randomUUID();
+  return new Promise<OmnicodeSharedAssetFetchReply>((resolve) => {
+    const settle = (result: OmnicodeSharedAssetFetchReply) => {
+      clearTimeout(timer);
+      pendingSharedAssetRequests.delete(requestId);
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      settle({ ok: false, error: "asset_timeout" });
+    }, Math.max(1_000, timeoutMs));
+    timer.unref?.();
+    pendingSharedAssetRequests.set(requestId, {
+      resolve: (result) => {
+        // 应答路径已清表；这里只转发结果。
+        resolve(result);
+      },
+      timer,
+    });
+    try {
+      ws.send(JSON.stringify({ type: "assetFetch", requestId, request }));
+    } catch {
+      settle({ ok: false, error: "asset_send" });
+    }
+  });
 }

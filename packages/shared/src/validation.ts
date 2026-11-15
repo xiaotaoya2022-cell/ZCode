@@ -59,6 +59,8 @@ import { browserCommandSchema } from "./browser-use/commands.js";
 import { browserCommandResultSchema } from "./browser-use/result.js";
 import { modelSelectionSchema } from "./model-selection.js";
 import { localeSchema } from "./validationAppSettings.js";
+// [OmniCode] 批次4 单点下沉：共享资产请求形状契约（bridge assetFetch / host↔main 同形）。
+import { omnicodeSharedAssetRequestSchema } from "./omnicodeSharedAssets.js";
 import { zcodeProcessDiagnosticSchema } from "./process-diagnostic.js";
 import { PROCESS_RESOURCE_CLI_LANES } from "./processResourceTelemetry.js";
 import {
@@ -1083,6 +1085,21 @@ export const hostProviderProvisioningLaneResultMessageSchema = z
   })
   .strict();
 
+// [OmniCode] 批次4 单点下沉（spec: docs/omnicode/omnicode-shared-services.md §G3.3）：
+// main → host：shared-asset-fetch-request 应答。ok=false（桥未连/管理器不可用/校验失败）
+// 时 Host 回退直连既有下载路径；dataBase64 为管理器已 sha256 复核的资产字节，Host 侧
+// 仍二次复核（纵深防御）。
+export const hostSharedAssetFetchResultMessageSchema = z
+  .object({
+    type: z.literal("shared-asset-fetch-result"),
+    requestId: nonEmptyStringSchema,
+    ok: z.boolean(),
+    dataBase64: z.string().max(32 * 1024 * 1024).optional(),
+    error: z.string().max(200).optional(),
+  })
+  .strict();
+export type HostSharedAssetFetchResultMessage = z.infer<typeof hostSharedAssetFetchResultMessageSchema>;
+
 /** 手机只提交项目意图；实际目录和远端 scope 必须由窗口 Host 准备。 */
 export const hostPrepareProjectWorkspaceMessageSchema = z
   .object({
@@ -1186,6 +1203,7 @@ export const hostIncomingMessageSchema = z.discriminatedUnion("type", [
   hostApplicationLocaleChangedMessageSchema,
   hostProviderProvisioningExecuteMessageSchema,
   hostProviderProvisioningLaneResultMessageSchema,
+  hostSharedAssetFetchResultMessageSchema,
 ]);
 
 export const hostRemoteWorkspaceConnectedResponseSchema = z
@@ -1665,6 +1683,17 @@ export const hostLocalMediaPreviewPathAuthorizeRequestResponseSchema = z
   })
   .strict();
 
+// [OmniCode] 批次4 单点下沉：host → main 请求经管理器桥取共享营销资产。资产已先过
+// 实例快照 allow 表（授权不下沉）；本 schema 只约束传输形态（https 直链 + sha256 + kind）。
+export const hostSharedAssetFetchRequestResponseSchema = z
+  .object({
+    type: z.literal("shared-asset-fetch-request"),
+    requestId: nonEmptyStringSchema,
+    request: omnicodeSharedAssetRequestSchema,
+  })
+  .strict();
+export type HostSharedAssetFetchRequestMessage = z.infer<typeof hostSharedAssetFetchRequestResponseSchema>;
+
 /** host → main：登记已校验的插件 UI HTML。 */
 export const hostPluginSandboxRegisterRequestResponseSchema = z
   .object({
@@ -1858,6 +1887,7 @@ export const hostResponseMessageSchema = z.discriminatedUnion("type", [
   hostOffPeakRunResultResponseSchema,
   hostCronSchedulerWakeRequestResponseSchema,
   hostOffPeakSchedulerWakeRequestResponseSchema,
+  hostSharedAssetFetchRequestResponseSchema,
 ]);
 
 export const zcodeTaskPersistStatusSchema = z.enum(["running", "completed", "error"]);

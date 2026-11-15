@@ -26,6 +26,7 @@ import {
   HostMessageTypes,
   hostResponseMessageSchema,
   HostResponseTypes,
+  type OmnicodeSharedAssetRequest,
   InternalChannels,
   LAUNCH_MARKS_QUERY_KEY,
   RUNTIME_ZCODE_DEBUG,
@@ -260,6 +261,12 @@ export function spawnHostProcess(
       ): Promise<ProviderProvisioningLaneStatus>;
       retry(sourceServerId: string): Promise<ProviderProvisioningLaneStatus>;
     };
+    // [OmniCode] 批次4 单点下沉（spec: docs/omnicode/omnicode-shared-services.md §G3.3）：
+    // host → main：共享营销资产取回（实例 main 经桥问管理器；仅实例身份装配）。
+    // 缺省实现回结构化错误——Host 请求总有应答，Host 侧失败即回退直连（不瘫）。
+    handleSharedAssetFetchRequest?: (
+      request: OmnicodeSharedAssetRequest,
+    ) => Promise<{ ok: boolean; dataBase64?: string; error?: string }>;
   },
   options?: SpawnHostProcessOptions,
 ): ElectronUtilityProcess {
@@ -532,6 +539,30 @@ export function spawnHostProcess(
             error: error instanceof Error ? error.message : String(error),
           });
         });
+      return;
+    }
+
+    // [OmniCode] 批次4 单点下沉：host → main 共享资产取回。无处理依赖（官方/控制台/远端
+    // Host）时回结构化错误——请求总有应答，Host 侧按 ok=false 回退直连既有下载路径。
+    if (result.data.type === HostResponseTypes.SharedAssetFetchRequest) {
+      const request = result.data;
+      const handler = dependencies.handleSharedAssetFetchRequest;
+      const reply = (payload: { ok: boolean; dataBase64?: string; error?: string }) =>
+        child.postMessage({
+          type: HostMessageTypes.SharedAssetFetchResult,
+          requestId: request.requestId,
+          ok: payload.ok,
+          ...(payload.ok && payload.dataBase64 ? { dataBase64: payload.dataBase64 } : {}),
+          ...(!payload.ok && payload.error ? { error: payload.error } : {}),
+        });
+      void (
+        handler
+          ? handler(request.request).catch((error: unknown) => ({
+              ok: false as const,
+              error: error instanceof Error ? error.message : String(error),
+            }))
+          : Promise.resolve({ ok: false as const, error: "shared_asset_unavailable" })
+      ).then(reply);
       return;
     }
 

@@ -60,6 +60,16 @@ export {
   reportOmnicodeGlobalPrefsToManager,
   startOmnicodeInstanceBridgeClient,
 } from "./instanceBridgeClient.js";
+// [OmniCode] 批次4 单点下沉（spec: docs/omnicode/omnicode-shared-services.md §G3）：
+// 管理器共享资产缓存 + 实例侧桥取请求（assetFetch 桥命令链的两侧入口）。
+export {
+  createOmnicodeSharedAssetsCache,
+  resolveOmnicodeAssetsCacheRoot,
+  sniffOmnicodeSharedAssetMime,
+} from "./sharedAssetsCache.js";
+export type { OmnicodeSharedAssetsCacheDeps } from "./sharedAssetsCache.js";
+export { requestOmnicodeSharedAssetFromManager } from "./instanceBridgeClient.js";
+export type { OmnicodeSharedAssetFetchReply } from "./instanceBridgeClient.js";
 export {
   getOmnicodeGlobalPrefsIdentity,
   handleOmnicodeGlobalPrefsReportFromInstance,
