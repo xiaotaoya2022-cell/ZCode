@@ -36,6 +36,11 @@ export const OMNICODE_CLAIM_HISTORY_MAX_ENTRIES = 50;
  * dockDefault=v 且清空每实例覆盖表（收敛到全局语义）；dockInstance 写单键覆盖
  * （profileId 非空字符串 ∧ docked 布尔才接受）。旧全局 mode 字段不再接受
  * （迁移只发生在读档路径 migrateOmnicodeConsoleUiState）。
+ * [OmniCode] 批次3 终审修复（P1-1）：patch 显式携带 dockedByProfileId 时整体替换为
+ * 逐键归一后的覆盖表（undefined = 不变）——此前读档路径把落盘 JSON 整体当 patch 传入
+ * 本函数，覆盖表不在白名单内被静默丢弃，任何 console-ui 写入（UiStateSet/预览开关/
+ * claimHistory 落盘）都会连带清空每实例停靠覆盖。归一规则见
+ * normalizeOmnicodeDockOverrides（空对象 = 清空覆盖表，与 claimHistory 空数组同构）。
  */
 export function mergeOmnicodeConsoleUiState(
   current: OmnicodeConsoleUiState,
@@ -45,6 +50,9 @@ export function mergeOmnicodeConsoleUiState(
   const next: OmnicodeConsoleUiState = { ...current };
   if (typeof patch.dockDefault === "boolean") {
     next.dockDefault = patch.dockDefault;
+  }
+  if (patch.dockedByProfileId !== undefined) {
+    next.dockedByProfileId = normalizeOmnicodeDockOverrides(patch.dockedByProfileId);
   }
   if (patch.dockAll === true || patch.dockAll === false) {
     next.dockDefault = patch.dockAll;
@@ -74,6 +82,27 @@ export function mergeOmnicodeConsoleUiState(
     next.claimHistory = normalized;
   }
   return next;
+}
+
+/** profileId 形态白名单（与 profileRuntime 生成器/assertValidProfileId 同源：p + base36）。 */
+const OMNICODE_PROFILE_ID_PATTERN = /^p[0-9a-z]{8,20}$/u;
+
+/**
+ * dockedByProfileId 归一（纯函数）：仅接受 Record 形态；逐键校验（键 = profileId 形态、
+ * 值 = 布尔），非法键丢弃——落盘/patch 值永远收敛到合法形态。[OmniCode] 批次3 终审
+ * 修复（P1-1）：读档路径把落盘 JSON 整体传给 mergeOmnicodeConsoleUiState，此前该字段
+ * 不在白名单内被静默丢弃（覆盖表读档即丢、任何 console-ui 写入都会清掉它）。
+ * 空对象/全非法键 = 清空覆盖表（全部实例跟随 dockDefault，合法缺省语义）。
+ */
+export function normalizeOmnicodeDockOverrides(raw: unknown): Record<string, boolean> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const normalized: Record<string, boolean> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!OMNICODE_PROFILE_ID_PATTERN.test(key)) continue;
+    if (typeof value !== "boolean") continue;
+    normalized[key] = value;
+  }
+  return normalized;
 }
 
 /** claimHistory 单条合法性校验（纯函数）：缺核心字段/枚举越界即丢弃该条。 */
