@@ -531,6 +531,14 @@ export interface OmnicodeConsoleUiState {
 export interface OmnicodeConsoleUiStatePatch {
   /** 全局默认停靠态直改（UI 批量按钮走 dockAll，此字段供存储层/工具直接写）。 */
   dockDefault?: boolean;
+  /**
+   * [OmniCode] 批次3 终审修复（P1-1）：显式携带 dockedByProfileId 才更新（undefined =
+   * 不变）。逐键归一（键 = profileId 形态、值 = 布尔，非法键丢弃；空对象 = 清空覆盖表）。
+   * 读档路径把落盘 JSON 整体当 patch 传入 merge，此字段必须在白名单内——否则覆盖表
+   * 读档即丢、任何 console-ui 写入连带清空每实例停靠覆盖。UI 常规路径仍走
+   * dockAll/dockInstance（不直接传本字段）。
+   */
+  dockedByProfileId?: Record<string, boolean>;
   /** 批量停靠/拖出：dockDefault=v 且清空每实例覆盖表（收敛到全局语义）。 */
   dockAll?: boolean;
   /** 单实例停靠/拖出（写 dockedByProfileId 覆盖键）。 */
