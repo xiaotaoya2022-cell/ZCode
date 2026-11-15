@@ -153,7 +153,7 @@ function releaseEmbed(win: BrowserWindow): void {
   restoreDesktopWindowConstraints(win);
 }
 
-function applyCommand(command: { type?: string; bounds?: unknown; path?: unknown; rects?: unknown; prefs?: unknown; sourceInstanceId?: unknown }): void {
+function applyCommand(command: { type?: string; bounds?: unknown; path?: unknown; rects?: unknown; prefs?: unknown; sourceInstanceId?: unknown; title?: unknown }): void {
   // [OmniCode] 批次2 B2-1（T4）：openWorkspace 不依赖窗口存在性——冷启动早期的请求也
   // 要能投递（Root 的 onOpenWorkspacePath 由 preload 先缓存后回放，天然容忍 renderer
   // 未就绪）。其余命令仍以主窗口存在为前提。
@@ -174,6 +174,25 @@ function applyCommand(command: { type?: string; bounds?: unknown; path?: unknown
   // setting.json 写入/热应用全在协调器（globalPrefs.ts）内完成（fire-and-forget）。
   if (command.type === "applyGlobalPrefs") {
     void handleOmnicodeGlobalPrefsApplyCommand(command.prefs, command.sourceInstanceId);
+    return;
+  }
+  // [OmniCode] 实例元数据批次：rename——窗口原生标题热更新（win.setTitle）+ renderer
+  // document.title 同步（广播 OmnicodeInstanceTitleChanged，preload 直写 document.title；
+  // page-title-updated 默认链路随后把原生标题对齐同一字符串，双保险同值）。窗口未就绪
+  // 时跳过（下次启动由 profile.json env 快照收敛）。
+  if (command.type === "rename") {
+    const title = typeof command.title === "string" ? command.title.trim() : "";
+    if (!title) return;
+    const win = getPrimaryInstanceWindow();
+    if (!win || win.isDestroyed()) return;
+    try {
+      win.setTitle(title);
+    } catch (error) {
+      console.warn("[omnicode] 实例窗口标题热更新失败:", error);
+    }
+    if (!win.webContents.isDestroyed()) {
+      win.webContents.send(PlatformChannels.OmnicodeInstanceTitleChanged, title);
+    }
     return;
   }
   const win = getPrimaryInstanceWindow();

@@ -274,10 +274,16 @@ export const PlatformChannels = {
   OmnicodeProfileCreate: "zcode:omnicode-profile-create",
   OmnicodeProfileRemove: "zcode:omnicode-profile-remove",
   OmnicodeProfileClone: "zcode:omnicode-profile-clone",
+  // [OmniCode] 实例元数据批次：重命名实例（profileId 不变；运行中实例经桥热更新窗口标题）
+  OmnicodeProfileRename: "zcode:omnicode-profile-rename",
   OmnicodeProfileLaunch: "zcode:omnicode-profile-launch",
   OmnicodeProfileStop: "zcode:omnicode-profile-stop",
   // [OmniCode] Main → Renderer：实例事件（缩略图帧/连接态）
   OmnicodeInstanceEvent: "zcode:omnicode-instance-event",
+  // [OmniCode] 实例元数据批次：Main → Renderer（实例进程）改名热更新——实例 main 经桥
+  // rename 命令收到新标题后广播；preload 直写 document.title（原生标题经
+  // page-title-updated 默认链路对齐同一字符串，win.setTitle 同值双保险）。
+  OmnicodeInstanceTitleChanged: "zcode:omnicode-instance-title-changed",
   // [OmniCode] Renderer → Main：聚焦实例窗口（桥接命令）
   OmnicodeProfileFocus: "zcode:omnicode-profile-focus",
   // [OmniCode] Renderer → Main：平铺编排全部运行中实例窗口到主屏网格（M2 v1，spec §实时视窗）
@@ -964,6 +970,11 @@ export interface PlatformChannelMap {
     request: { id: string; name: string };
     response: { profile: OmnicodeProfileSummaryInfo };
   };
+  // [OmniCode] 实例元数据批次：重命名（main 侧 trim 非空 + 重名校验；profileId 稳定性红线）
+  [PlatformChannels.OmnicodeProfileRename]: {
+    request: { id: string; name: string };
+    response: { profile: OmnicodeProfileSummaryInfo };
+  };
   [PlatformChannels.OmnicodeProfileLaunch]: {
     request: { id: string };
     response: { pid: number };
@@ -974,6 +985,11 @@ export interface PlatformChannelMap {
   };
   [PlatformChannels.OmnicodeInstanceEvent]: {
     request: OmnicodeInstanceEventPayload;
+    response: void;
+  };
+  // [OmniCode] 实例元数据批次：改名热更新广播（实例 main → 自身 renderer；payload = 新标题）
+  [PlatformChannels.OmnicodeInstanceTitleChanged]: {
+    request: string;
     response: void;
   };
   [PlatformChannels.OmnicodeProfileFocus]: {

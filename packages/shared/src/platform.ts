@@ -1,4 +1,5 @@
 /* eslint-disable max-lines -- 跨端 platform contract 集中声明 renderer 能力；OAuth 与 browser lifecycle 必须保持 desktop/web 类型合同，本 MR 不拆分平台边界。 */
+import type { OmnicodeInstanceSortMode } from "./omnicodeInstanceSort.js";
 import type {
   DockerConnectOptions,
   RemoteTarget,
@@ -418,6 +419,12 @@ export interface OmnicodeProfileSummaryInfo {
   name: string;
   createdAt: string;
   notes?: string;
+  /**
+   * [OmniCode] 实例元数据批次：序号（profileRegistry 持久化整数；新建 = 当前 max+1，
+   * 读档缺失由注册表回填）。仅排序依据（sortOmnicodeInstances seq 模式），不影响昵称
+   * 显示；卡片底部以 "#N" 角标克制呈现。
+   */
+  seq?: number;
   /** 是否正在运行（控制台内存态，进程重启即重建） */
   running: boolean;
   /** 运行中实例的 pid */
@@ -454,6 +461,12 @@ export interface OmnicodeProfileCreateInput {
 }
 
 export interface OmnicodeProfileCloneInput {
+  id: string;
+  name: string;
+}
+
+/** [OmniCode] 实例元数据批次：重命名入参（id 不变，仅 name 更新）。 */
+export interface OmnicodeProfileRenameInput {
   id: string;
   name: string;
 }
@@ -516,6 +529,18 @@ export interface OmnicodeConsoleUiState {
    * 不写实例树（consoleUiState.ts 立场注释同源）。
    */
   claimHistory?: OmnicodeClaimHistoryEntry[];
+  /**
+   * [OmniCode] 实例元数据批次：实例列表排序模式（seq=按序号默认 / name=按名称 zh
+   * collation / custom=拖拽产生顺序）。持久化 console-ui.json；网格/设置分区列表/
+   * 托盘菜单共用 `sortOmnicodeInstances`（omnicodeInstanceSort.ts）同一排序事实源。
+   */
+  sortMode?: OmnicodeInstanceSortMode;
+  /**
+   * [OmniCode] 实例元数据批次：自定义排序的 profileId 顺序数组（拖拽落点语义见
+   * moveOmnicodeInstanceInCustomOrder）。merge 白名单逐项归一（形态白名单+去重+截断）；
+   * 旧档缺省 = 回退 seq 序。
+   */
+  customOrder?: string[];
 }
 
 /** UI 状态部分更新（字段缺省=不变；非法值在 main 侧归一后落盘）。 */
@@ -538,6 +563,16 @@ export interface OmnicodeConsoleUiStatePatch {
   perfPanelOpen?: boolean;
   autoClaimEnabled?: boolean;
   claimHistory?: OmnicodeClaimHistoryEntry[];
+  /**
+   * [OmniCode] 实例元数据批次：排序模式（显式携带才更新，undefined = 不变）。
+   * 非法值在 merge 白名单归一后丢弃（落盘值收敛到合法形态）。
+   */
+  sortMode?: OmnicodeInstanceSortMode;
+  /**
+   * [OmniCode] 实例元数据批次：自定义排序数组（显式携带才更新，undefined = 不变；
+   * 空数组 = 清空回 seq 兜底序）。逐项归一同 sortMode。
+   */
+  customOrder?: string[];
 }
 
 /**
@@ -1406,6 +1441,12 @@ export interface IPlatformService {
   createOmnicodeProfile?(input: OmnicodeProfileCreateInput): Promise<{ profile: OmnicodeProfileSummaryInfo }>;
   removeOmnicodeProfile?(input: OmnicodeProfileIdInput): Promise<{ ok: boolean }>;
   cloneOmnicodeProfile?(input: OmnicodeProfileCloneInput): Promise<{ profile: OmnicodeProfileSummaryInfo }>;
+  /**
+   * [OmniCode] 实例元数据批次：重命名实例（profileId 稳定性红线：id/凭据/数据根/锁/
+   * dock 覆盖表全部按旧 id 工作；main 侧 trim 非空 + 重名校验）。运行中实例经桥命令
+   * 热更新窗口标题；托盘菜单名称缓存随改名重建。仅 Desktop。
+   */
+  renameOmnicodeProfile?(input: OmnicodeProfileRenameInput): Promise<{ profile: OmnicodeProfileSummaryInfo }>;
   launchOmnicodeProfile?(input: OmnicodeProfileIdInput): Promise<{ pid: number }>;
   stopOmnicodeProfile?(input: OmnicodeProfileIdInput): Promise<{ ok: boolean }>;
   focusOmnicodeProfile?(input: OmnicodeProfileIdInput): Promise<{ ok: boolean }>;

@@ -9,7 +9,11 @@ import type {
   OmnicodeConsoleUiState,
   OmnicodeConsoleUiStatePatch,
 } from "@zcode/shared";
-import { resolveOmnicodeInstanceDocked } from "@zcode/shared";
+import {
+  normalizeOmnicodeInstanceCustomOrder,
+  normalizeOmnicodeInstanceSortMode,
+  resolveOmnicodeInstanceDocked,
+} from "@zcode/shared";
 import { readJsonWithRecovery, writeJsonAtomic } from "./atomicJson.js";
 import { getOmnicodeConsoleDataBaseDir } from "./profileRuntime.js";
 
@@ -80,6 +84,17 @@ export function mergeOmnicodeConsoleUiState(
     const normalized = normalizeOmnicodeClaimHistory(patch.claimHistory);
     // 显式携带 claimHistory 才更新（undefined = 不变）；空数组 = 清空历史
     next.claimHistory = normalized;
+  }
+  // [OmniCode] 实例元数据批次：排序态白名单（P1-1 教训——读档路径把落盘 JSON 整体当
+  // patch 传入 merge，漏字段 = 读档即丢 + 持久化断裂）。sortMode 仅接受合法枚举；
+  // customOrder 显式携带才更新（undefined = 不变；空数组 = 清空回 seq 兜底序），逐项
+  // profileId 形态白名单 + 去重 + 截断（归一规则见 omnicodeInstanceSort）。
+  const normalizedSortMode = normalizeOmnicodeInstanceSortMode(patch.sortMode);
+  if (normalizedSortMode !== undefined) {
+    next.sortMode = normalizedSortMode;
+  }
+  if (patch.customOrder !== undefined) {
+    next.customOrder = normalizeOmnicodeInstanceCustomOrder(patch.customOrder) ?? [];
   }
   return next;
 }

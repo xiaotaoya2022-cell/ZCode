@@ -80,6 +80,23 @@ export type {
   OmnicodeGlobalPrefsPayload,
   OmnicodeThemePreference,
 } from "./omnicodeGlobalPrefs.js";
+// [OmniCode] 实例元数据批次：实例列表排序纯函数（网格/设置分区列表/托盘菜单共用，
+// spec: docs/omnicode/profile-runtime.md §实例元数据）
+export {
+  OMNICODE_INSTANCE_CUSTOM_ORDER_MAX,
+  OMNICODE_INSTANCE_SORT_MODES,
+  isOmnicodeInstanceSeq,
+  isOmnicodeInstanceSortMode,
+  moveOmnicodeInstanceInCustomOrder,
+  normalizeOmnicodeInstanceCustomOrder,
+  normalizeOmnicodeInstanceSortMode,
+  sortOmnicodeInstances,
+} from "./omnicodeInstanceSort.js";
+export type {
+  OmnicodeDropPosition,
+  OmnicodeInstanceSortItem,
+  OmnicodeInstanceSortMode,
+} from "./omnicodeInstanceSort.js";
 export { ZCODE_VERSION, ZCODE_COMMIT, ZCODE_BUILD_TIME } from "./version.js";
 export type { HelloMessage, HelloAckMessage } from "./handshake.js";
 export type { ArmsRumEnv, ZCodeEnv, ZCodeProductFlavor } from "./env.js";
@@ -282,6 +299,7 @@ export type {
   OmnicodeProfileSummaryInfo,
   OmnicodeProfileCreateInput,
   OmnicodeProfileCloneInput,
+  OmnicodeProfileRenameInput,
   OmnicodeProfileIdInput,
   OmnicodeInstanceEventPayload,
   OmnicodeConsoleAdoptionCheckResult,

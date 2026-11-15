@@ -45,6 +45,19 @@ contextBridge.exposeInMainWorld("__ZCODE_DEVICE_ID__", parseDeviceIdFromArgs());
 const omnicodeInstanceId = resolveOmnicodeInstanceIdFromEnv(process.env);
 const omnicodeInstanceTitle = process.env.OMNICODE_INSTANCE_TITLE?.trim() || null;
 
+// [OmniCode] 实例元数据批次：改名热更新（仅实例进程）。实例 main 经桥 rename 命令收到
+// 新标题后广播 OmnicodeInstanceTitleChanged；preload 直写 document.title（renderer 入口
+// main.tsx 的 env 快照此后不再变化，热更新走本监听），Electron page-title-updated 默认
+// 链路随后把原生窗口标题对齐同一字符串（main 侧 win.setTitle 同值双保险）。空/非字符串
+// payload 丢弃（防御畸形帧）。
+if (omnicodeInstanceId !== null) {
+  ipcRenderer.on(PlatformChannels.OmnicodeInstanceTitleChanged, (_event, title: unknown) => {
+    if (typeof title === "string" && title.trim().length > 0) {
+      document.title = title;
+    }
+  });
+}
+
 import type {
   AppSettings,
   ApplicationIconRequest,
@@ -103,6 +116,7 @@ import type {
   OmnicodeProfileSummaryInfo,
   OmnicodeProfileCreateInput,
   OmnicodeProfileCloneInput,
+  OmnicodeProfileRenameInput,
   OmnicodeProfileIdInput,
   OmnicodeInstanceEventPayload,
   OmnicodeConsoleUiState,
@@ -414,6 +428,11 @@ contextBridge.exposeInMainWorld("zcode", {
           payload: OmnicodeProfileCloneInput,
         ): Promise<{ profile: OmnicodeProfileSummaryInfo }> =>
           ipcRenderer.invoke(PlatformChannels.OmnicodeProfileClone, payload),
+        // [OmniCode] 实例元数据批次：重命名实例（main 侧重名校验 + 桥热更新 + 托盘重建）
+        renameOmnicodeProfile: (
+          payload: OmnicodeProfileRenameInput,
+        ): Promise<{ profile: OmnicodeProfileSummaryInfo }> =>
+          ipcRenderer.invoke(PlatformChannels.OmnicodeProfileRename, payload),
         launchOmnicodeProfile: (payload: OmnicodeProfileIdInput): Promise<{ pid: number }> =>
           ipcRenderer.invoke(PlatformChannels.OmnicodeProfileLaunch, payload),
         stopOmnicodeProfile: (payload: OmnicodeProfileIdInput): Promise<{ ok: boolean }> =>
