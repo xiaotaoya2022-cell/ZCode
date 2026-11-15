@@ -22,11 +22,13 @@ import {
   ensureOmnicodeInstanceBridgeServerStarted,
   getOmnicodeConsoleDataBaseDir,
   getOmnicodeProfileDir,
+  handleOmnicodeGlobalPrefsReportFromInstance,
   hasOmnicodeConsoleCredentials,
   isOmnicodeDataBaseDirAdopted,
   launchOmnicodeProfile,
   listOmnicodeProfiles,
   listOmnicodeRunningInstances,
+  pushOmnicodeGlobalPrefsSnapshotToInstance,
   reconcileOmnicodeRunningInstances,
   readOmnicodeProcessMemoryMBs,
   removeOmnicodeProfile,
@@ -108,6 +110,18 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
 
   ipcMain.handle(PlatformChannels.OmnicodeProfileRemove, async (_event, input: { id: string }) => {
     await removeOmnicodeProfile(input.id);
+    // [OmniCode] 批次3 终审修复（P2-⑤）：清理 console-ui dockedByProfileId 残留键
+    //（删实例后覆盖键不再有意义——键为时间戳+随机无碰撞，dockAll 亦会清空，此处只是
+    // 存档卫生）。best-effort：清理失败不阻断删除主流程（残留键按缺省语义解析）。
+    try {
+      const state = await readOmnicodeConsoleUiState();
+      if (Object.prototype.hasOwnProperty.call(state.dockedByProfileId, input.id)) {
+        const { [input.id]: _removedOverride, ...restOverrides } = state.dockedByProfileId;
+        await writeOmnicodeConsoleUiState({ ...state, dockedByProfileId: restOverrides });
+      }
+    } catch (error) {
+      console.warn("[omnicode] 删实例清理 dockedByProfileId 残留键失败（不阻断）:", error);
+    }
     return { ok: true };
   });
 
@@ -154,9 +168,19 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
   // F:\OmniCode\docs\batch3\BATCH3-DESIGN-DISCUSSION.md §2/§3）
   registerDesktopOmnicodeAccountIpcHandlers();
   setOmnicodeInstanceBridgeManagerHooks({
-    onInstanceConnected: (profileId) => notifyOmnicodeInstanceConnected(profileId),
+    onInstanceConnected: (profileId) => {
+      notifyOmnicodeInstanceConnected(profileId);
+      // [OmniCode] 批次4 全局偏好层：连接即推当前全局层快照（theme 主交付面 +
+      // 长断连实例的收敛兜底；fire-and-forget，spec: docs/omnicode/global-preferences.md）。
+      void pushOmnicodeGlobalPrefsSnapshotToInstance(profileId);
+    },
     onInstanceDisconnected: (profileId) => notifyOmnicodeInstanceDisconnected(profileId),
     onInstanceHello: (profileId, hwndHex) => notifyOmnicodeInstanceHello(profileId, hwndHex),
+    // [OmniCode] 批次4：实例上行全局偏好（载荷已在桥服务侧消毒；协调器内二次消毒 +
+    // 管理器写全局层 + state:* 热应用 + 下行广播，spec: docs/omnicode/global-preferences.md）。
+    onOmnicodeGlobalPrefsReport: (profileId, prefs, sourceInstanceId) => {
+      void handleOmnicodeGlobalPrefsReportFromInstance(prefs, sourceInstanceId);
+    },
   });
   // 装配时初始化持久化模式（窗口引用由 index.ts 在主窗口创建后补挂）
   void setupOmnicodeConsoleEmbedding();

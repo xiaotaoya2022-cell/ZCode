@@ -44,6 +44,7 @@ export type { OmnicodeRunningInstance, OmnicodeWorkspaceRouteDeps } from "./inst
 export { scanOmnicodeInstanceProcesses, readOmnicodeProcessMemoryMBs } from "./instanceReconcile.js";
 export {
   ensureOmnicodeInstanceBridgeServerStarted,
+  getOmnicodeConnectedInstanceProfileIds,
   getOmnicodeInstanceBridgeInfo,
   sendOmnicodeInstanceCommand,
   setOmnicodeInstanceThumbnailSubscription,
@@ -52,7 +53,23 @@ export type {
   OmnicodeInstanceBridgeCommand,
   OmnicodeInstanceBridgeListeners,
 } from "./instanceBridgeServer.js";
-export { startOmnicodeInstanceBridgeClient } from "./instanceBridgeClient.js";
+export {
+  reportOmnicodeGlobalPrefsToManager,
+  startOmnicodeInstanceBridgeClient,
+} from "./instanceBridgeClient.js";
+export {
+  getOmnicodeGlobalPrefsIdentity,
+  handleOmnicodeGlobalPrefsReportFromInstance,
+  initOmnicodeGlobalPrefsCoordinator,
+  injectOmnicodeGlobalPrefsForSpawn,
+  noteOmnicodeAppSettingsPatchForGlobalPrefs,
+  noteOmnicodeRendererStateBroadcastForGlobalPrefs,
+  pushOmnicodeGlobalPrefsSnapshotToInstance,
+} from "./globalPrefs.js";
+export type {
+  OmnicodeGlobalPrefsCoordinatorDeps,
+  OmnicodeGlobalPrefsIdentity,
+} from "./globalPrefs.js";
 export {
   backupAllOmnicodeCredentials,
   backupCredentialFile,

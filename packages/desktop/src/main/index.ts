@@ -14,8 +14,11 @@ import "./omnicode/profileBootstrap.js";
 import { buildOmnicodeInstanceRelaunchArgs } from "./omnicode/contract.js";
 // [OmniCode] 批次2 B2-1：管理器/实例双模式分流（T2 瘦身 + T4 工作区路由）
 import {
+  getOmnicodeConnectedInstanceProfileIds,
   listOmnicodeRunningInstances,
+  reportOmnicodeGlobalPrefsToManager,
   routeOmnicodeWorkspaceOpenFromManager,
+  sendOmnicodeInstanceCommand,
   startOmnicodeInstanceSelfCredentialBackupScheduler,
 } from "./omnicode/contract.js";
 // [OmniCode] 批次2 B2-3：管理器内嵌编排（owned-window 生命周期红线——退出收尾队列在
@@ -30,6 +33,13 @@ import { buildOmnicodeTrayMenuSection, setupOmnicodeConsoleTray } from "./omnico
 // [OmniCode] 批次2.5 X1 评审修复（R1 P1-1）：性能采样器退出收尾接入 quit 屏障
 //（spec: docs/omnicode/console-extras.md §X1 采样生命周期）
 import { shutdownOmnicodePerfSampler } from "./omnicode/perfMonitor.js";
+// [OmniCode] 批次4 全局偏好层：管理器/实例双身份同步协调器装配 + 双路观察点
+//（spec: docs/omnicode/global-preferences.md；官方 flavor 装配成 no-op，行为零影响）
+import {
+  initOmnicodeGlobalPrefsCoordinator,
+  noteOmnicodeAppSettingsPatchForGlobalPrefs,
+  noteOmnicodeRendererStateBroadcastForGlobalPrefs,
+} from "./omnicode/contract.js";
 import "./desktopEarlyDataBaseDirBootstrap.js";
 import "./desktopEarlyChromiumHardwareAccelerationBootstrap.js";
 import { powerMonitor, powerSaveBlocker } from "electron";
@@ -654,6 +664,11 @@ let activeAppShutdownKind: AppShutdownKind | null = null;
 const WINDOWS_AGENT_FORCE_KILL_TIMEOUT_MS = 2_000;
 
 const broadcastHub = new BroadcastHub();
+// [OmniCode] 批次4 全局偏好层：renderer 发起 state:* 广播观察点（回调内部按身份过滤，
+// 官方 flavor/未装配进程 no-op——见 globalPrefs.ts；注入路径不经 relay，无回环）。
+broadcastHub.onOmnicodeRendererStateBroadcast = (channel, payload) => {
+  noteOmnicodeRendererStateBroadcastForGlobalPrefs(channel, payload);
+};
 const taskRealtimeBus = new TaskRealtimeBus({ logger });
 // 内存诊断计数器：desktopResourceTelemetry 每 60s collect
 // 一次写主日志。will-download 监听数用于观察关窗后 defaultSession 是否残留监听。
@@ -808,6 +823,45 @@ const UPDATE_STATUS_WINDOW_PROGRESS_HEIGHT = 224;
 const UPDATE_STATUS_WINDOW_READY_HEIGHT = UPDATE_STATUS_WINDOW_PROGRESS_HEIGHT - 54;
 const UPDATE_STATUS_WINDOW_TRAFFIC_LIGHT_POSITION = { x: 10, y: 10 } as const;
 const mainSettingService = createSettingService();
+// [OmniCode] 批次4 全局偏好层：双身份同步协调器装配（官方 flavor 装配成 no-op 身份，
+// 观察点与 spawn 注入全部直通返回；spec: docs/omnicode/global-preferences.md）。
+// - 管理器：观察点 → 下行桥广播；实例上行 → 写自己的全局层（mainSettingService/
+//   theme 侧车）+ state:* 注入热应用 + 再下行广播（带源实例 id，环形抑制在源侧裁决）。
+// - 实例：观察点 → 上行桥上报；applyGlobalPrefs → 写自己 setting.json 白名单键 +
+//   state:* 注入热应用（环形抑制：sourceInstanceId=自己即忽略）。
+// - 依赖经注入面解耦（sendApplyToInstance/sendReportToManager 等直接指向桥的既有
+//   导出，不新增模块间导入边）。
+initOmnicodeGlobalPrefsCoordinator({
+  // 与 isOmnicodeManagerMain 同口径（该 const 在其后才声明，此处用同一原语组合）：
+  // 管理器 = omnicode flavor ∧ 无实例身份。
+  identity: isOmnicodeManagerProcess(ZCODE_PRODUCT_FLAVOR) && !isOmnicodeProfileInstanceEnv()
+    ? "manager"
+    : isOmnicodeProfileInstanceEnv()
+      ? "instance"
+      : "official",
+  getOwnProfileId: () => process.env.OMNICODE_PROFILE_ID?.trim() ?? "",
+  getSettings: () => mainSettingService.get(),
+  updateSettings: (patch) => mainSettingService.update(patch),
+  injectStateBroadcast: (channel, payload) => broadcastHub.relayFromOmnicodeMain(channel, payload),
+  sendApplyToInstance: (profileId, command) => sendOmnicodeInstanceCommand(profileId, command),
+  getConnectedInstanceProfileIds: () => getOmnicodeConnectedInstanceProfileIds(),
+  sendReportToManager: (message) => reportOmnicodeGlobalPrefsToManager(message.prefs, message.sourceInstanceId),
+  // 快捷键热应用：与官方 syncImmediateAppSettings 的 shortcutBindings 分支同款动作
+  //（重建应用菜单 accelerator + 通知各窗口刷新设置快照），复用既有先例路径。
+  refreshShortcutApplication: () => {
+    rebuildMenu();
+    for (const win of getApplicationWindowsExcludingCuaIndicator()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send(PlatformChannels.SettingsChanged);
+      }
+    }
+  },
+  resolveCurrentApplicationLocale: () => currentApplicationLocale,
+  logger: {
+    info: (...args) => logger.info(...args),
+    warn: (...args) => logger.warn(...args),
+  },
+});
 const webRemoteControlCredentialService = createCredentialService();
 const appLaunchGate = createAppLaunchGate();
 const appLaunchCoordinator = createAppLaunchCoordinator(appLaunchGate);
@@ -1340,6 +1394,10 @@ function syncCloseToTrayOnWindows(value: unknown) {
 }
 
 function syncImmediateAppSettings(patch: ReturnType<typeof appSettingsPatchSchema.parse>) {
+  // [OmniCode] 批次4 全局偏好层：白名单键变更观察（SyncAppSettings 通道，官方
+  // shortcutBindings 菜单重建即走此路）。观察器内部白名单过滤 + 身份路由，官方
+  // flavor no-op；放在函数首部确保后续官方分支行为逐行原样。
+  noteOmnicodeAppSettingsPatchForGlobalPrefs(patch);
   syncCloseToTrayOnWindows(patch.closeToTrayOnWindows);
 
   if (typeof patch.keepAwakeWhileRunning === "boolean") {

@@ -17,6 +17,7 @@ import {
   type OmnicodeEmbedRectInput,
 } from "./embedLayoutMath.js";
 import { MIN_DESKTOP_WINDOW_WIDTH, MIN_DESKTOP_WINDOW_HEIGHT } from "../desktopWindowSize.js";
+import { handleOmnicodeGlobalPrefsApplyCommand } from "./globalPrefs.js";
 
 const CAPTURE_INTERVAL_MS = 700; // ≈1.4fps；JPEG q55 单帧约 40-80KB，本地回环无压力
 const RECONNECT_DELAY_MS = 3000;
@@ -31,6 +32,8 @@ let captureInFlight = false;
 let lastReportedHwndHex: string | null = null;
 /** 内嵌中标记：embedLayout 成功后置位，releaseEmbed/编排冲突时复位。 */
 let embedActive = false;
+/** [OmniCode] 批次4：当前回连 socket（全局偏好上行上报通道；断开置空）。 */
+let activeReportSocket: WebSocket | null = null;
 
 function getPrimaryInstanceWindow(): BrowserWindow | undefined {
   // 实例是单主窗口应用（primaryWindowCoordinator 单飞）
@@ -150,7 +153,7 @@ function releaseEmbed(win: BrowserWindow): void {
   restoreDesktopWindowConstraints(win);
 }
 
-function applyCommand(command: { type?: string; bounds?: unknown; path?: unknown; rects?: unknown }): void {
+function applyCommand(command: { type?: string; bounds?: unknown; path?: unknown; rects?: unknown; prefs?: unknown; sourceInstanceId?: unknown }): void {
   // [OmniCode] 批次2 B2-1（T4）：openWorkspace 不依赖窗口存在性——冷启动早期的请求也
   // 要能投递（Root 的 onOpenWorkspacePath 由 preload 先缓存后回放，天然容忍 renderer
   // 未就绪）。其余命令仍以主窗口存在为前提。
@@ -165,6 +168,12 @@ function applyCommand(command: { type?: string; bounds?: unknown; path?: unknown
   if (command.type === "requestWindowHandle") {
     // 管理器在需要建立 owned 关系但尚未收到 hello 时主动索取（连上即 hello，此为兜底）
     lastReportedHwndHex = null; // 强制重发
+    return;
+  }
+  // [OmniCode] 批次4 全局偏好层：applyGlobalPrefs 不依赖窗口存在性——环形抑制/消毒/
+  // setting.json 写入/热应用全在协调器（globalPrefs.ts）内完成（fire-and-forget）。
+  if (command.type === "applyGlobalPrefs") {
+    void handleOmnicodeGlobalPrefsApplyCommand(command.prefs, command.sourceInstanceId);
     return;
   }
   const win = getPrimaryInstanceWindow();
@@ -281,6 +290,7 @@ export function startOmnicodeInstanceBridgeClient(): void {
       `ws://127.0.0.1:${port}/?token=${token}&profileId=${encodeURIComponent(profileId)}`,
     );
     ws.on("open", () => {
+      activeReportSocket = ws;
       startCaptureLoop(ws);
       startHelloLoop(ws);
     });
@@ -292,6 +302,9 @@ export function startOmnicodeInstanceBridgeClient(): void {
       }
     });
     ws.on("close", () => {
+      if (activeReportSocket === ws) {
+        activeReportSocket = null;
+      }
       stopHelloLoop();
       lastReportedHwndHex = null;
       if (!reconnectTimer) {
@@ -306,4 +319,24 @@ export function startOmnicodeInstanceBridgeClient(): void {
     });
   };
   connect();
+}
+
+/**
+ * [OmniCode] 批次4 全局偏好层：实例 → 管理器上行上报（fire-and-forget）。
+ * 未回连/发送失败返回 false（调用方只记日志，不重试——连接即推快照兜底收敛）。
+ */
+export function reportOmnicodeGlobalPrefsToManager(
+  prefs: unknown,
+  sourceInstanceId: string,
+): boolean {
+  const ws = activeReportSocket;
+  if (!ws || ws.readyState !== 1) return false;
+  try {
+    ws.send(
+      JSON.stringify({ type: "reportGlobalPrefs", prefs, sourceInstanceId }),
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
