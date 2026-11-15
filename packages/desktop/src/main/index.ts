@@ -28,8 +28,12 @@ import {
   setOmnicodeEmbedManagerWindow,
 } from "./omnicode/consoleEmbedding.js";
 // [OmniCode] 批次2.5 X3：托盘实例快捷菜单区提供者（仅管理器主进程注入 desktopTray；
-// spec: docs/omnicode/console-extras.md §X3）
-import { buildOmnicodeTrayMenuSection, setupOmnicodeConsoleTray } from "./omnicode/trayMenu.js";
+// spec: docs/omnicode/console-extras.md §X3）。实例元数据批次：tooltip 运行数提供者同门控注入。
+import {
+  buildOmnicodeTrayMenuSection,
+  getOmnicodeTrayRunningCount,
+  setupOmnicodeConsoleTray,
+} from "./omnicode/trayMenu.js";
 // [OmniCode] 批次2.5 X1 评审修复（R1 P1-1）：性能采样器退出收尾接入 quit 屏障
 //（spec: docs/omnicode/console-extras.md §X1 采样生命周期）
 import { shutdownOmnicodePerfSampler } from "./omnicode/perfMonitor.js";
@@ -2709,8 +2713,14 @@ app.whenReady().then(async () => {
     },
     logger,
     // [OmniCode] 批次2.5 X3：仅管理器主进程注入实例快捷菜单区（官方 flavor 不注入，
-    // 托盘菜单零变化；内容与动态重建见 omnicode/trayMenu.ts）
-    ...(isOmnicodeManagerMain ? { buildOmnicodeSection: buildOmnicodeTrayMenuSection } : {}),
+    // 托盘菜单零变化；内容与动态重建见 omnicode/trayMenu.ts）。实例元数据批次：tooltip
+    // 运行数提供者同门控（官方分支与实例进程 tooltip/打开文案原样——实例=ZCode 语义）。
+    ...(isOmnicodeManagerMain
+      ? {
+          buildOmnicodeSection: buildOmnicodeTrayMenuSection,
+          omnicodeRunningCount: getOmnicodeTrayRunningCount,
+        }
+      : {}),
   };
   if (isOmnicodeManagerMain) {
     // [OmniCode] 批次2.5 X3：托盘实例区装配（名称缓存 + 运行态订阅去抖重建；托盘创建

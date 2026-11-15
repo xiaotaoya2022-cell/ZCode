@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   DesktopCommandIds,
   desktopMenuMessageIds,
+  formatDesktopMenuMessage,
   getDesktopMenuMessage,
   ZCODE_PRODUCT_FLAVOR,
   type DesktopCommandId,
@@ -37,6 +38,14 @@ export function createDesktopTray(options: {
    * 返回空数组=无实例区，官方 flavor 零影响。spec: docs/omnicode/console-extras.md §X3）。
    */
   buildOmnicodeSection?: () => MenuItemConstructorOptions[];
+  /**
+   * [OmniCode] 实例元数据批次：omnicode 管理器托盘 tooltip 的运行实例数提供者（动态 N）。
+   * 仅管理器主进程注入（index.ts 与 buildOmnicodeSection 同一 flavor 门控）；官方 flavor /
+   * omnicode 实例进程不注入 → tooltip 与「打开」文案保持官方分支原样（红线：官方零改动；
+   * 实例窗口保持 ZCode 语义）。omnicode 管理器 tooltip = `OmniCode · N 个实例运行中`，
+   * 「打开」文案 = 「打开 OmniCode」。
+   */
+  omnicodeRunningCount?: () => number;
 }) {
   const platform = options.platform ?? process.platform;
   // Linux 驻留能力由 createCloseToTrayCapabilityMonitor 探测决定（spec：
@@ -71,14 +80,30 @@ export function createDesktopTray(options: {
       });
   };
   const rebuildContextMenu = () => {
-    desktopTray?.setToolTip(getLabel(desktopMenuMessageIds.trayTooltip));
+    // [OmniCode] 实例元数据批次：tooltip 品牌名——omnicode 管理器（omnicodeRunningCount
+    // option 注入且 flavor=omnicode）为 `OmniCode · N 个实例运行中`（N 动态，重建时实时
+    // 取数；启动/停止/改名链路经 updateWindowsDesktopTrayMenu 触发重建即刷新）；其余
+    //（官方 flavor 与 omnicode 实例进程）保持官方 "ZCode" 原样。
+    const isOmnicodeManagerTray =
+      ZCODE_PRODUCT_FLAVOR === "omnicode" && typeof options.omnicodeRunningCount === "function";
+    desktopTray?.setToolTip(
+      isOmnicodeManagerTray
+        ? formatDesktopMenuMessage(options.getLocale(), desktopMenuMessageIds.trayTooltipOmniCodeRunning, {
+            count: options.omnicodeRunningCount!(),
+          })
+        : getLabel(desktopMenuMessageIds.trayTooltip),
+    );
     // [OmniCode] 批次2.5 X3：实例快捷菜单区（运行实例/启动全部/停止全部）插在「打开」
     // 之后；提供者返回空数组时完全无痕（官方 flavor 不注入）。
     const omnicodeSection = options.buildOmnicodeSection?.() ?? [];
     desktopTray?.setContextMenu(
       Menu.buildFromTemplate([
         {
-          label: getLabel(desktopMenuMessageIds.trayOpenZCode),
+          // [OmniCode] 实例元数据批次：omnicode 管理器托盘菜单残留纯 "ZCode" 文案清理
+          // ——「打开 ZCode」→「打开 OmniCode」；仅管理器分支（官方与实例进程原样）。
+          label: isOmnicodeManagerTray
+            ? getLabel(desktopMenuMessageIds.trayOpenOmniCode)
+            : getLabel(desktopMenuMessageIds.trayOpenZCode),
           click: showTrayWindow,
         },
         ...(omnicodeSection.length > 0
