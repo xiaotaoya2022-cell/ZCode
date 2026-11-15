@@ -61,6 +61,25 @@ export {
   isOmnicodeManagerProcess,
   resolveOmnicodeInstanceIdFromEnv,
 } from "./omnicodeAuth.js";
+// [OmniCode] 批次4 全局偏好层：白名单常量 + 过滤/环形抑制/键映射纯函数（spec:
+// docs/omnicode/global-preferences.md）
+export {
+  OMNICODE_GLOBAL_PREF_KEYS,
+  OMNICODE_GLOBAL_PREFS_MANAGER_SOURCE_ID,
+  OMNICODE_THEME_PREF_KEY,
+  buildOmnicodeLocaleSyncFields,
+  filterOmnicodeGlobalPrefsFromPatch,
+  isEmptyOmnicodeGlobalPrefsPayload,
+  isOmnicodeGlobalPrefsEchoSelf,
+  isOmnicodeShortcutBindingsValue,
+  isOmnicodeThemePreference,
+  sanitizeOmnicodeGlobalPrefsPayload,
+} from "./omnicodeGlobalPrefs.js";
+export type {
+  OmnicodeGlobalPrefKey,
+  OmnicodeGlobalPrefsPayload,
+  OmnicodeThemePreference,
+} from "./omnicodeGlobalPrefs.js";
 export { ZCODE_VERSION, ZCODE_COMMIT, ZCODE_BUILD_TIME } from "./version.js";
 export type { HelloMessage, HelloAckMessage } from "./handshake.js";
 export type { ArmsRumEnv, ZCodeEnv, ZCodeProductFlavor } from "./env.js";
