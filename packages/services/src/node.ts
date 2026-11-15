@@ -494,6 +494,7 @@ import { createObservableSettingService } from "./setting/observableSettingServi
 import {
   assertWorkspaceNotLockedByOther,
   attachWorkspaceLockCoordinator,
+  readLatestOmnicodeProfileDisplayName,
   type WorkspaceLockCoordinator,
 } from "./omnicode/contract.js";
 import { createCredentialService } from "./credential/credentialService.js";
@@ -2451,6 +2452,10 @@ export function createLocalServices(options: {
         // [OmniCode] B2 评审修复（C5）：实例显示名（profileBootstrap 注入，spawn env 双保险）
         // 随锁写入锁文件——锁提示展示实例名，老链路（无该 env）缺省回退 profileId。
         displayName: process.env.OMNICODE_PROFILE_NAME?.trim() || undefined,
+        // [OmniCode] 实例元数据批次：锁名热更新——锁获取/心跳时读 profile.json 最新 name
+        //（改名后 spawn env 快照过期；Host utilityProcess 与实例 desktop main 不共享内存，
+        // 桥命令到不了锁协调器，文件是唯一事实源、最稳实现）。解析失败回退静态 env 值。
+        resolveDisplayName: () => readLatestOmnicodeProfileDisplayName(),
         pid: process.pid,
       });
   const taskGroupService = createTaskGroupService({

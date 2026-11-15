@@ -2409,6 +2409,7 @@ exceptions:
       - packages/ui/src/console/useOmnicodeConsoleInstances.ts
       - packages/ui/src/console/ConsolePerfPanel.tsx
       - packages/ui/src/console/perfSpark.ts
+      - packages/ui/src/console/ConsoleGridSorting.tsx
     reason: OmniCode profile runtime wiring files follow the exact same structure as the existing desktopSaveFile IPC registration and desktopBrowserPlatformBridge delegation patterns; the files are OmniCode-fork feature additions reviewed line-by-line (580-finding sealed scan passed), and adopting the whole desktop/ui module trees needs a separate boundary refactor. Batch-1 adds atomicJson.ts (profile registry atomic write/recovery, mirrors Cockpit atomic_write.rs invariants) and instanceReconcile.ts (running-state rebuild via process-table scan keyed on --omnicode-profile argv, mirrors Cockpit resolve_pid). Batch-2 B2-3 adds the console grid files (shared instances hook + card view + grid orchestrator, reusing the same platform bridge delegation pattern as ConsoleHome). Batch-2.5 adds the perf panel files (ConsolePerfPanel drawer + perfSpark pure functions, reusing the same delegation pattern; spec docs/omnicode/console-extras.md X1).
   # [OmniCode] M4b Browser Relay：新文件落在既有未受管 shared/server/desktop 大模块内的精确路径准入。
   # shared/browserRelay.ts 为 fork-only 事件契约（沿用 browser-use 既有类型，不发明新形状）；
@@ -2427,6 +2428,14 @@ exceptions:
     paths:
       - packages/shared/src/omnicodeAuth.ts
     reason: OmniCode instance login browser needs the authorize-URL shape check and profile-instance env guard in both main (window routing) and future renderer error-state recovery; a pure-function shared helper is the only shared home, and adopting the whole shared module is out of scope for this feature.
+  # [OmniCode] 实例元数据批次：排序纯函数落 shared（精确路径准入，同 omnicodeAuth 模式）。
+  # 网格/设置分区列表（ui）与托盘菜单（desktop main）共用同一排序事实源——shared 纯函数
+  # 是唯一共享 home；采纳整个 shared 模块树不属于本特性。
+  - id: omnicode-instance-sort-shared-shape
+    rule: unmanaged-new-file
+    paths:
+      - packages/shared/src/omnicodeInstanceSort.ts
+    reason: OmniCode instance metadata batch needs one sort fact source (seq/name/custom + customOrder drop semantics) consumed by the console grid, the settings partition list (ui) and the tray menu (desktop main); a pure-function shared helper is the only shared home, mirroring the omnicodeAuth/omnicodeGlobalPrefs admission pattern, and adopting the whole shared module is out of scope for this feature.
   # [OmniCode] M4c Browser Relay：relay 频道实现自 packages/server 迁入 services（精确路径准入）。
   # 远端 workspace 的 server 有两个形态——stdio bundle（@zcode/server entry-stdio/entry-http）
   # 与 zcode-server-cli 的 Source Server Core；依赖边界禁止 zcode-server-cli 反向依赖

@@ -39,6 +39,13 @@ export interface WorkspaceLockCoordinatorOptions {
    * 缺省时锁文件不含该字段，消费方回退 profileId（老链路兼容）。
    */
   displayName?: string;
+  /**
+   * [OmniCode] 实例元数据批次：动态显示名解析（锁获取/心跳时读最新注册表名）。
+   * 改名后 env 快照过期；resolved 值优先于静态 displayName，解析失败回退静态值
+   *（node.ts 注入 readLatestOmnicodeProfileDisplayName）。改名 → 10s 心跳内锁文件
+   * displayName 自愈，锁冲突提示实时显示最新实例名。
+   */
+  resolveDisplayName?: () => string | undefined;
   /** 锁持有者 pid = Host 进程 pid：窗口/Host 退出 → 锁靠存活检查自愈 */
   pid: number;
   log?: (message: string, error?: unknown) => void;
@@ -81,6 +88,9 @@ export function attachWorkspaceLockCoordinator(
     if (error) console.warn(message, error);
     else console.warn(message);
   };
+  // [OmniCode] 实例元数据批次：锁显示名 = 动态解析（最新注册表名）优先，解析失败回退
+  // spawn 注入的静态 env 快照（双保险，与 profileBootstrap/spawn 注入同形）。
+  const currentDisplayName = (): string | undefined => options.resolveDisplayName?.() ?? displayName;
   /** 本实例当前持有的锁（规范化工作区路径）。 */
   const heldLockPaths = new Set<string>();
   /** 打开集合内但被其他实例占用的路径：心跳期重试获取，对方退出（锁自愈）后自动接管。 */
@@ -90,7 +100,7 @@ export function attachWorkspaceLockCoordinator(
   function acquireHeldOrContended(path: string): void {
     let result: ReturnType<typeof acquireWorkspaceLock>;
     try {
-      result = acquireWorkspaceLock(path, profileId, pid, displayName);
+      result = acquireWorkspaceLock(path, profileId, pid, currentDisplayName());
     } catch (error) {
       log("[omnicode] 获取工作区锁失败:", error);
       return;
@@ -168,7 +178,9 @@ export function attachWorkspaceLockCoordinator(
     const lostHeldPaths: string[] = [];
     for (const path of heldLockPaths) {
       try {
-        if (!heartbeatWorkspaceLock(path, profileId, pid)) {
+        // [OmniCode] 实例元数据批次：心跳携带最新注册表名——续期时重写 displayName，
+        // 改名后运行中持有的锁 10s 内锁名自愈（锁冲突提示显示最新实例名）。
+        if (!heartbeatWorkspaceLock(path, profileId, pid, currentDisplayName())) {
           // 锁文件丢失或被改写（如被其他实例原子接管）：转入竞争集合，下一拍重取
           lostHeldPaths.push(path);
         }

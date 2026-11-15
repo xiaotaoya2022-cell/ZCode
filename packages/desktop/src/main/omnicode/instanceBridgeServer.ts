@@ -46,7 +46,10 @@ export interface OmnicodeInstanceBridgeCommand {
     | "requestWindowHandle"
     // [OmniCode] 批次4 全局偏好层（spec: docs/omnicode/global-preferences.md）：管理器
     // → 实例的全局偏好下发（白名单键载荷已消毒；sourceInstanceId 供实例环形抑制）。
-    | "applyGlobalPrefs";
+    | "applyGlobalPrefs"
+    // [OmniCode] 实例元数据批次：改名热更新——实例 main 热更新窗口原生标题 + 广播
+    // renderer document.title（title = "ZCode [新名]"，manager 侧构造）。
+    | "rename";
   /** arrange 命令的目标矩形（父进程由 workArea 计算后下发）。 */
   bounds?: { x: number; y: number; width: number; height: number };
   /** openWorkspace 命令的工作区目录路径。 */
@@ -57,6 +60,8 @@ export interface OmnicodeInstanceBridgeCommand {
   prefs?: OmnicodeGlobalPrefsPayload;
   /** applyGlobalPrefs 的源身份（manager 或发起实例的 profileId；环形抑制依据）。 */
   sourceInstanceId?: string;
+  /** rename 命令的实例窗口新标题（"ZCode [新名]"，manager 侧构造）。 */
+  title?: string;
 }
 
 /** [OmniCode] 批次4：实例 → 管理器的全局偏好上行消息（reportGlobalPrefs）。 */

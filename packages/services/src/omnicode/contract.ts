@@ -11,6 +11,7 @@ export {
   heartbeatWorkspaceLock,
   listWorkspaceLockDecorations,
   listWorkspaceLocks,
+  readLatestOmnicodeProfileDisplayName,
   readWorkspaceLockOwner,
   releaseWorkspaceLock,
   resolveWorkspaceOpenGuardDecision,

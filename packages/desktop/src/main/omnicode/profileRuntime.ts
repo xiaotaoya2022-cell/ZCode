@@ -7,6 +7,7 @@ import { cp, mkdir, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import process from "node:process";
+import { isOmnicodeInstanceSeq } from "@zcode/shared";
 import { readJsonWithRecovery, writeJsonAtomic, writeOwnerMark, checkOwnerMarkForDelete } from "./atomicJson.js";
 
 export interface OmnicodeProfileRecord {
@@ -14,6 +15,12 @@ export interface OmnicodeProfileRecord {
   name: string;
   createdAt: string;
   notes?: string;
+  /**
+   * [OmniCode] 实例元数据批次：序号（正整数；新建 = 当前 max+1，读档缺失由
+   * listOmnicodeProfiles 回填并写回）。仅排序依据（sortOmnicodeInstances seq 模式），
+   * 不影响昵称显示；profileId 稳定性红线不受影响（seq 与 id 无关）。
+   */
+  seq?: number;
   /**
    * [OmniCode] 批次2 B2-1（T5 收养）：业务数据根覆盖（.zcode 树所在目录，零拷贝指向
    * 旧控制台数据根等外部目录）。electron-userdata/session 仍用 profile 自身目录——
@@ -30,6 +37,8 @@ export interface OmnicodeProfileSummary {
   name: string;
   createdAt: string;
   notes?: string;
+  /** [OmniCode] 实例元数据批次：排序序号（读档缺失已回填；仅排序依据）。 */
+  seq?: number;
 }
 
 /** Profile 数据根：默认 `~/.omnicode/profiles`，可用 `OMNICODE_PROFILE_ROOT` 覆盖（spec §目录与数据模型）。 */
@@ -111,6 +120,7 @@ function toSummary(record: OmnicodeProfileRecord): OmnicodeProfileSummary {
     name: record.name,
     createdAt: record.createdAt,
     ...(record.notes ? { notes: record.notes } : {}),
+    ...(isOmnicodeInstanceSeq(record.seq) ? { seq: record.seq } : {}),
   };
 }
 
@@ -118,21 +128,69 @@ function newProfileId(): string {
   return `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/**
+ * [OmniCode] 实例元数据批次：读档缺失 seq 回填（纯决策，供单测）。
+ * 已有合法 seq 的记录保持原值；缺失记录按 createdAt 升序从 max(现有 seq)+1 起连续
+ * 分配（补齐后仍单调）。返回 map（profileId → 回填后 seq）只含缺失项。
+ */
+export function deriveOmnicodeProfileSeqBackfill(
+  records: readonly { id: string; createdAt: string; seq?: number }[],
+): Map<string, number> {
+  let maxSeq = 0;
+  const missing: { id: string; createdAt: string }[] = [];
+  for (const record of records) {
+    if (isOmnicodeInstanceSeq(record.seq)) {
+      maxSeq = Math.max(maxSeq, record.seq);
+    } else {
+      missing.push({ id: record.id, createdAt: record.createdAt });
+    }
+  }
+  missing.sort(
+    (a, b) =>
+      a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
+  );
+  const assigned = new Map<string, number>();
+  let cursor = maxSeq;
+  for (const entry of missing) {
+    cursor += 1;
+    assigned.set(entry.id, cursor);
+  }
+  return assigned;
+}
+
 export async function listOmnicodeProfiles(): Promise<OmnicodeProfileSummary[]> {
   const root = getOmnicodeProfileRoot();
   if (!existsSync(root)) return [];
-  const summaries: OmnicodeProfileSummary[] = [];
+  const records: OmnicodeProfileRecord[] = [];
   for (const entry of readdirSync(root, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     try {
       const record = await readProfileRecord(entry.name);
-      if (record) summaries.push(toSummary(record));
+      if (record) records.push(record);
     } catch (error) {
       // 单个损坏的 profile 不拖垮列表；唯一事实源是 profile.json，坏档目录跳过
       console.warn(`[omnicode] 跳过无法解析的 profile 目录 ${entry.name}:`, error);
     }
   }
-  summaries.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  // [OmniCode] 实例元数据批次：seq 缺失回填（旧档升级路径）——按 createdAt 兜底推导
+  // 并 best-effort 写回 profile.json（写失败仅告警，下次读档仍会回填，幂等）；
+  // 排序事实源收敛到 seq（无 seq 的档位由 createdAt 决定回填值，行为可预期）。
+  const backfill = deriveOmnicodeProfileSeqBackfill(records);
+  for (const [profileId, seq] of backfill) {
+    const record = records.find((entry) => entry.id === profileId);
+    if (!record) continue;
+    const updated: OmnicodeProfileRecord = { ...record, seq };
+    void writeJsonAtomic(getProfileFilePath(profileId), updated).catch((error) => {
+      console.warn(`[omnicode] profile.json seq 回填写回失败（不阻断）: ${profileId}`, error);
+    });
+    record.seq = seq;
+  }
+  const summaries = records.map(toSummary);
+  summaries.sort(
+    (a, b) =>
+      (a.seq ?? Number.POSITIVE_INFINITY) - (b.seq ?? Number.POSITIVE_INFINITY) ||
+      a.createdAt.localeCompare(b.createdAt),
+  );
   return summaries;
 }
 
@@ -145,6 +203,9 @@ export async function createOmnicodeProfile(
   if (!trimmedName) throw new Error("[omnicode] Profile 名称不能为空");
   const profileId = newProfileId();
   const profileDir = getOmnicodeProfileDir(profileId);
+  // [OmniCode] 实例元数据批次：新建 seq = 当前 max+1（无 profile 时从 1 起；并发创建
+  // 同号可接受——seq 仅排序依据，createdAt 兜底稳定 tie-break，不需要强唯一）。
+  const seq = await nextOmnicodeProfileSeq();
   // 收养（批次2 B2-1）：.zcode 数据根由 override 指向旧目录，profile 自身目录只建
   // 注册表/Chromium 存储；默认（无 override）仍建自身 .zcode/v2。
   const dataBaseDirOverride = options?.dataBaseDirOverride?.trim() || undefined;
@@ -157,6 +218,7 @@ export async function createOmnicodeProfile(
     id: profileId,
     name: trimmedName,
     createdAt: new Date().toISOString(),
+    seq,
     ...(notes?.trim() ? { notes: notes.trim() } : {}),
     ...(dataBaseDirOverride ? { dataBaseDirOverride } : {}),
   };
@@ -164,6 +226,61 @@ export async function createOmnicodeProfile(
   // 批次1 P2-10：目录所有权标记（防误删用户数据——只有本仓创建的目录才允许整目录删除）
   await writeOwnerMark(profileDir, profileId);
   return toSummary(record);
+}
+
+/**
+ * [OmniCode] 实例元数据批次：下一个新建实例的 seq（当前 max+1）。读档失败的坏档不参与
+ * max 计算（与 listOmnicodeProfiles 的跳过语义一致）；无 profile 时返回 1。
+ */
+async function nextOmnicodeProfileSeq(): Promise<number> {
+  const root = getOmnicodeProfileRoot();
+  if (!existsSync(root)) return 1;
+  let max = 0;
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    try {
+      const record = await readProfileRecord(entry.name);
+      if (record && isOmnicodeInstanceSeq(record.seq)) {
+        max = Math.max(max, record.seq);
+      }
+    } catch {
+      // 坏档不阻断（seq 是排序提示，非身份事实）
+    }
+  }
+  return max + 1;
+}
+
+/**
+ * [OmniCode] 实例元数据批次：重命名实例（profileId 稳定性红线：id/seq/createdAt/
+ * dataBaseDirOverride/凭据/数据根/锁全部按旧 id 不变，仅 name 更新）。
+ * 校验：trim 非空 + 限长 + 重名拒绝（trim 后同名不区分大小写，与收养避让同口径）。
+ * 未知 profile 抛错（与 remove 同语义）。
+ */
+export async function renameOmnicodeProfile(
+  profileId: string,
+  newName: string,
+): Promise<OmnicodeProfileSummary> {
+  assertValidProfileId(profileId);
+  const trimmedName = newName.trim();
+  if (!trimmedName) throw new Error("[omnicode] Profile 名称不能为空");
+  if (trimmedName.length > 100) throw new Error("[omnicode] Profile 名称过长（上限 100 字符）");
+  const record = await readProfileRecord(profileId);
+  if (!record) throw new Error(`[omnicode] profile 不存在: ${profileId}`);
+  if (record.name === trimmedName) {
+    return toSummary(record); // 同名幂等（无变化不写盘）
+  }
+  const profiles = await listOmnicodeProfiles();
+  const duplicate = profiles.some(
+    (profile) =>
+      profile.id !== profileId &&
+      profile.name.trim().toLowerCase() === trimmedName.toLowerCase(),
+  );
+  if (duplicate) {
+    throw new Error(`[omnicode] 实例名称已存在: ${trimmedName}`);
+  }
+  const updated: OmnicodeProfileRecord = { ...record, name: trimmedName };
+  await writeJsonAtomic(getProfileFilePath(profileId), updated);
+  return toSummary(updated);
 }
 
 export async function removeOmnicodeProfile(profileId: string): Promise<void> {

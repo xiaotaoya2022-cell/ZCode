@@ -50,6 +50,10 @@ export const desktopMenuMessageIds = {
   dockShowCurrentWindow: "dock.menu.showCurrentWindow",
   trayTooltip: "tray.tooltip",
   trayOpenZCode: "tray.menu.openZCode",
+  // [OmniCode] 实例元数据批次：omnicode 管理器托盘品牌文案（仅 omnicode 分支选用，
+  // 官方 flavor 不引用——官方 tooltip/打开文案零改动）。
+  trayOpenOmniCode: "tray.menu.openOmniCode",
+  trayTooltipOmniCodeRunning: "tray.tooltip.omnicodeRunning",
   trayQuit: "tray.menu.quit",
 } as const;
 
@@ -114,6 +118,9 @@ export const desktopMenuMessages: Record<"zh-CN" | "en-US", DesktopMenuLocaleMes
     "dock.menu.showCurrentWindow": "显示当前窗口",
     "tray.tooltip": "ZCode",
     "tray.menu.openZCode": "打开 ZCode",
+    // [OmniCode] 实例元数据批次：omnicode 管理器托盘品牌文案（tooltip 动态 N=运行实例数）
+    "tray.menu.openOmniCode": "打开 OmniCode",
+    "tray.tooltip.omnicodeRunning": "OmniCode · {count} 个实例运行中",
     "tray.menu.quit": "退出",
   },
   "en-US": {
@@ -166,6 +173,9 @@ export const desktopMenuMessages: Record<"zh-CN" | "en-US", DesktopMenuLocaleMes
     "dock.menu.showCurrentWindow": "Show current window",
     "tray.tooltip": "ZCode",
     "tray.menu.openZCode": "Open ZCode",
+    // [OmniCode] 实例元数据批次：omnicode 管理器托盘品牌文案（tooltip 动态 N=运行实例数）
+    "tray.menu.openOmniCode": "Open OmniCode",
+    "tray.tooltip.omnicodeRunning": "OmniCode · {count} instances running",
     "tray.menu.quit": "Quit",
   },
 };

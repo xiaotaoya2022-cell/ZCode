@@ -624,6 +624,25 @@ export function sendOmnicodeOpenWorkspace(profileId: string, workspacePath: stri
   return sendOmnicodeInstanceCommand(profileId, { type: "openWorkspace", path: workspacePath });
 }
 
+/**
+ * [OmniCode] 实例元数据批次：向运行中实例投递 rename 桥命令（实例 main 热更新窗口
+ * 原生标题 + 广播 renderer document.title；spec §实例元数据 涟漪点③）。空名不投递
+ *（改名链路保证 trim 非空，此处防御）；未回连返回 false（未运行/启动中静默跳过，
+ * 下次启动由 profile.json 事实源重新注入 env 快照，天然收敛）。
+ */
+export function sendOmnicodeInstanceRename(profileId: string, displayName: string): boolean {
+  assertValidProfileId(profileId);
+  const title = buildOmnicodeInstanceWindowTitle(displayName);
+  if (!title) return false;
+  return sendOmnicodeInstanceCommand(profileId, { type: "rename", title });
+}
+
+/** [OmniCode] 实例元数据批次：实例窗口标题构造（"ZCode [实例名]"；空名 → 空串不设置）。 */
+export function buildOmnicodeInstanceWindowTitle(displayName: string): string {
+  const trimmed = displayName.trim();
+  return trimmed ? `ZCode [${trimmed}]` : "";
+}
+
 export interface OmnicodeWorkspaceRouteDeps {
   /** 文案语言（与 index.ts 的 currentApplicationLocale 判定一致：zh-CN 为中文）。 */
   isZh: boolean;

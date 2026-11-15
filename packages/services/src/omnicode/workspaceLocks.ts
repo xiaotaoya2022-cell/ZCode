@@ -245,13 +245,50 @@ export function acquireWorkspaceLock(
 }
 
 /** 心跳：仅当锁归属当前实例时续期。返回是否仍持有。 */
-export function heartbeatWorkspaceLock(workspacePath: string, profileId: string, pid: number): boolean {
+export function heartbeatWorkspaceLock(
+  workspacePath: string,
+  profileId: string,
+  pid: number,
+  /** [OmniCode] 实例元数据批次：最新持有者显示名（可缺省）——续期时重写进锁文件，改名后 10s 内锁名自愈。 */
+  displayName?: string,
+): boolean {
   const lockPath = getLockFilePath(getWorkspaceLockHash(workspacePath));
   const entry = readLockEntry(lockPath);
   if (!entry || entry.profileId !== profileId || entry.pid !== pid) return false;
-  const updated: WorkspaceLockEntry = { ...entry, heartbeatAt: Date.now() };
+  const freshName = normalizeLockDisplayName(displayName);
+  const updated: WorkspaceLockEntry = {
+    ...entry,
+    heartbeatAt: Date.now(),
+    ...(freshName ? { displayName: freshName } : {}),
+  };
   writeFileSync(lockPath, JSON.stringify(updated), "utf8");
   return true;
+}
+
+/**
+ * [OmniCode] 实例元数据批次：锁持有者显示名的最新注册表读取（同步小 IO，fail-open）。
+ * 改名后运行中实例的 env 快照（OMNICODE_PROFILE_NAME，spawn 时注入）已过期；Host
+ * utilityProcess 与实例 desktop main 不共享内存（桥命令到不了锁协调器），故锁获取/
+ * 心跳时直接读 profile.json 最新 name——单一事实源，最稳实现（无需桥下发、无时序依赖）。
+ * 仅 Profile 实例身份（OMNICODE_PROFILE_ID 过白名单）读档；profileRoot 与
+ * desktop profileRuntime 同源（OMNICODE_PROFILE_ROOT 覆盖或 ~/.omnicode/profiles）。
+ * 读不到/坏档返回 undefined（调用方回退 spawn 注入的静态 env 值）。
+ */
+export function readLatestOmnicodeProfileDisplayName(): string | undefined {
+  const profileId = process.env.OMNICODE_PROFILE_ID?.trim() ?? "";
+  if (!/^p[0-9a-z]{8,20}$/u.test(profileId)) return undefined;
+  const override = process.env.OMNICODE_PROFILE_ROOT?.trim();
+  const profileRoot = override ? override : join(homedir(), ".omnicode", "profiles");
+  try {
+    const raw = readFileSync(join(profileRoot, profileId, "profile.json"), "utf8");
+    const parsed = JSON.parse(raw) as { id?: unknown; name?: unknown };
+    if (parsed.id !== profileId) return undefined;
+    if (typeof parsed.name !== "string") return undefined;
+    const trimmed = parsed.name.trim();
+    return trimmed || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** 释放：仅当锁归属当前实例时删除。 */
