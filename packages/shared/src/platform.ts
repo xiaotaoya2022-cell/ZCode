@@ -787,11 +787,16 @@ export interface OmnicodeAccountClaimRunRequest {
 /**
  * 领取执行响应：ok=true 表示 run 已启动（结果经事件广播），reason=in_progress 表示
  * 已有 run 在跑，no_targets 表示无任何可领账号（都不算错误，不抛穿）。
+ * [OmniCode] 批次3 终审修复（P2-①）：ok=true 携带 total（可执行任务 + skipped 合计）
+ * ——renderer 直接用它初始化进度 HUD，不再依赖 started 事件时序（started 广播在
+ * invoke resolve 前发出，此前 manualRunId 未及登记导致 runTotal 恒 0）。
  */
 export interface OmnicodeAccountClaimRunResult {
   ok: boolean;
   reason?: "in_progress" | "no_targets";
   runId?: string;
+  /** run 总数 = 可执行任务数 + 不可执行（skipped）账号数；仅 ok=true 时返回。 */
+  total?: number;
 }
 
 /** 领取执行进度事件（main → renderer 广播；renderer 可订阅渲染逐张动效）。 */

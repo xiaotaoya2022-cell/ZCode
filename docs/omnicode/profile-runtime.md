@@ -271,6 +271,7 @@ Win32 owned window 随 owner 销毁——管理器窗口直接销毁会**连带�
 - console-ui.json 全局 `mode: "embedded"|"desktop"` 字段退役，改为 `dockDefault: boolean`（全局默认，缺省 true=停靠）+ `dockedByProfileId: Record<string, boolean>`（每实例覆盖，缺省键=跟随 dockDefault）。每实例停靠态唯一解析口径 = `resolveOmnicodeInstanceDocked`（@zcode/shared 纯函数：覆盖布尔命中优先 → dockDefault → 双缺省回停靠 true）。
 - **一次性迁移（读档即迁移，现状不丢）**：档案携带旧 `mode` 时——mode=desktop → dockDefault=false（全部拖出）；mode=embedded（或损坏值）→ dockDefault=true（全部停靠）；覆盖表清空（迁移=现状整体映射）；mode 字段剥离后原子写回（`loadOmnicodeConsoleUiStateMigrating`，写失败不阻断、下次读档幂等重迁移）。迁移只发生在读档路径；UiStateSet patch 的 mode 字段不再被接受（旧字段进白名单外丢弃）。
 - UI patch 面：`dockAll`（批量= dockDefault 直改 + 清覆盖表，新建实例跟随全局默认）/ `dockInstance {profileId, docked}`（单实例覆盖键）/ `dockDefault`（直改）。
+- **覆盖表持久化收口（批次3 终审修复 P1-1）**：`mergeOmnicodeConsoleUiState` 白名单接收 `dockedByProfileId`（读档路径把落盘 JSON 整体当 patch 传入，漏收会导致覆盖表读档即丢、任何 console-ui 写入连带清空）。归一规则 = `normalizeOmnicodeDockOverrides`（仅 Record 形态；键 = profileId 生成器形态 `p[0-9a-z]{8,20}`、值 = 布尔，非法键丢弃；空对象 = 清空覆盖表跟随 dockDefault）；`dockDefault` 显式布尔直改（merge 已有）。**删实例清理（终审修复 P2-⑤）**：`OmnicodeProfileRemove` handler 在删目录成功后 best-effort 清掉该实例的覆盖键（失败不阻断，残留键按缺省语义解析）。回归锁定：`omnicodeReviewBatch3Final.test.ts`（写 dockInstance → 读档 → 覆盖保留 / UiStateSet 与 claimHistory 落盘不清空覆盖表 / 损坏键剔除）。
 
 ### 每实例停靠编排（consoleEmbedding）
 
@@ -282,11 +283,12 @@ Win32 owned window 随 owner 销毁——管理器窗口直接销毁会**连带�
 
 ### 贴合 B 三件套（停靠实例）
 
-1. **隐藏底图（B-a）**：停靠态卡片不再渲染 letterbox 底图 `<img>`——真窗口精确盖满画面区=看起来就是预览窗口本身（消除双层悬浮感）。帧数据仍驱动 aspect 冻结与 letterbox 比例计算；实例侧缩略图 `capturePage` 走 WebContents（与本 img 渲染与否无关），X1 性能面板/预览订阅不受影响（已核实 instanceBridgeClient 截图链路独立于管理器 renderer DOM）。
+1. **隐藏底图（B-a）**：停靠态卡片不再渲染 letterbox 底图 `<img>`——真窗口盖住画面区内区（embedLayout 矩形四边内缩 6px，见 B-c），消除了双层悬浮感且四边 6px 手柄带露出。帧数据仍驱动 aspect 冻结与 letterbox 比例计算；实例侧缩略图 `capturePage` 走 WebContents（与本 img 渲染与否无关），X1 性能面板/预览订阅不受影响（已核实 instanceBridgeClient 截图链路独立于管理器 renderer DOM）。
 2. **零滞后跟随（B-b）**：管理器窗口 move/resize 不再走 60ms 节流档——main 用缓存相对矩形（latestClientLayout）+ 当前 contentBounds 换算直推 embedLayout（跳过 renderer 60ms hop；Electron move/resize 至多帧率级触发，回环 WS + SetWindowPos 可承载）。renderer 上报仅服务布局变化（滚动/卡片尺寸/增删/手柄拖拽），仍走 60ms 节流。
-3. **拖拽手柄（B-c）**：停靠卡片画面区四边 6px 命中区（cursor ns/ew-resize）→ **卡片权威调高**：pointermove 按 `resolveOmnicodeEmbedResizeHeightCss`（@zcode/shared 纯函数：上下边映射 dy、左右边映射 dx 1:1；下限 = 96 DIP / scale 换算回 CSS）改画面区高度 + 快路径上报（绕过 60ms 节流）让窗口实时跟随；pointerup 冻结新宽高比（内嵌比例反馈环的更新点）并清 inline 高度。宽度受网格列宽约束（卡片宽度固定 → 窗口宽度跟随卡片），故四边统一调"高度"。160×96 最小尺寸三层保证：手柄数学按 scale 钳制（scale 由 EmbedLayout IPC 响应回传 contentHeight/viewportHeight，首拍前按 1 兜底）→ main dispatch 对换算后矩形 `clampOmnicodeScreenRectToEmbedMinimum` 兜底（原"低于下限丢弃矩形"改为钳制，保持窗口与卡片一致）→ 实例侧独立校验原样保留。
+3. **拖拽手柄（B-c）**：停靠卡片画面区四边 6px 命中区（cursor ns/ew-resize）→ **卡片权威调高**：pointermove 按 `resolveOmnicodeEmbedResizeHeightCss`（@zcode/shared 纯函数：上下边映射 dy、左右边映射 dx 1:1；下限 = 96 DIP / scale 换算回 CSS）改画面区高度 + 快路径上报（绕过 60ms 节流）让窗口实时跟随；pointerup 时序（终审修复 P2-⑥）= 先在 inline 高度仍在时测量最终矩形 → 冻结新宽高比 → 上报最终矩形 → 再清 inline 高度（冻结比例 = 拖后真实比例，aspect 样式接管高度与之等值，同帧收敛无回弹；旧顺序"先清高度再上报"会上报回落旧 aspect 的矩形）。宽度受网格列宽约束（卡片宽度固定 → 窗口宽度跟随卡片），故四边统一调"高度"。160×96 最小尺寸三层保证：手柄数学按 scale 钳制（scale 由 EmbedLayout IPC 响应回传 contentHeight/viewportHeight，首拍前按 1 兜底）→ main dispatch 对换算后矩形 `clampOmnicodeScreenRectToEmbedMinimum` 兜底（原"低于下限丢弃矩形"改为钳制，保持窗口与卡片一致）→ 实例侧独立校验原样保留。
+   **手柄可达性（终审修复 P1-2，矩形内缩方案）**：main dispatch 在下发 `embedLayout` 前对每实例屏幕矩形执行 `insetOmnicodeEmbedRectForResizeHandles`（纯函数，四边各内缩 6px = 手柄命中带同宽），**内缩只影响实例窗口 setBounds，卡片画面区 DOM 尺寸不变**——实例窗口只盖画面区内区，四边手柄 DOM 露出在窗口外沿可命中（此前窗口精确盖满画面区，Win32 owned 窗口恒在 DOM 之上，手柄 pointerdown 全部落到实例窗口，拖拽调高功能失效）。内缩后可能低于内嵌最低规格（下限矩形 -12px），main 侧再过一次 `clampOmnicodeScreenRectToEmbedMinimum` 收敛，**实例侧 clamp/校验逻辑不变**（内缩后仍 ≥160×96，独立校验必过）。观感说明：停靠实例窗口四周出现 6px 深色边带（=卡片画面区底色 bg-black/90，即手柄命中带本身），预览画面不再精确贴满卡片边缘、内缩 6px 后与手柄带对齐；窗口内容（实例自绘 UI）不受影响。纯函数单测：`omnicodeReviewBatch3Final.test.ts`（内缩数学/退化矩形/下限契约）。
 
 ### console-ui.json 迁移与验收（D 组重写指向）
 
 - 验收清单批次2 D4-D7（全局内嵌/桌面模式语义）由 OmniCode 仓 ACCEPTANCE-CHECKLIST 停靠语义重写取代（每实例拖出/收回/批量/贴合三件套）。
-- 已知限制追加：①手柄 resize 仅调"高度"（网格列宽固定，宽度跟卡）；②scale 首拍前按 1 兜底——极端缩放下首拖一次可能有 ≤1 帧的钳制修正；③迁移后旧 mode 字段不复存在，回滚到批次2 代码会读不到模式（回退到缺省 embedded）。
+- 已知限制追加：①手柄 resize 仅调"高度"（网格列宽固定，宽度跟卡）；②scale 首拍前按 1 兜底——极端缩放下首拖一次可能有 ≤1 帧的钳制修正；③迁移后旧 mode 字段不复存在，回滚到批次2 代码会读不到模式（回退到缺省 embedded）；④停靠窗口四周 6px 手柄带露出（P1-2 内缩方案的固有观感——下限矩形场景窗口内缩后钳回 ≥160×96，可能与卡片边缘有 ≤12px 偏差）。

@@ -163,8 +163,17 @@
   运行态点。余量分档配色沿用 Cockpit：<10% 红、<30% 黄、<60% 中性、其余蓝。
 - 异常卡引导优先于数字：missing_jwt=未登录、skipped_no_device_mid=缺设备号（红线：绝不
   代生成）、failed=查询失败（原因键文案显示 + 打开实例引导）、unknown=旧密文/读不到。
+- **邮箱 main 侧脱敏（批次3 终审修复 P2-③）**：快照装配（`assembleOmnicodeAccountDashboardEntry`）
+  时对 identity.email 统一 `maskOmnicodeAccountEmail`（与检测链同口径）——raw 邮箱不进
+  IPC 载荷；渲染层 AccountDashboardCard 的脱敏保留为兜底（脱敏串重掩码幂等）。红线
+  （token/设备号不进载荷）不变，测试追加邮箱脱敏断言。
+- **并发 force 去重（批次3 终审修复 P2-④）**：`getOmnicodeAccountDashboardSnapshot` main 侧
+  in-flight 单飞——进行中的整表拉取被并发调用（单卡刷新双击/单卡×全部刷新交错）直接
+  复用，同账号不会出现 2 个并发 balance 请求；逐账号串行编排口径不变（去重只发生在
+  整表 Promise 层）。
 - 「刷新」单卡钮的取舍：数据层只有整表快照一个杠杆——单卡刷新也是 force 整表强刷
-  （本卡转刷新态、其余卡静默更新），频率红线由 TTL + main 串行编排兜住。
+  （本卡转刷新态、其余卡静默更新），频率红线由 TTL + main 串行编排兜住（P2-④ 去重
+  进一步兜住并发交错）。
 - 平台方法缺席（官方 flavor / 旧 preload）：整视图降级为不可用提示，不报错。
 
 ## X6. 赛博鸡蛋一键领取（批次 3，左下浮层）
@@ -188,6 +197,9 @@
 - 点击门票叠 → `OmnicodeAccountClaimRun(mode manual)`：订阅 ClaimEvent 播逐张动效
   （当前张飞出→「账号 +到账额度」chip + 顶部「领取中 x/N」），随时「跳过动画」
   （停动效等待真实结果，到齐即结算）；右键菜单「静默全部领取」= 同 mode manual 不播动效。
+  进度 HUD 总数（批次3 终审修复 P2-①）= 直接取 ClaimRun 响应的 `total`（jobs + skipped
+  合计）初始化——started 事件在 invoke resolve 前同步广播（manualRunId 尚未登记），此前
+  依赖 started 事件会导致 runTotal 恒 0。
   结束态「今日已领取 N 份额度·合计 +X」（纯函数 `summarizeOmnicodeClaimSettlement`
   单测锁定；全部缺省数值时合计不编造 0）。
 - 自动领取（mode auto）：领取中不打扰（无动效，逐张静默清票）；完成后左下角结算徽章
@@ -196,9 +208,13 @@
   窗口关闭期间，挂载时按历史补徽章）。
 - 领取历史列表落在设置「自动化」分区（见下）。
 
-### 设置「自动化」分区（omnicodeAutomation，desktop-only）
+### 设置「自动化」分区（omnicodeAutomation，管理器语境专属）
 
-- settingsPageConfig 新分区 + 管理器白名单追加（与 omnicodeProfiles desktop-only 同构）。
+- settingsPageConfig 新分区 + 管理器白名单追加。**门控（批次3 终审修复 P2-②）**：
+  `omnicodeProfiles` 与 `omnicodeAutomation` 均要求 `isDesktop ∧ omnicodeManager`（管理器
+  = omnicode flavor ∧ 非实例身份窗口）——此前仅 isDesktop 门控，官方 desktop flavor 设置页
+  出现这两个分区且点开呈"可用"假象（自动化依赖 omnicode 数据根/IPC 面，官方端一律缺席）。
+  方向 = 给官方 flavor **隐藏**分区（官方代码零改动红线）；实例身份窗口同样隐藏。
 - 内容：自动领取总开关（读写 console-ui `autoClaimEnabled`；开关旁说明文案——检测到每日
   免费额度时以低风控节奏自动领取，各账号用自己的凭据与设备号）+「手动检测一次」（走
   DetectGet，toast 汇报 N 可领）+ 领取历史列表（时间/账号/plan/结果/额度，FIFO 50）。
