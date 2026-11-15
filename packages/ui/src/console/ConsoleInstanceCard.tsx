@@ -125,7 +125,11 @@ export function ConsoleInstanceCard(props: {
   /**
    * resize 手柄拖拽（卡片权威）：pointermove 按 shared 手柄数学改画面区高度
    *（下限 = 96 DIP / scale 换算回 CSS，保证实例侧独立校验必过）+ 快路径上报让窗口
-   * 实时跟随；pointerup 冻结新宽高比并清 inline 高度（aspect 样式接管，渲染尺寸不变）。
+   * 实时跟随；pointerup 时序（批次3 终审修复 P2-⑥）：先在 inline 高度仍在时测量最终
+   * 矩形 → 冻结新宽高比 → 上报最终矩形 → 最后清 inline 高度（冻结比例 = 拖后真实
+   * 比例，aspect 样式接管后高度与 inline 等值——同帧收敛无回弹；旧顺序"先清高度
+   * 再上报"会上报回落到旧 aspect 的矩形，造成 1-2 帧回弹）。手柄可命中依赖 main
+   * 侧 embedLayout 四边 6px 内缩（P1-2：窗口只盖内区，四边手柄露出在窗口外沿）。
    * 双击/点击在手柄上被吞（不触发放大/聚焦）。
    */
   const beginResize = (edge: OmnicodeEmbedResizeEdge) => (event: React.PointerEvent<HTMLDivElement>) => {
@@ -152,19 +156,25 @@ export function ConsoleInstanceCard(props: {
     const onUp = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      // P2-⑥ 时序：inline 高度仍在 → 测量最终矩形 → 冻结比例 → 上报 → 再清高度态。
+      // 冻结比例等于拖后真实比例，清 inline 高度后 aspect 样式接管的高度与之等值
+      //（同帧收敛），上报的矩形不再回落旧 aspect（消除 1-2 帧回弹）。
       const finalRect = element.getBoundingClientRect();
       if (finalRect.width > 0 && finalRect.height > 0) {
         setEmbeddedAspectRatio(`${finalRect.width} / ${finalRect.height}`);
       }
-      element.style.height = "";
       reportEmbedLayoutNow?.();
+      element.style.height = "";
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
   };
 
   const handleCardClick = () => {
-    // 拖出态：点击卡片 = 聚焦真窗口（停靠态的画面区被真窗口覆盖，点击到不了这里）
+    // 拖出态：点击卡片 = 聚焦真窗口。停靠态画面区中心被实例窗口覆盖（main 下发矩形
+    // 已四边内缩 6px——仅四边手柄带露出可命中，中心区域点击仍落在实例窗口），
+    // 故本处理只在拖出态生效（批次3 终审 P1-2 勘误：旧注释"点击到不了这里"与手柄
+    // 放在覆盖区内的矛盾已由内缩方案消除）。
     if (!docked && running) onFocus(profile);
   };
 
@@ -396,7 +406,9 @@ export function ConsoleInstanceCard(props: {
 
         {/* [OmniCode] 批次3 停靠重构（B 套件 c）：停靠画面区四边 resize 手柄
             （6px 命中区；卡片权威调高→embedLayout 跟随→窗口实时贴合，160×96 下限
-            由手柄数学 + main clamp + 实例侧校验三层保证） */}
+            由手柄数学 + main clamp + 实例侧校验三层保证）。批次3 终审修复 P1-2：
+            main 下发矩形四边内缩 6px，窗口只盖画面区内区——本手柄带露出在窗口外沿
+            可命中（此前窗口精确盖满，手柄 pointerdown 全部落到实例窗口）。 */}
         {resizeHandles}
 
         {/* 预览总开关关闭：角标（卡片停留最后一帧灰暗化；停靠态底图隐藏但真窗口即预览，

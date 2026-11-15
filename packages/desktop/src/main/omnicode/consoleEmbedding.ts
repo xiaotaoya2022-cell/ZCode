@@ -36,6 +36,7 @@ import {
 import {
   clampOmnicodeScreenRectToEmbedMinimum,
   convertOmnicodeClientRectToScreen,
+  insetOmnicodeEmbedRectForResizeHandles,
   isOmnicodeEmbedRectUsable,
   isValidOmnicodeHwndHex,
 } from "./embedLayoutMath.js";
@@ -551,7 +552,16 @@ function dispatchEmbedLayout(): void {
     // 保持窗口与卡片可换算一致，而非丢弃矩形让窗口停留旧位置。
     const clamped = clampOmnicodeScreenRectToEmbedMinimum(screen);
     if (!isOmnicodeEmbedRectUsable({ profileId: rect.profileId, ...clamped })) continue;
-    screenRects.push({ profileId: rect.profileId, ...clamped });
+    // [OmniCode] 批次3 终审修复（P1-2）：下发矩形四边内缩 6px——实例窗口只盖画面区
+    // 内区，卡片四边 resize 手柄 DOM（6px 命中带）露出在窗口外沿可命中（此前窗口
+    // 精确盖满画面区，owned 窗口恒在 DOM 之上，手柄 pointerdown 全部落到实例窗口，
+    // 拖拽调高整个功能失效）。内缩只改实例窗口 setBounds，卡片画面区尺寸不变；
+    // 内缩后可能低于内嵌最低规格（下限矩形 -12px），再钳一次保证实例侧独立校验必过
+    //（实例侧 clamp/校验逻辑原样不动）。
+    const insetRect = insetOmnicodeEmbedRectForResizeHandles(clamped);
+    const finalRect = clampOmnicodeScreenRectToEmbedMinimum(insetRect);
+    if (!isOmnicodeEmbedRectUsable({ profileId: rect.profileId, ...finalRect })) continue;
+    screenRects.push({ profileId: rect.profileId, ...finalRect });
   }
   // 视口外的内嵌实例临时隐藏（owned 窗口无裁剪，悬在管理器外会遮挡桌面）
   const inLayout = new Set(screenRects.map((rect) => rect.profileId));

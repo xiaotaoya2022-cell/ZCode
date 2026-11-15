@@ -143,3 +143,42 @@ export function clampOmnicodeScreenRectToEmbedMinimum(rect: OmnicodeScreenRect):
     height: Math.max(OMNICODE_EMBED_MIN_HEIGHT, rect.height),
   };
 }
+
+/**
+ * [OmniCode] 批次3 终审修复（P1-2）：停靠 embedLayout 下发矩形的四边内缩像素。
+ * 与卡片 resize 手柄的 6px 命中带同宽——内缩后实例窗口只盖画面区内区，四边手柄 DOM
+ * 露出在窗口外沿可命中（此前窗口精确盖满画面区，owned 窗口恒在 DOM 之上，手柄
+ * pointerdown 全部落到实例窗口，拖拽调高整个功能失效）。
+ */
+export const OMNICODE_EMBED_RESIZE_HANDLE_INSET_PX = 6;
+
+/**
+ * 停靠 embedLayout 下发矩形四边内缩（纯函数）：只影响实例窗口 setBounds 的屏幕矩形，
+ * 卡片画面区 DOM 尺寸不变。宽度/高度不足 2×inset 的退化矩形原样返回（避免负尺寸）；
+ * 非有限值原样透传（由调用方 isOmnicodeEmbedRectUsable 复核丢弃）。内缩后仍可能低于
+ * 内嵌最低规格（下限矩形 -12px），由调用方再过一次 clampOmnicodeScreenRectToEmbedMinimum
+ * 收敛（实例侧独立校验逻辑不变）。
+ */
+export function insetOmnicodeEmbedRectForResizeHandles(
+  rect: OmnicodeScreenRect,
+  insetPx: number = OMNICODE_EMBED_RESIZE_HANDLE_INSET_PX,
+): OmnicodeScreenRect {
+  if (
+    !Number.isFinite(rect.x) ||
+    !Number.isFinite(rect.y) ||
+    !Number.isFinite(rect.width) ||
+    !Number.isFinite(rect.height) ||
+    !Number.isFinite(insetPx) ||
+    insetPx <= 0 ||
+    rect.width <= insetPx * 2 ||
+    rect.height <= insetPx * 2
+  ) {
+    return rect;
+  }
+  return {
+    x: rect.x + insetPx,
+    y: rect.y + insetPx,
+    width: rect.width - insetPx * 2,
+    height: rect.height - insetPx * 2,
+  };
+}
