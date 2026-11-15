@@ -429,8 +429,9 @@ export function ConsoleInstanceCard(props: {
  * [OmniCode] 批次2.5 X2：登录态健康度徽标（spec: docs/omnicode/console-extras.md §X2）。
  * 语义色：healthy=绿（停止实例但登录健康=黄——"仅剩登录态"，X4 状态色统一）、
  * expiring=黄、expired=红、unknown=灰；title 提示精确剩余时间（天+小时）。
+ * [OmniCode] 批次3 UI 批次：导出供账号看板卡复用（同一四态口径，不重写）。
  */
-function LoginHealthBadge(props: {
+export function LoginHealthBadge(props: {
   running: boolean;
   loginHealth?: OmnicodeLoginHealthInfo;
 }) {

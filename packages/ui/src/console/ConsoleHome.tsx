@@ -3,10 +3,16 @@
 // 开关）+ 实例卡片网格（真实宽高比 letterbox 预览、双击放大、内嵌 owned-window 跟随）
 // + 旧控制台收养横幅 + 底栏（spec: docs/omnicode/profile-runtime.md §批次2 D9）。
 // 控制台自身不是可干活的 ZCode 实例（方案 A 拍板）；工作与登录都在实例窗口内完成。
-import { Download, Globe, Settings } from "lucide-react";
+// [OmniCode] 批次3 UI 批次：头部加「账号看板」二视图切换（网格↔看板，视图态存内存——
+// 管理器主语义=实例网格，看板是瞬时检视面，重启回落网格无需存储迁移）+ 账号看板视图
+// （演示稿 01）+ 赛博鸡蛋左下浮层（演示稿 02，常驻于两视图之上，无蛋日不渲染）。
+import { useState } from "react";
+import { Download, Globe, LayoutGrid, Settings, Users } from "lucide-react";
 import { LOCALE_NATIVE_NAMES, SUPPORTED_LOCALES, type Locale } from "@zcode/shared";
 import { TID_CONSOLE_SETTINGS_BUTTON, TID_LOCALE_TOGGLE } from "@zcode/shared/test-ids";
+import { AccountDashboardView } from "@/console/AccountDashboard.js";
 import { ConsoleInstanceGrid } from "@/console/ConsoleInstanceGrid.js";
+import { EggClaimOverlay } from "@/console/EggClaimOverlay.js";
 import { DesktopOverlayWindowControls } from "@/DesktopOverlayWindowControls.js";
 import { Button } from "@/components/ui/button.js";
 import {
@@ -20,8 +26,13 @@ import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { useTabStore } from "@/store/TabStoreProvider.js";
 import { useOmnicodeConsoleAdoption } from "@/settings/ProfileMultiInstanceSection.js";
 
+/** ConsoleHome 二视图（网格=实例管理中枢主视图；dashboard=账号看板检视视图）。 */
+type ConsoleHomeView = "grid" | "dashboard";
+
 export function ConsoleHome() {
   const { intl } = useZCodeIntl();
+  // 视图态存内存（取舍见文件头注释）：切换钮触发 setState，重启回落网格。
+  const [view, setView] = useState<ConsoleHomeView>("grid");
   return (
     <main className="relative flex h-full min-h-dvh flex-col overflow-hidden bg-background px-4 py-4 text-foreground sm:px-6">
       {/* 原生拖拽命中不受 pointer-events/z-index 约束；拖拽层必须避开窗控，且先于 no-drag 区声明。 */}
@@ -32,26 +43,67 @@ export function ConsoleHome() {
         <div className="flex shrink-0 items-start justify-between gap-3">
           <div className="flex flex-col gap-1">
             <h1 className="text-ui-xl text-foreground">
-              {intl.formatMessage({ id: "console.homeTitle" })}
+              {intl.formatMessage({
+                id: view === "dashboard" ? "console.dashboardTitle" : "console.homeTitle",
+              })}
             </h1>
             <p className="text-ui-base text-foreground-subtle">
-              {intl.formatMessage({ id: "console.homeSubtitle" })}
+              {intl.formatMessage({
+                id: view === "dashboard" ? "console.dashboardSubtitle" : "console.homeSubtitle",
+              })}
             </p>
           </div>
           {/* [OmniCode] 批次3 T1：管理器首屏此前没有任何语言/设置入口（语言切换只在设置页
               footer，而管理器永远不进设置页），用户观感"管理器不支持语言选择"。这里加最小
               的语言下拉；[app-region:no-drag] 保证按钮不被顶部拖拽层吃掉点击。 */}
           <div className="flex shrink-0 items-center gap-1 pt-1 [app-region:no-drag]">
+            {/* [OmniCode] 批次3 UI 批次：网格↔看板二视图切换（图标钮 + 本地态） */}
+            <ConsoleHomeViewToggle view={view} onChange={setView} />
             <ConsoleHomeLocaleSwitcher />
             {/* [OmniCode] 设置入口：打开窗口唯一的设置 tab；Root 侧早返回门禁对设置 tab
                 放行，渲染进既有「无 workspace + settings tab」全屏设置页（候选 B）。 */}
             <ConsoleHomeSettingsButton />
           </div>
         </div>
-        <AdoptionBanner />
-        <ConsoleInstanceGrid />
+        {view === "dashboard" ? <AccountDashboardView /> : null}
+        {view === "grid" ? (
+          <>
+            <AdoptionBanner />
+            <ConsoleInstanceGrid />
+          </>
+        ) : null}
       </div>
+      {/* 赛博鸡蛋左下浮层（常驻：网格/看板两视图都可见；无蛋日整个不渲染） */}
+      <EggClaimOverlay />
     </main>
+  );
+}
+
+/**
+ * [OmniCode] 批次3 UI 批次：网格↔账号看板二视图切换钮。图标钮循环切换（两态无歧义，
+ * 无需下拉）；title/aria 跟随目标视图文案。
+ */
+function ConsoleHomeViewToggle(props: {
+  view: ConsoleHomeView;
+  onChange: (view: ConsoleHomeView) => void;
+}) {
+  const { intl } = useZCodeIntl();
+  const { view, onChange } = props;
+  const nextView: ConsoleHomeView = view === "grid" ? "dashboard" : "grid";
+  const title = intl.formatMessage({
+    id: view === "grid" ? "console.viewDashboardTitle" : "console.viewGridTitle",
+  });
+  return (
+    <Button
+      variant="ghost"
+      size="icon-md"
+      aria-label={title}
+      title={title}
+      data-testid="console-view-toggle"
+      onClick={() => onChange(nextView)}
+    >
+      {view === "grid" ? <Users className="size-4" /> : <LayoutGrid className="size-4" />}
+    </Button>
   );
 }
 

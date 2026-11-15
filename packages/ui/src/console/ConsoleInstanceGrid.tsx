@@ -315,6 +315,29 @@ export function ConsoleInstanceGrid() {
     collectAndReportEmbedLayout();
   }, [collectAndReportEmbedLayout]);
 
+  // [OmniCode] 批次3 UI 批次：卸载收尾（切换到账号看板视图时网格整体卸载）——上报
+  // 空矩形集 + 清空预览订阅。main 侧 dispatchEmbedLayout 对「不在上报集中」的 owned
+  // 窗口会隐藏（P2-9 视口外隐藏语义），避免看板视图下停靠窗口悬停残留；切回网格时
+  // 挂载 effect 重新上报矩形即恢复贴合。
+  useEffect(() => {
+    return () => {
+      void platform
+        .sendOmnicodeEmbedLayout?.({
+          viewportWidth: window.innerWidth,
+          viewportHeight: window.innerHeight,
+          rects: [],
+        })
+        .catch(() => {
+          /* 卸载路径失败无重试机会，静默（main 侧 move 事件自愈） */
+        });
+      void platform
+        .setOmnicodePreviewState?.({ previewEnabled: true, visibleProfileIds: [] })
+        .catch(() => {
+          /* 同上 */
+        });
+    };
+  }, [platform]);
+
   // 触发源：网格/卡片尺寸变化（ResizeObserver 观察容器 + 各卡片画面区——卡片高度随
   // 帧首现的真实宽高比变化，容器本身滚动区高度不变观察不到）+ 滚动/窗口缩放 +
   // 卡片增删/放大切换/停靠状态变化。deps 刻意不含 frames（1.4fps 高频重建观察者是
