@@ -97,6 +97,7 @@ import type {
   // [OmniCode] 批次3 UI 批次：赛博鸡蛋检测（门票叠数据源）
   OmnicodeAccountDetectRequest,
   OmnicodeAccountDetectResult,
+  OmnicodeConsoleCredentialOsState,
   OmnicodeProfileIdInput,
   OpenInEditorOptions,
   PostUpdateReleaseNotesPayload,
@@ -324,6 +325,9 @@ export const PlatformChannels = {
   // [OmniCode] 批次3 UI 批次：赛博鸡蛋检测（逐账号 preview，main 汇总；低频触发：
   // 启动一次/手动/30min 自动轮询。spec 同上 §3）
   OmnicodeAccountDetectGet: "zcode:omnicode-account-detect-get",
+  // [OmniCode] omni.5 真机修复（F2-5）：console 根 os: 旧密文迁移状态查询（unrecoverable
+  // 标记存在时管理器 UI 给明确重登引导；null=无标记）。仅管理器装配。
+  OmnicodeConsoleCredentialStateGet: "zcode:omnicode-console-credential-state-get",
   /** Renderer → Main：用 Chromium 打印引擎把当前页面 print 媒体版面导出为 PDF */
   PrintToPdf: "zcode:print-to-pdf",
   /** Renderer → Main：检查并按需请求系统麦克风权限 */
@@ -1091,6 +1095,11 @@ export interface PlatformChannelMap {
   [PlatformChannels.OmnicodeAccountDetectGet]: {
     request: OmnicodeAccountDetectRequest;
     response: OmnicodeAccountDetectResult;
+  };
+  // [OmniCode] omni.5 真机修复（F2-5）：console 根 os: 迁移状态（unrecoverable 标记）
+  [PlatformChannels.OmnicodeConsoleCredentialStateGet]: {
+    request: void;
+    response: OmnicodeConsoleCredentialOsState | null;
   };
   [PlatformChannels.PrintToPdf]: {
     request: void;

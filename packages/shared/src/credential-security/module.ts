@@ -13,6 +13,10 @@ export {
   enablePrivateFileKeyFallback,
   createLegacyCredentialCipher,
   migrateCredentialRecord,
+  // [OmniCode] omni.5 真机修复（F2-5）：console 根 os→env 一次性迁移原语 + keyring 探测
+  reWrapOsCredentialValuesWithEnvKey,
+  readSystemCredentialKeyringEntry,
+  SYSTEM_CREDENTIAL_KEYRING_SERVICE,
 } from "./systemCredentialCipher.js";
 export {
   createCredentialCipherBridge,

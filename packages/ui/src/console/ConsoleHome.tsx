@@ -6,9 +6,10 @@
 // [OmniCode] 批次3 UI 批次：头部加「账号看板」二视图切换（网格↔看板，视图态存内存——
 // 管理器主语义=实例网格，看板是瞬时检视面，重启回落网格无需存储迁移）+ 账号看板视图
 // （演示稿 01）+ 赛博鸡蛋左下浮层（演示稿 02，常驻于两视图之上，无蛋日不渲染）。
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Download, Globe, LayoutGrid, Settings, Users } from "lucide-react";
 import { LOCALE_NATIVE_NAMES, SUPPORTED_LOCALES, type Locale } from "@zcode/shared";
+import type { OmnicodeConsoleCredentialOsState } from "@zcode/shared";
 import { TID_CONSOLE_SETTINGS_BUTTON, TID_LOCALE_TOGGLE } from "@zcode/shared/test-ids";
 import { AccountDashboardView } from "@/console/AccountDashboard.js";
 import { ConsoleInstanceGrid } from "@/console/ConsoleInstanceGrid.js";
@@ -23,6 +24,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { usePlatform } from "@/hooks/usePlatform.js";
 import { useTabStore } from "@/store/TabStoreProvider.js";
 import { useOmnicodeConsoleAdoption } from "@/settings/ProfileMultiInstanceSection.js";
 
@@ -65,6 +67,9 @@ export function ConsoleHome() {
             <ConsoleHomeSettingsButton />
           </div>
         </div>
+        {/* [OmniCode] omni.5 真机修复（F2-5）：console 根 os: 旧密文不可恢复时的明确重登
+            引导（非静默——此前该状态只体现在 oauth 全 FAIL，用户看不到任何提示）。 */}
+        <ConsoleCredentialOsBanner />
         {view === "dashboard" ? <AccountDashboardView /> : null}
         {view === "grid" ? (
           <>
@@ -76,6 +81,45 @@ export function ConsoleHome() {
       {/* 赛博鸡蛋左下浮层（常驻：网格/看板两视图都可见；无蛋日整个不渲染） */}
       <EggClaimOverlay />
     </main>
+  );
+}
+
+/**
+ * [OmniCode] omni.5 真机修复（F2-5b）：console 根 os: 旧密文不可恢复状态的重登引导横幅
+ * （unrecoverable 标记存在才渲染；迁移成功/无标记不渲染）。明确引导而非静默——
+ * 此前该状态只体现为 oauth 全 FAIL，用户在管理器里看不到任何提示（bug1 观感）。
+ */
+function ConsoleCredentialOsBanner() {
+  const { intl } = useZCodeIntl();
+  const platform = usePlatform();
+  const [state, setState] = useState<OmnicodeConsoleCredentialOsState | null | undefined>(undefined);
+  useEffect(() => {
+    let disposed = false;
+    void platform
+      .getOmnicodeConsoleCredentialOsState?.()
+      .then((result) => {
+        if (!disposed) setState(result ?? null);
+      })
+      .catch(() => {
+        if (!disposed) setState(null);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [platform]);
+  if (!state) return null;
+  return (
+    <div className="flex shrink-0 flex-col gap-1 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-amber-300">
+      <b className="text-ui-sm font-bold">
+        {intl.formatMessage({ id: "console.credentialOsUnrecoverableTitle" })}
+      </b>
+      <span className="text-ui-xs opacity-90">
+        {intl.formatMessage({ id: "console.credentialOsUnrecoverableBody" })}
+        {state.backedUp
+          ? ` ${intl.formatMessage({ id: "console.credentialOsUnrecoverableBackedUp" })}`
+          : ""}
+      </span>
+    </div>
   );
 }
 

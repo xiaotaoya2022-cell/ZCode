@@ -62,6 +62,7 @@ import { mergeOmnicodeConsoleUiState } from "./omnicode/consoleUiState.js";
 import { refreshOmnicodeTrayNameCache } from "./omnicode/trayMenu.js";
 import { setOmnicodeInstanceBridgeManagerHooks } from "./omnicode/instanceBridgeServer.js";
 import { readOmnicodeLoginHealths } from "./omnicode/loginHealth.js";
+import { readConsoleRootOsMigrationMarker } from "./omnicode/consoleCredentialOsMigration.js";
 import { applyOmnicodePerfPanelState } from "./omnicode/perfMonitor.js";
 import { getOmnicodeAccountDashboardSnapshot } from "./omnicode/accountDashboard.js";
 import { startOmnicodeAccountClaimRun } from "./omnicode/claimRunner.js";
@@ -437,6 +438,12 @@ function registerDesktopOmnicodeAccountIpcHandlers(): void {
   // [OmniCode] 批次3 UI 批次：赛博鸡蛋检测（逐账号 preview，main 侧汇聚 + 邮箱脱敏）
   ipcMain.handle(PlatformChannels.OmnicodeAccountDetectGet, async () =>
     detectOmnicodeClaimableAccounts(),
+  );
+
+  // [OmniCode] omni.5 真机修复（F2-5）：console 根 os: 旧密文迁移状态（unrecoverable
+  // 标记 → 管理器 UI 明确重登引导；null=无标记）。任何读取异常按无标记降级。
+  ipcMain.handle(PlatformChannels.OmnicodeConsoleCredentialStateGet, async () =>
+    readConsoleRootOsMigrationMarker(getOmnicodeConsoleDataBaseDir()),
   );
 
   // 自动领取 30min 轮询（开关每次 tick 重读 console-ui；关闭态零网络请求）

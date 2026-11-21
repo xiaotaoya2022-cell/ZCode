@@ -4173,6 +4173,12 @@ const enUS: Record<string, string> = {
   "console.loginExpiringDays": "Expiring in {days}d",
   "console.loginExpired": "Sign-in expired",
   "console.loginUnknown": "Not signed in",
+  "console.loginStatusUnknown": "Credential status unknown",
+  // [OmniCode] omni.5 fix (F2-5): re-login guidance banner for unrecoverable console-root os: ciphertext
+  "console.credentialOsUnrecoverableTitle": "Legacy credential key missing — please sign in again",
+  "console.credentialOsUnrecoverableBody":
+    "The console data root's historical sign-in credentials were encrypted with the legacy OS credential store and the key entry can no longer be read (the original file is preserved; no data was deleted). Please sign in once more in Settings: new sign-ins use the built-in key and stay stable afterwards.",
+  "console.credentialOsUnrecoverableBackedUp": "The original credential file has been content-addressed and backed up.",
   "console.loginRemainingTitle": "Sign-in valid for {days}d {hours}h",
   // [OmniCode] Batch 3 UI: account dashboard (demo section 01; ConsoleHome view toggle)
   "console.dashboardTitle": "Account Dashboard",
@@ -4240,6 +4246,11 @@ const enUS: Record<string, string> = {
   "console.egg.settledSubUnknown": "Total per claim history (some accounts did not report units)",
   "console.egg.dismiss": "Dismiss",
   "console.egg.toastNoTargets": "No claimable accounts (already claimed today or no drop)",
+  // [OmniCode] omni.5 fix (F3-7/F3-8): zero-state guidance + always-visible manual detect entry
+  "console.egg.zeroDetecting": "Detecting…",
+  "console.egg.zeroNoClaim": "Nothing claimable (already claimed today or no drop)",
+  "console.egg.zeroNeedsLogin": "{count} instance(s) not signed in — sign in to become eligible",
+  "console.egg.redetect": "Re-detect",
   "console.egg.toastInProgress": "A claim run is already in progress",
   "console.egg.autoBadgeTitle": "{count} auto-claimed today",
   "console.egg.autoDetailsTitle": "Auto claim details",

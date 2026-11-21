@@ -595,6 +595,16 @@ export function buildHostProcessEnv(hostProcessLocalEnv: Record<string, string>)
     // 工作树或根据安装路径猜测；否则同一产品版本的不同修复包无法在 ARMS 中区分。
     [ZCODE_BUILD_COMMIT_ID_ENV]: ZCODE_COMMIT,
     ...(dataBaseDir !== homedir() ? { ZCODE_DATA_BASE_DIR: dataBaseDir } : {}),
+    // [OmniCode] omni.5 真机修复（bug1 根因之一）：独立数据根（omnicode 管理器 console
+    // 根 / Profile 实例根）必须把固化的凭据密钥透传给 host——desktopDataBaseDirBootstrap
+    // 已把密钥写入 main process.env，但此前未显式透传，host 侧凭据 cipher 退回 OS
+    // keyring 路径（console 根钉 os → keyring 条目缺失即 CREDENTIAL_SECURE_STORAGE_
+    // UNAVAILABLE，oauth 全 FAIL）。与 ZCODE_DATA_BASE_DIR 同门控：默认 homedir（官方
+    // flavor）不注入，官方 keyring 语义零改动。managed secret 存在时 cipher getKey 走
+    // source="env" 短路，绕过 keyring（systemCredentialCipher resolveManagedSecret）。
+    ...(dataBaseDir !== homedir() && process.env.ZCODE_CREDENTIAL_SECRET
+      ? { ZCODE_CREDENTIAL_SECRET: process.env.ZCODE_CREDENTIAL_SECRET }
+      : {}),
     ...(windowsAppInstallDir ? { [ZCODE_WINDOWS_APP_INSTALL_DIR_ENV]: windowsAppInstallDir } : {}),
     ...(bundledCuaHelperAppPath
       ? { [ZCODE_CUA_BUNDLED_HELPER_APP_PATH_ENV]: bundledCuaHelperAppPath }

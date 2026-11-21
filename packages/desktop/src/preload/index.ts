@@ -134,6 +134,7 @@ import type {
   // [OmniCode] 批次3 UI 批次：赛博鸡蛋检测（门票叠数据源）
   OmnicodeAccountDetectRequest,
   OmnicodeAccountDetectResult,
+  OmnicodeConsoleCredentialOsState,
   SSHConfigAliasOption,
   WebRemoteControlContext,
   WebRemoteControlReconnectWorkspaceRequest,
@@ -509,6 +510,9 @@ contextBridge.exposeInMainWorld("zcode", {
           payload: OmnicodeAccountDetectRequest,
         ): Promise<OmnicodeAccountDetectResult> =>
           ipcRenderer.invoke(PlatformChannels.OmnicodeAccountDetectGet, payload),
+        // [OmniCode] omni.5 真机修复（F2-5）：console 根 os: 迁移状态（重登引导数据源）
+        getOmnicodeConsoleCredentialOsState: (): Promise<OmnicodeConsoleCredentialOsState | null> =>
+          ipcRenderer.invoke(PlatformChannels.OmnicodeConsoleCredentialStateGet),
       }
     : {}),
   // [OmniCode] 失败态恢复入口：手动粘贴完整 OAuth 回调 URL，main 复用 handleDeepLink 路由

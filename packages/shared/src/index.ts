@@ -347,6 +347,8 @@ export type {
   OmnicodeAccountDetectionSummary,
   OmnicodeAccountDetectResult,
   OmnicodeAccountDetectRequest,
+  // [OmniCode] omni.5 真机修复（F2-5）：console 根 os: 迁移状态（重登引导数据源）
+  OmnicodeConsoleCredentialOsState,
   DesktopCloseToTrayCapability,
   DesktopCommandId,
   CuaOsSupport,

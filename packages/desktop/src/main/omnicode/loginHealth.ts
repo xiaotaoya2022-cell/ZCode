@@ -123,14 +123,41 @@ async function readBoundedTextFile(path: string, maxBytes: number): Promise<stri
 /**
  * 从单个数据根读取登录态健康度（测试可注入 now）。文件缺失/JSON 损坏/密钥缺失/
  * 解密失败/文件越界全部 → unknown（静默；spec §分级语义"任何读失败=未知态静默"）。
+ * [OmniCode] omni.5 真机验收（bug2）：unknown 细分——无 credentials.json 或无任何
+ * oauth 凭据值 = logged-out（UI「未登录」）；文件存在但读不出（os: 旧密文/密钥文件
+ * 缺失/解密失败/越界/损坏）= unreadable（UI「凭据状态未知」）。不再把"读不出"伪装
+ * 成"未登录"。
  */
 export async function readOmnicodeLoginHealthFromDataRoot(
   dataRoot: string,
   now: number = Date.now(),
 ): Promise<OmnicodeLoginHealthInfo> {
   const credentialsPath = join(dataRoot, ".zcode", "v2", CREDENTIALS_FILE_NAME);
-  let secret: string;
+  let raw: string;
+  try {
+    raw = await readBoundedTextFile(credentialsPath, OMNICODE_LOGIN_CREDENTIALS_MAX_BYTES);
+  } catch (error) {
+    if ((error as { code?: string }).code === "ENOENT") {
+      return { status: "unknown", unknownReason: "logged-out" };
+    }
+    return { status: "unknown", unknownReason: "unreadable" };
+  }
   let snapshot: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { status: "unknown", unknownReason: "unreadable" };
+    }
+    snapshot = parsed as Record<string, unknown>;
+  } catch {
+    return { status: "unknown", unknownReason: "unreadable" };
+  }
+  // 无任何 oauth 凭据值（连 zcodejwttoken 都没有）= 从未登录过（真·未登录态）。
+  const hasOauthValues = Object.keys(snapshot).some(
+    (key) => key.startsWith("oauth:") || key === "zcodejwttoken",
+  );
+  if (!hasOauthValues) return { status: "unknown", unknownReason: "logged-out" };
+  let secret: string;
   try {
     // [R1 P2-2] 与实例侧 canonical 读取（systemCredentialCipher.resolveManagedSecret）
     // 对齐：原样读取不 trim，按 Buffer.byteLength 判界——手工编辑过的密钥文件若带
@@ -140,14 +167,13 @@ export async function readOmnicodeLoginHealthFromDataRoot(
       OMNICODE_LOGIN_SECRET_MAX_BYTES,
     );
     const secretBytes = Buffer.byteLength(secretRaw, "utf8");
-    if (secretBytes < 32 || secretBytes > OMNICODE_LOGIN_SECRET_MAX_BYTES) return { status: "unknown" };
+    if (secretBytes < 32 || secretBytes > OMNICODE_LOGIN_SECRET_MAX_BYTES) {
+      return { status: "unknown", unknownReason: "unreadable" };
+    }
     secret = secretRaw;
-    const raw = await readBoundedTextFile(credentialsPath, OMNICODE_LOGIN_CREDENTIALS_MAX_BYTES);
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { status: "unknown" };
-    snapshot = parsed as Record<string, unknown>;
   } catch {
-    return { status: "unknown" };
+    // 凭据值存在但密钥文件读不出/缺失 → 状态不可读（非未登录）。
+    return { status: "unknown", unknownReason: "unreadable" };
   }
   // env 注入密钥：cipher 的 key 解析走 env 短路（不触 keyring / 文件锁 / 写入）
   const cipher = createSystemCredentialCipher({
@@ -162,7 +188,12 @@ export async function readOmnicodeLoginHealthFromDataRoot(
     if (Number.isFinite(expiresAt) && expiresAt > 0) expiresAtByProvider[provider] = expiresAt;
   }
   const activeProvider = await decryptSnapshotValue(cipher, snapshot[ACTIVE_PROVIDER_KEY] as string | undefined);
-  return resolveOmnicodeLoginHealth({ expiresAtByProvider, activeProvider }, now);
+  const health = resolveOmnicodeLoginHealth({ expiresAtByProvider, activeProvider }, now);
+  if (health.status === "unknown") {
+    // 有凭据值但分层读不出（解密失败/无有效 expires_at）→ 凭据状态未知，非未登录。
+    return { ...health, unknownReason: "unreadable" };
+  }
+  return health;
 }
 
 /**

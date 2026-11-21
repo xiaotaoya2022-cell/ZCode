@@ -626,11 +626,20 @@ describe("omnicode batch2.5 X2: readOmnicodeLoginHealthFromDataRoot (fs + cipher
   it("数据根缺失 / 密钥文件过短 / JSON 损坏 → 全部 unknown 静默", async () => {
     await expect(readOmnicodeLoginHealthFromDataRoot(join(root, "nope"))).resolves.toEqual({
       status: "unknown",
+      unknownReason: "logged-out",
     });
+    // [OmniCode] omni.5 bug2：unknown 细分——空快照（无任何 oauth 值）=真未登录；
+    // 文件存在但损坏/读不出=凭据状态未知（不再伪装成未登录）。
     await writeSnapshot({}, { secretFile: "short" });
-    await expect(readOmnicodeLoginHealthFromDataRoot(root)).resolves.toEqual({ status: "unknown" });
+    await expect(readOmnicodeLoginHealthFromDataRoot(root)).resolves.toEqual({
+      status: "unknown",
+      unknownReason: "logged-out",
+    });
     await writeSnapshot({}, { rawCredentials: "{corrupt json" });
-    await expect(readOmnicodeLoginHealthFromDataRoot(root)).resolves.toEqual({ status: "unknown" });
+    await expect(readOmnicodeLoginHealthFromDataRoot(root)).resolves.toEqual({
+      status: "unknown",
+      unknownReason: "unreadable",
+    });
   });
 
   it("env 密文 happy path：active=zai 且剩 30 天 → healthy", async () => {
@@ -669,7 +678,10 @@ describe("omnicode batch2.5 X2: readOmnicodeLoginHealthFromDataRoot (fs + cipher
       },
       { secret: SECRET }, // 落盘密钥与加密密钥不同 → 解密失败
     );
-    await expect(readOmnicodeLoginHealthFromDataRoot(root, NOW)).resolves.toEqual({ status: "unknown" });
+    await expect(readOmnicodeLoginHealthFromDataRoot(root, NOW)).resolves.toEqual({
+      status: "unknown",
+      unknownReason: "unreadable",
+    });
   });
 
   it("[R1 P2-2] 密钥文件带尾随空白与实例侧同判定（canonical 不 trim：原样字节即密钥）→ 正常解密非 unknown", async () => {
@@ -691,21 +703,42 @@ describe("omnicode batch2.5 X2: readOmnicodeLoginHealthFromDataRoot (fs + cipher
     });
   });
 
-  it("[R1 P2-2/P2-6] 密钥超长（>4096 字节）→ unknown（与 canonical 字节界对齐）", async () => {
+  it("[R1 P2-2/P2-6] 密钥超长（>4096 字节）→ unknown/unreadable（与 canonical 字节界对齐）", async () => {
+    // [OmniCode] omni.5 bug2：凭据值存在时密钥越界归 unreadable（有凭据但状态读不出）；
+    // 空快照时先归 logged-out（无任何 oauth 值=未登录，密钥界不再参与判定）。
+    const NOW = Date.now();
+    const credentialsPath = join(root, ".zcode", "v2", "credentials.json");
+    await writeSnapshot(
+      { "oauth:zai:expires_at": await encrypt(credentialsPath, SECRET, String(NOW + 30 * DAY_MS)) },
+      { secretFile: "x".repeat(OMNICODE_LOGIN_SECRET_MAX_BYTES + 1) },
+    );
+    await expect(readOmnicodeLoginHealthFromDataRoot(root, NOW)).resolves.toEqual({
+      status: "unknown",
+      unknownReason: "unreadable",
+    });
     await writeSnapshot({}, { secretFile: "x".repeat(OMNICODE_LOGIN_SECRET_MAX_BYTES + 1) });
-    await expect(readOmnicodeLoginHealthFromDataRoot(root)).resolves.toEqual({ status: "unknown" });
+    await expect(readOmnicodeLoginHealthFromDataRoot(root)).resolves.toEqual({
+      status: "unknown",
+      unknownReason: "logged-out",
+    });
   });
 
   it("[R1 P2-6] credentials.json 为合法 JSON 数组 → 安全落 unknown（仅接受对象快照）", async () => {
     await writeSnapshot({}, { rawCredentials: JSON.stringify([1, 2, 3]) });
-    await expect(readOmnicodeLoginHealthFromDataRoot(root)).resolves.toEqual({ status: "unknown" });
+    await expect(readOmnicodeLoginHealthFromDataRoot(root)).resolves.toEqual({
+      status: "unknown",
+      unknownReason: "unreadable",
+    });
   });
 
   it("[R1 P2-6] credentials.json 超大小上限 → 读前拒读归 unknown（有界防御，无真超时）", async () => {
     await writeSnapshot({}, {
       rawCredentials: `{"pad": "${"x".repeat(OMNICODE_LOGIN_CREDENTIALS_MAX_BYTES)}"}`,
     });
-    await expect(readOmnicodeLoginHealthFromDataRoot(root)).resolves.toEqual({ status: "unknown" });
+    await expect(readOmnicodeLoginHealthFromDataRoot(root)).resolves.toEqual({
+      status: "unknown",
+      unknownReason: "unreadable",
+    });
   });
 
   it("readOmnicodeLoginHealths：逐 profile 解析数据根（override 优先），失败项 unknown 不拖垮整体", async () => {
@@ -733,7 +766,11 @@ describe("omnicode batch2.5 X2: readOmnicodeLoginHealthFromDataRoot (fs + cipher
       daysRemaining: 20,
       expiresAt: NOW + 20 * DAY_MS,
     });
-    expect(results.get("p222222222")).toEqual({ status: "unknown" });
+    // [OmniCode] omni.5 bug2：数据根缺失 = 无凭据文件 → logged-out（细分口径）。
+    expect(results.get("p222222222")).toEqual({
+      status: "unknown",
+      unknownReason: "logged-out",
+    });
   });
 });
 

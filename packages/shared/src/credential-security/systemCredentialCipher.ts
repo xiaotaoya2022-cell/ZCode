@@ -19,6 +19,12 @@ const KEY_BYTES = 32;
 const IV_BYTES = 12;
 const TAG_BYTES = 16;
 const SYSTEM_SERVICE = "ZCode Credential Encryption";
+/**
+ * [OmniCode] omni.5 真机修复（F2-5）：系统 keyring 服务名导出——main 侧 console 根
+ * os→env 一次性迁移用同一构造探测 keyring 条目（AsyncEntry(service, digest(path))），
+ * 字面量只在这里定义，杜绝两处漂移。
+ */
+export const SYSTEM_CREDENTIAL_KEYRING_SERVICE = SYSTEM_SERVICE;
 /** 与凭据文件同目录的来源标记；内容只能是 OS_SOURCE_MARKER，不含密钥。 */
 const CREDENTIAL_SOURCE_FILE = "credential-source";
 const OS_SOURCE_MARKER = "os\n";
@@ -425,6 +431,77 @@ export function createSystemCredentialCipher(
       return open(parts[2], key);
     },
   };
+}
+
+/**
+ * [OmniCode] omni.5 真机修复（F2-5）：console 根 os→env 一次性迁移的重加密原语（纯函数）。
+ * 用 OS keyring 原始密钥（main 侧探测读取的 base64url 编码密钥）解开记录里全部
+ * enc:v2:os: 值，再以固化 env 密钥重加密为 enc:v2:env:。
+ * 红线语义：任何一个 os: 值解密失败即整体失败（返回 null），调用方绝不改写文件、
+ * 绝不静默丢弃——原始凭据文件保持原样（"解密失败先备份"哲学的迁移前置守卫）。
+ * 非 os: 值（env:/legacy/明文）原样保留，输出为全新记录对象，不修改入参。
+ */
+export function reWrapOsCredentialValuesWithEnvKey(
+  record: Readonly<Record<string, string>>,
+  osKeyEncoded: string,
+  envKey: Buffer,
+): Record<string, string> | null {
+  let osKey: Buffer;
+  try {
+    if (!ENCODED_KEY_PATTERN.test(osKeyEncoded)) return null;
+    osKey = Buffer.from(osKeyEncoded, "base64url");
+  } catch {
+    return null;
+  }
+  if (osKey.length !== KEY_BYTES) return null;
+  const next: Record<string, string> = {};
+  let migratedCount = 0;
+  for (const [key, value] of Object.entries(record)) {
+    if (!value.startsWith(`${SYSTEM_PREFIX}os:`)) {
+      next[key] = value;
+      continue;
+    }
+    const parts = value.slice(SYSTEM_PREFIX.length).split(":");
+    if (parts.length !== 3 || parts[0] !== "os" || !/^[a-f0-9]{24}$/.test(parts[1] ?? "")) {
+      return null;
+    }
+    let plain: string;
+    try {
+      plain = open(parts[2]!, osKey);
+    } catch {
+      // 任何 os: 值解不开 → 整体失败，绝不产出半迁移记录。
+      return null;
+    }
+    next[key] = `${SYSTEM_PREFIX}env:${keyFingerprint(envKey)}:${seal(plain, envKey)}`;
+    migratedCount += 1;
+  }
+  if (migratedCount === 0) return null;
+  return next;
+}
+
+/**
+ * [OmniCode] omni.5 真机修复（F2-5）：console 根 os→env 迁移的 keyring 探测专用读取。
+ * 与 systemKeyStore 完全同构造（service 常量 + 凭据文件路径哈希），保证探测到的是
+ * 生成该目录 os: 密文的那把密钥。条目缺失返回 null；系统库不可达抛 unavailable()
+ * （CREDENTIAL_SECURE_STORAGE_UNAVAILABLE）——调用方据此区分「条目丢失」与「系统库失败」。
+ */
+export async function readSystemCredentialKeyringEntry(filePath: string): Promise<string | null> {
+  let entry: import("@napi-rs/keyring").AsyncEntry;
+  try {
+    const { AsyncEntry } = await import("@napi-rs/keyring");
+    entry = new AsyncEntry(
+      SYSTEM_SERVICE,
+      digest(resolve(filePath)).toString("hex"),
+      { linux: { store: "secret-service" } },
+    );
+  } catch {
+    throw unavailable();
+  }
+  try {
+    return await entry.getPassword();
+  } catch {
+    throw unavailable();
+  }
 }
 
 /** Desktop 显式请求远端准备；随机密钥只在目标机生成，不能随连接结果返回。 */

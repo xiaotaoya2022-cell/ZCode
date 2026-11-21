@@ -13,6 +13,7 @@ import {
 /* eslint-disable max-lines */
 // [OmniCode] Profile 实例身份引导：必须先于一切早期 bootstrap（spec: docs/omnicode/profile-runtime.md）
 import "./omnicode/profileBootstrap.js";
+import { runConsoleRootOsCredentialMigration } from "./omnicode/consoleCredentialOsMigration.js";
 // [OmniCode] 实例 relaunch 身份续接（spec §产品规则 1 / D6）；置于 profileBootstrap 之后
 import { buildOmnicodeInstanceRelaunchArgs } from "./omnicode/contract.js";
 // [OmniCode] 批次2 B2-1：管理器/实例双模式分流（T2 瘦身 + T4 工作区路由）
@@ -1105,6 +1106,34 @@ if (isOmnicodeManagerMain) {
   // 供 host utilityProcess 继承（services/node.ts 据此跳过工作区锁协调器装配）；
   // 读 ??= 不覆盖用户显式同名 env（该命名空间归 OmniCode 所有）。
   process.env.OMNICODE_CONSOLE_MODE ??= "1";
+  // [OmniCode] omni.5 真机修复（F2-5，bug1 根因之二）：console 根 os→env 一次性凭据迁移。
+  // 早期 bootstrap 已固化 env 密钥；此处 fire-and-forget 迁移（keyring 探测→重加密→
+  // 备份/标记，详见 consoleCredentialOsMigration 模块注释）。官方 flavor 与 Profile 实例
+  // 恒不进入本分支（零改动）；withFileLock 保证与 host 凭据访问互斥，并发安全。
+  void runConsoleRootOsCredentialMigration(
+    getDataBaseDir(),
+    process.env.ZCODE_CREDENTIAL_SECRET ?? "",
+  )
+    .then((outcome) => {
+      if (outcome.status === "migrated") {
+        logger.info("[omnicode] console 根凭据 os→env 迁移完成", {
+          migratedCount: outcome.migratedCount,
+          backupPath: outcome.backupPath,
+        });
+        return;
+      }
+      if (outcome.status === "unrecoverable") {
+        logger.warn("[omnicode] console 根 os: 旧密文不可恢复（已备份+标记，管理器给重登引导）", {
+          reason: outcome.reason,
+          backupPath: outcome.backupPath,
+        });
+      }
+    })
+    .catch((error: unknown) => {
+      logger.warn("[omnicode] console 根凭据迁移异常（原文件保持原样）", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
 }
 // 管理器模式下待路由的"打开工作区"请求（冷启动 argv/deep-link/open-url 在窗口
 // 创建前到达时先入队，whenReady 后统一路由到实例）。

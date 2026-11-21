@@ -3910,6 +3910,12 @@ const zhCN: Record<string, string> = {
   "console.loginExpiringDays": "即将到期 · 剩 {days} 天",
   "console.loginExpired": "登录已过期",
   "console.loginUnknown": "未登录",
+  "console.loginStatusUnknown": "凭据状态未知",
+  // [OmniCode] omni.5 真机修复（F2-5）：console 根 os: 旧密文不可恢复的重登引导横幅
+  "console.credentialOsUnrecoverableTitle": "本机凭据库缺少旧加密密钥，需要重新登录",
+  "console.credentialOsUnrecoverableBody":
+    "console 数据根的历史登录凭据使用旧版系统密钥库加密，当前密钥条目无法读取（原文件已保留，登录数据未丢失）。请在设置中重新登录一次：新登录改用内置密钥，之后永久稳定。",
+  "console.credentialOsUnrecoverableBackedUp": "原凭据文件已按内容寻址备份。",
   "console.loginRemainingTitle": "登录态剩余 {days} 天 {hours} 小时",
   // [OmniCode] 批次3 UI 批次：账号看板（演示稿 01；ConsoleHome 二视图切换）
   "console.dashboardTitle": "账号看板",
@@ -3976,6 +3982,11 @@ const zhCN: Record<string, string> = {
   "console.egg.settledSubUnknown": "合计额度以领取记录为准（部分账号未返回数值）",
   "console.egg.dismiss": "收起",
   "console.egg.toastNoTargets": "没有可领取的账号（可能今日已领完或无投放）",
+  // [OmniCode] omni.5 真机修复（F3-7/F3-8）：零态引导三态 + 常驻手动检测入口
+  "console.egg.zeroDetecting": "检测中…",
+  "console.egg.zeroNoClaim": "暂无可领额度（可能今日已领或无投放）",
+  "console.egg.zeroNeedsLogin": "{count} 个实例未登录——登录实例后可领",
+  "console.egg.redetect": "重新检测",
   "console.egg.toastInProgress": "已有一轮领取在进行中",
   "console.egg.autoBadgeTitle": "今日已自动领取 {count} 份",
   "console.egg.autoDetailsTitle": "自动领取明细",

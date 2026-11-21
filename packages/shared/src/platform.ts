@@ -462,6 +462,28 @@ export interface OmnicodeLoginHealthInfo {
   daysRemaining?: number;
   /** 登录态过期时刻（epoch ms）。 */
   expiresAt?: number;
+  /**
+   * [OmniCode] omni.5 真机验收（bug2）：status=unknown 时的细分口径——
+   * "logged-out" = 数据根无 credentials.json（或无任何 oauth 凭据值）→ UI「未登录」；
+   * "unreadable" = 凭据文件存在但状态读不出（os: 旧密文/密钥文件缺失/解密失败）→
+   * UI「凭据状态未知」。缺省（旧数据/列表级失败兜底）按 logged-out 兼容渲染。
+   */
+  unknownReason?: "logged-out" | "unreadable";
+}
+
+/**
+ * [OmniCode] omni.5 真机修复（F2-5）：console 根 os: 旧密文一次性迁移的不可恢复标记
+ * （credential-os-migration.json 投影；不含任何密钥/明文）。仅管理器 UI 消费——
+ * 存在该状态时给明确重登引导（非静默）。
+ */
+export interface OmnicodeConsoleCredentialOsState {
+  status: "unrecoverable";
+  /** 探测失败原因：keyring-unavailable / keyring-entry-missing / decrypt-failed / env-secret-missing。 */
+  reason: string;
+  /** 标记写入时刻（ISO）。 */
+  markedAt: string;
+  /** 原凭据文件是否已留内容寻址备份（备份路径不进 UI 载荷）。 */
+  backedUp: boolean;
 }
 
 export interface OmnicodeProfileCreateInput {
@@ -1521,6 +1543,11 @@ export interface IPlatformService {
    * 启动一次/手动触发/自动领取 30min 轮询）。仅管理器 Desktop。
    */
   getOmnicodeAccountDetect?(input: OmnicodeAccountDetectRequest): Promise<OmnicodeAccountDetectResult>;
+  /**
+   * [OmniCode] omni.5 真机修复（F2-5）：查询 console 根 os: 旧密文迁移状态（unrecoverable
+   * 标记存在时管理器 UI 给明确重登引导；null=无标记）。仅管理器 Desktop。
+   */
+  getOmnicodeConsoleCredentialOsState?(): Promise<OmnicodeConsoleCredentialOsState | null>;
   /**
    * [OmniCode] 批次3：启动一次赛博鸡蛋逐张领取（mode 仅作执行标注，共用节奏器；
    * 启动即回 runId，进度/结算经事件广播）。仅管理器 Desktop。
