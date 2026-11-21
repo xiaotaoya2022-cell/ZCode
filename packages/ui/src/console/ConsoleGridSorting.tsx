@@ -42,6 +42,9 @@ export interface OmnicodeCardDragState {
  * 挂 move/up 生命周期（候选期阈值判定、激活期实时落点计算）。提交以最后一次 move 的
  * 落点为准；无落点（指针出网格）= 取消换位。提交经 ref 快照转发（commitRef），effect
  * 依赖最小化（不因排序数组变化重挂 listener）。
+ * [OmniCode] omni.5 真机修复（F4-10）：额外暴露 dragActive/dragActiveId——拖拽激活但
+ * 暂无合法落点时（指针在卡片间隙/网格外）被拖卡的抬升态仍可见，网格容器据
+ * dragActive && !dragState 呈现"非合法落点"禁用态（cursor-not-allowed）。
  * @param cardElementsRef 卡片元素注册表（profileId → DOM；与网格 IntersectionObserver
  *   共用同一注册表，落点矩形按真实布局计算）。
  * @param commit 拖拽提交回调（hook 内不做顺序计算/持久化，归调用方 + shared 纯函数）。
@@ -53,6 +56,7 @@ export function useOmnicodeCardDragSort(input: {
 }) {
   const { sortMode, cardElementsRef } = input;
   const [dragState, setDragState] = useState<OmnicodeCardDragState | null>(null);
+  const [dragActiveId, setDragActiveId] = useState<string | null>(null);
   const dragCandidateRef = useRef<{
     pointerId: number;
     startX: number;
@@ -122,6 +126,7 @@ export function useOmnicodeCardDragSort(input: {
         );
         if (distance <= CARD_DRAG_THRESHOLD_PX) return;
         dragActiveRef.current = true;
+        setDragActiveId(candidate.dragId);
         moveEvent.preventDefault();
       }
       moveEvent.preventDefault();
@@ -134,6 +139,7 @@ export function useOmnicodeCardDragSort(input: {
       dragCandidateRef.current = null;
       if (!dragActiveRef.current) return;
       dragActiveRef.current = false;
+      setDragActiveId(null);
       // 提交以最后一次 move 的落点为准；无落点（指针出网格）= 取消换位。
       const drop = dragLastTargetRef.current;
       dragLastTargetRef.current = null;
@@ -146,13 +152,17 @@ export function useOmnicodeCardDragSort(input: {
     };
     window.addEventListener("pointermove", onMove, { passive: false });
     window.addEventListener("pointerup", onUp);
+    // [OmniCode] omni.5（F4-10）：pointercancel（触控/系统打断）同样终止拖拽视觉态，
+    // 否则被拖卡抬升态可能滞留（原逻辑只漏 ref，不漏 UI——现在视觉态也挂激活标志）。
+    window.addEventListener("pointercancel", onUp);
     return () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
     };
   }, [resolveDropTarget]);
 
-  return { dragState, handleGridPointerDown, dragCommitAtRef };
+  return { dragState, dragActiveId, handleGridPointerDown, dragCommitAtRef };
 }
 
 /**

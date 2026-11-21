@@ -2,7 +2,9 @@
 // F:\OmniCode\docs\batch3\BATCH3-DESIGN-DISCUSSION.md §3；观感对标演示稿
 // console-dashboard-demo.html 02 节）。
 // - 检测数据源 = OmnicodeAccountDetectGet（管理器启动一次 + 手动「重新检测」；main 侧
-//   自动领取轮询的领取事件也会同步清票）。无蛋/无票空闲态整个浮层不渲染（无痕）。
+//   自动领取轮询的领取事件也会同步清票）。[OmniCode] omni.5 真机修复（F3-7）：无票
+//   空闲态不再整层静默——左下角常驻零态引导（检测中/暂无可领/需登录三态）+ 首屏可见
+//   的手动检测按钮（设置分区入口保留）。
 // - 手动领取（点击门票叠）= OmnicodeAccountClaimRun(mode manual)，进度经
 //   OmnicodeAccountClaimEvent 逐张动效（高亮→打勾→「账号 +到账额度」+ 顶部进度），
 //   随时可「跳过动画」；右键 = 静默全部领取（同 mode manual，不播动效直接结算态）。
@@ -11,10 +13,11 @@
 // - 风控红线：领取频率/节奏/凭据全部在 main 数据层（claimPacer/billingClient），本组件
 //   仅消费事件，无任何直接网络请求。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Egg, X } from "lucide-react";
+import { Check, Egg, RefreshCw, X } from "lucide-react";
 import type {
   OmnicodeAccountClaimEventPayload,
   OmnicodeClaimHistoryEntry,
+  OmnicodeAccountDetectionEntry,
 } from "@zcode/shared";
 import { Button } from "@/components/ui/button.js";
 import { toast } from "@/components/ui/toast.js";
@@ -87,6 +90,11 @@ export function EggClaimOverlay() {
   const [autoBadgeDismissed, setAutoBadgeDismissed] = useState(false);
   // 检测结果的全量展示名映射（自动领取明细/到账 chips 里的账号名数据源；tickets 只留可领）
   const [displayNameById, setDisplayNameById] = useState<Record<string, string>>({});
+  // [OmniCode] omni.5 真机修复（F3-7/F3-8）：零态引导数据源——全量检测条目（含
+  // missing_jwt/no_claim/skipped），无 claimable 时给「检测中/暂无可领/需登录」三态
+  // 引导 + 常驻手动检测入口，替代此前 tickets=0 整层静默不渲染。
+  const [detectEntries, setDetectEntries] = useState<OmnicodeAccountDetectionEntry[]>([]);
+  const [detecting, setDetecting] = useState(false);
 
   const refreshAutoBadgeFromHistory = useCallback((history: OmnicodeClaimHistoryEntry[]) => {
     const summary = summarizeOmnicodeAutoSettlementFromHistory(history, Date.now());
@@ -99,16 +107,16 @@ export function EggClaimOverlay() {
     setAutoDetails(history.filter((entry) => entry.mode === "auto" && entry.at >= dayStart.getTime()));
   }, []);
 
-  // ─── 检测（挂载一次；检测状态更新另有三路：手动 run no_targets 清票 / 自动领取
-  // 事件逐张清票 / 设置分区「手动检测一次」走 toast 不改浮层，下一拍检测自对齐） ───
-  useEffect(() => {
-    void (async () => {
+  const runDetect = useCallback(
+    async (reason: "startup" | "manual") => {
+      setDetecting(true);
       try {
-        const result = await platform.getOmnicodeAccountDetect?.({ reason: "startup" });
+        const result = await platform.getOmnicodeAccountDetect?.({ reason });
         if (result) {
           setDisplayNameById(
             Object.fromEntries(result.accounts.map((account) => [account.profileId, account.displayName])),
           );
+          setDetectEntries(result.accounts);
           setTickets(
             result.accounts
               .filter((account) => account.state === "claimable")
@@ -120,19 +128,32 @@ export function EggClaimOverlay() {
                 ...(account.grantedUnits !== undefined ? { grantedUnits: account.grantedUnits } : {}),
               })),
           );
+        } else {
+          setDetectEntries([]);
         }
       } catch {
-        /* 桥缺席：浮层静默不渲染 */
+        // 桥缺席：零态按"暂无可领"降级（不再整层静默）。
+        setDetectEntries([]);
       } finally {
+        setDetecting(false);
         setDetectionDone(true);
       }
+    },
+    [platform],
+  );
+
+  // ─── 检测（挂载一次；检测状态更新另有三路：手动 run no_targets 清票 / 自动领取
+  // 事件逐张清票 / 设置分区「手动检测一次」走 toast 不改浮层，下一拍检测自对齐） ───
+  useEffect(() => {
+    void (async () => {
+      await runDetect("startup");
       // 挂载时补自动领取结算徽章（自动领取可能发生在窗口关闭期间）
       await platform
         .getOmnicodeConsoleUiState?.()
         .then((state) => refreshAutoBadgeFromHistory(state.claimHistory ?? []))
         .catch(() => undefined);
     })();
-  }, [platform, refreshAutoBadgeFromHistory]);
+  }, [platform, refreshAutoBadgeFromHistory, runDetect]);
 
   // ─── 领取事件订阅（manualRunId 区分本浮层发起的 run 与 main 自动领取 run） ───
   useEffect(() => {
@@ -258,8 +279,17 @@ export function EggClaimOverlay() {
   const showOverlay =
     detectionDone &&
     (idleStack || claiming || phase === "settled" || (autoSettlement !== null && !autoBadgeDismissed));
+  // [OmniCode] omni.5 真机修复（F3-7）：零态引导——检测完成但无可领（且无任何浮层态）
+  // 时渲染常驻小入口：检测中/暂无可领额度/需登录三态 + 手动检测按钮，不再静默隐藏。
+  const zeroStateVisible =
+    detectionDone &&
+    phase === "idle" &&
+    tickets.length === 0 &&
+    settlement === null &&
+    !(autoSettlement !== null && !autoBadgeDismissed);
+  const needsLoginCount = detectEntries.filter((entry) => entry.state === "missing_jwt").length;
 
-  if (!showOverlay) return null;
+  if (!showOverlay && !zeroStateVisible) return null;
 
   return (
     <div
@@ -482,6 +512,36 @@ export function EggClaimOverlay() {
               )}
             </div>
           ) : null}
+        </div>
+      ) : null}
+
+      {/* [OmniCode] omni.5 真机修复（F3-7/F3-8）：零态引导（无票且无任何浮层态时常驻）——
+          三态按检测实际结果切换：检测中 / 暂无可领额度 / N 个实例未登录（登录后可领）；
+          常驻「重新检测」按钮 = 首屏可见的手动检测入口（不依赖设置页）。 */}
+      {zeroStateVisible ? (
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-popover px-2.5 py-1.5 text-ui-xs text-foreground-subtle shadow-sm">
+          <Egg className="size-3.5 shrink-0 text-amber-400" />
+          <span>
+            {detecting
+              ? intl.formatMessage({ id: "console.egg.zeroDetecting" })
+              : needsLoginCount > 0
+                ? intl.formatMessage(
+                    { id: "console.egg.zeroNeedsLogin" },
+                    { count: String(needsLoginCount) },
+                  )
+                : intl.formatMessage({ id: "console.egg.zeroNoClaim" })}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 shrink-0 gap-1 px-2 text-ui-xs text-primary"
+            disabled={detecting}
+            data-testid="console-egg-redetect"
+            onClick={() => void runDetect("manual")}
+          >
+            <RefreshCw className={cn("size-3", detecting && "animate-spin")} />
+            {intl.formatMessage({ id: "console.egg.redetect" })}
+          </Button>
         </div>
       ) : null}
 

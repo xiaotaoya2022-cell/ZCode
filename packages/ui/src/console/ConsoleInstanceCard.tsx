@@ -246,9 +246,14 @@ export function ConsoleInstanceCard(props: {
           : "hover:border-border",
         !docked && running && "cursor-pointer",
         focusHighlighted && "border-primary ring-1 ring-primary",
-        dragging && "opacity-45",
-        dropIndicator === "before" && "border-t-2 border-t-primary",
-        dropIndicator === "after" && "border-b-2 border-b-primary",
+        // [OmniCode] omni.5 真机修复（F4-10）：被拖卡抬升态（抬升阴影 + 轻微放大 +
+        // 半透明弱化），替代此前仅 opacity-45 的扁平弱化——拖拽对象在网格中可辨识。
+        dragging &&
+          "z-10 scale-[1.03] shadow-lg shadow-black/40 ring-1 ring-primary/70 opacity-85",
+        // 插入位置占位高亮线：primary 实线边 + 同色细 ring 勾勒目标卡轮廓（比旧 2px
+        // 单边线醒目，插入前/后语义不变）。
+        dropIndicator === "before" && "border-t-2 border-t-primary ring-1 ring-primary/60",
+        dropIndicator === "after" && "border-b-2 border-b-primary ring-1 ring-primary/60",
         enlarged && "h-full",
       )}
     >
@@ -392,7 +397,9 @@ export function ConsoleInstanceCard(props: {
         ref={registerScreenElement}
         style={enlarged ? undefined : { aspectRatio }}
         className={cn(
-          "relative min-h-0 w-full overflow-hidden bg-black/90",
+          // [OmniCode] omni.5 真机修复（F4-9）：画面区容器自持命名 hover 组（group/screen）
+          // ——停止态启动/重启按钮的显示从"画面区中心"提升到"整个黑色画面区容器 hover"。
+          "group/screen relative min-h-0 w-full overflow-hidden bg-black/90",
           enlarged ? "flex-1" : "",
         )}
       >
@@ -417,11 +424,14 @@ export function ConsoleInstanceCard(props: {
           </div>
         ) : null}
         {!running ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+          // [OmniCode] omni.5 真机修复（F4-9）：启动按钮 hover 提升到整个画面区容器
+          // （group-hover/screen）；wrapper pointer-events-none + 按钮恢复 auto——
+          // 点击只落在按钮本体，画面区其余区域的事件（卡片双击放大等）不受影响。
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 opacity-0 transition-opacity duration-200 group-hover/screen:opacity-100 focus-within:opacity-100">
             <Button
               variant="outline"
               size="icon"
-              className="size-12 rounded-full"
+              className="pointer-events-auto size-12 rounded-full"
               disabled={busy}
               onClick={(event) => {
                 event.stopPropagation();
@@ -558,7 +568,12 @@ export function LoginHealthBadge(props: {
           id:
             status === "expired"
               ? "console.loginExpired"
-              : "console.loginUnknown",
+              : // [OmniCode] omni.5 真机验收（bug2）：unknown 细分——凭据文件存在但读不出
+                // （os: 旧密文/密钥缺失/解密失败）=「凭据状态未知」，不再伪装成「未登录」；
+                // 缺省（无凭据文件/旧数据）保持「未登录」。
+                loginHealth?.unknownReason === "unreadable"
+                ? "console.loginStatusUnknown"
+                : "console.loginUnknown",
         });
   const title =
     status === "healthy" || status === "expiring"

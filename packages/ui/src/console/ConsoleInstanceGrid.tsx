@@ -530,7 +530,7 @@ export function ConsoleInstanceGrid() {
 
   // ─── [OmniCode] 实例元数据批次：自定义排序拖拽 + 排序模式切换（交互编排拆分见
   // ConsoleGridSorting.tsx——冲突裁决/落点语义/阈值判定注释集中在该文件头） ───
-  const { dragState, handleGridPointerDown, dragCommitAtRef } = useOmnicodeCardDragSort({
+  const { dragState, dragActiveId, handleGridPointerDown, dragCommitAtRef } = useOmnicodeCardDragSort({
     sortMode,
     cardElementsRef,
     commit: (dragId, targetId, position) => {
@@ -706,6 +706,9 @@ export function ConsoleInstanceGrid() {
               enlargedId
                 ? "grid-cols-1 grid-rows-1 pt-11"
                 : "auto-rows-min grid-cols-[repeat(auto-fill,minmax(280px,1fr))] pb-1",
+              // [OmniCode] omni.5 真机修复（F4-10）：拖拽激活但无合法落点（指针在卡片
+              // 间隙/网格外）= 非合法落点禁用态（光标提示；无插入线，提交即取消换位）。
+              dragActiveId && !dragState && "cursor-not-allowed select-none",
             )}
           >
             {/* [OmniCode] 实例元数据批次：sortedProfiles（seq 默认/名称/自定义三模式，
@@ -728,7 +731,7 @@ export function ConsoleInstanceGrid() {
                   reportEmbedLayoutNow={reportEmbedLayoutNow}
                   embedScaleRef={embedScaleRef}
                   dragHandle={sortMode === "custom" && !enlargedId}
-                  dragging={dragState?.dragId === profile.id}
+                  dragging={dragActiveId === profile.id}
                   dropIndicator={
                     dragState?.targetId === profile.id ? dragState.position : null
                   }
