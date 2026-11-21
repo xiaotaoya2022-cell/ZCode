@@ -457,6 +457,21 @@ contextBridge.exposeInMainWorld("zcode", {
         restoreOmnicodeInstances: (): Promise<{ delivered: string[] }> =>
           ipcRenderer.invoke(PlatformChannels.OmnicodeProfileRestore),
         // [OmniCode] 批次2 B2-1：旧控制台收养（spec §批次2：旧控制台数据收养）
+        // [OmniCode] 新功能批次（2026-11-21 审计会话）：管理器维护面（锁总览/凭据备份/会话库）
+        listOmnicodeWorkspaceLocks: (): Promise<
+          import("@zcode/shared").OmnicodeWorkspaceLockSummaryEntry[]
+        > => ipcRenderer.invoke(PlatformChannels.OmnicodeWorkspaceLocksList),
+        backupOmnicodeCredentialsNow: (): Promise<
+          import("@zcode/shared").OmnicodeCredentialBackupNowResult
+        > => ipcRenderer.invoke(PlatformChannels.OmnicodeCredentialBackupNow),
+        openOmnicodeCredentialBackupsFolder: (): Promise<{ ok: boolean }> =>
+          ipcRenderer.invoke(PlatformChannels.OmnicodeCredentialBackupsOpen),
+        getOmnicodeSessionDbStatus: (): Promise<
+          import("@zcode/shared").OmnicodeSessionDbStatus
+        > => ipcRenderer.invoke(PlatformChannels.OmnicodeSessionDbStatusGet),
+        backupOmnicodeSessionDbNow: (): Promise<
+          import("@zcode/shared").OmnicodeSessionDbBackupResult
+        > => ipcRenderer.invoke(PlatformChannels.OmnicodeSessionDbBackupNow),
         checkOmnicodeConsoleAdoption: (): Promise<{
           available: boolean;
         }> => ipcRenderer.invoke(PlatformChannels.OmnicodeConsoleAdoptionCheck),

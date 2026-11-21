@@ -29,8 +29,10 @@ import {
   sendOmnicodeInstanceCommand,
 } from "./instanceBridgeServer.js";
 import {
+  arrangeOmnicodeInstances,
   launchAllOmnicodeProfiles,
   listOmnicodeRunningInstances,
+  restoreOmnicodeInstances,
   stopAllOmnicodeInstances,
   subscribeOmnicodeRunningStateChanges,
 } from "./instanceManager.js";
@@ -65,6 +67,10 @@ export function buildOmnicodeTraySectionModel(input: {
   launchAllEnabled: boolean;
   stopAllLabel: string;
   stopAllEnabled: boolean;
+  // [OmniCode] 新功能批次（2026-11-21 审计会话）：托盘快捷编排标签（平铺/还原全部
+  // ——与网格工具栏同款 instanceManager 动作；仅未停靠运行实例参与）
+  arrangeAllLabel: string;
+  restoreAllLabel: string;
 } {
   return {
     instanceItems: input.instances.map((entry) => ({
@@ -75,6 +81,8 @@ export function buildOmnicodeTraySectionModel(input: {
     launchAllEnabled: input.instances.length < input.profileCount,
     stopAllLabel: input.isZh ? "停止全部" : "Stop all",
     stopAllEnabled: input.instances.length > 0,
+    arrangeAllLabel: input.isZh ? "平铺全部窗口" : "Arrange all windows",
+    restoreAllLabel: input.isZh ? "还原窗口位置" : "Restore window positions",
   };
 }
 
@@ -198,6 +206,25 @@ export function buildOmnicodeTrayMenuSection(): MenuItemConstructorOptions[] {
         void stopAllOmnicodeInstances().catch((error: unknown) => {
           console.warn("[omnicode] 托盘「停止全部」失败:", error);
         });
+      },
+    },
+    // [OmniCode] 新功能批次：托盘快捷编排（平铺/还原；无未停靠运行实例时 arrange 侧
+    // 置灰、restore 保持可点——restore 语义是"编排后回基线"，有无目标由实例侧判定）
+    {
+      label: model.arrangeAllLabel,
+      enabled: model.stopAllEnabled,
+      click: () => {
+        if (arrangeOmnicodeInstances().delivered.length === 0) {
+          console.warn("[omnicode] 托盘「平铺全部」无未停靠运行实例可投递");
+        }
+      },
+    },
+    {
+      label: model.restoreAllLabel,
+      click: () => {
+        if (restoreOmnicodeInstances().delivered.length === 0) {
+          console.warn("[omnicode] 托盘「还原窗口」无未停靠运行实例可投递");
+        }
       },
     },
     { type: "separator" },

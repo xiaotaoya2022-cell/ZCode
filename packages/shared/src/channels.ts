@@ -103,6 +103,10 @@ import type {
   OmnicodeTakeoverConfirmPayload,
   OmnicodeTakeoverSubmitResult,
   OmnicodeTakeoverRequestInput,
+  OmnicodeWorkspaceLockSummaryEntry,
+  OmnicodeCredentialBackupNowResult,
+  OmnicodeSessionDbStatus,
+  OmnicodeSessionDbBackupResult,
   OpenInEditorOptions,
   PostUpdateReleaseNotesPayload,
   RemoteSessionClosedEvent,
@@ -299,6 +303,13 @@ export const PlatformChannels = {
   OmnicodeTakeoverEvent: "zcode:omnicode-takeover-event",
   // Main → Renderer（持有者侧确认请求事件）：转发桥下行 takeoverRequest
   OmnicodeTakeoverConfirm: "zcode:omnicode-takeover-confirm",
+  // [OmniCode] 新功能批次（2026-11-21 审计会话）：管理器维护面——锁占用总览只读快照 +
+  // 凭据立即备份/打开备份目录 + 会话库体检/备份（仅管理器进程装配 handler）
+  OmnicodeWorkspaceLocksList: "zcode:omnicode-workspace-locks-list",
+  OmnicodeCredentialBackupNow: "zcode:omnicode-credential-backup-now",
+  OmnicodeCredentialBackupsOpen: "zcode:omnicode-credential-backups-open",
+  OmnicodeSessionDbStatusGet: "zcode:omnicode-session-db-status-get",
+  OmnicodeSessionDbBackupNow: "zcode:omnicode-session-db-backup-now",
   // [OmniCode] 实例元数据批次：Main → Renderer（实例进程）改名热更新——实例 main 经桥
   // rename 命令收到新标题后广播；preload 直写 document.title（原生标题经
   // page-title-updated 默认链路对齐同一字符串，win.setTitle 同值双保险）。
@@ -1044,6 +1055,27 @@ export interface PlatformChannelMap {
   [PlatformChannels.OmnicodeTakeoverConfirm]: {
     request: OmnicodeTakeoverConfirmPayload;
     response: void;
+  };
+  // [OmniCode] 新功能批次：管理器维护面（锁总览/凭据备份/会话库体检）
+  [PlatformChannels.OmnicodeWorkspaceLocksList]: {
+    request: void;
+    response: OmnicodeWorkspaceLockSummaryEntry[];
+  };
+  [PlatformChannels.OmnicodeCredentialBackupNow]: {
+    request: void;
+    response: OmnicodeCredentialBackupNowResult;
+  };
+  [PlatformChannels.OmnicodeCredentialBackupsOpen]: {
+    request: void;
+    response: { ok: boolean };
+  };
+  [PlatformChannels.OmnicodeSessionDbStatusGet]: {
+    request: void;
+    response: OmnicodeSessionDbStatus;
+  };
+  [PlatformChannels.OmnicodeSessionDbBackupNow]: {
+    request: void;
+    response: OmnicodeSessionDbBackupResult;
   };
   [PlatformChannels.OmnicodeProfileFocus]: {
     request: { id: string };

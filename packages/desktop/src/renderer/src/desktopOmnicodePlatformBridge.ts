@@ -28,6 +28,10 @@ import type {
   OmnicodeTakeoverRequestInput,
   OmnicodeTakeoverCancelInput,
   OmnicodeTakeoverDecideInput,
+  OmnicodeWorkspaceLockSummaryEntry,
+  OmnicodeCredentialBackupNowResult,
+  OmnicodeSessionDbStatus,
+  OmnicodeSessionDbBackupResult,
 } from "@zcode/shared";
 
 function requireBridge<T>(result: Promise<T> | undefined): Promise<T> {
@@ -153,4 +157,15 @@ export const desktopOmnicodePlatformBridge = {
   onOmnicodeTakeoverConfirm: (
     handler: (payload: OmnicodeTakeoverConfirmPayload) => void,
   ): (() => void) => window.zcode.onOmnicodeTakeoverConfirm?.(handler) ?? (() => {}),
+  // [OmniCode] 新功能批次（2026-11-21 审计会话）：管理器维护面（缺席=旧 preload——UI 隐藏入口）
+  listOmnicodeWorkspaceLocks: (): Promise<OmnicodeWorkspaceLockSummaryEntry[]> =>
+    requireBridge(window.zcode.listOmnicodeWorkspaceLocks?.()),
+  backupOmnicodeCredentialsNow: (): Promise<OmnicodeCredentialBackupNowResult> =>
+    requireBridge(window.zcode.backupOmnicodeCredentialsNow?.()),
+  openOmnicodeCredentialBackupsFolder: (): Promise<{ ok: boolean }> =>
+    requireBridge(window.zcode.openOmnicodeCredentialBackupsFolder?.()),
+  getOmnicodeSessionDbStatus: (): Promise<OmnicodeSessionDbStatus> =>
+    requireBridge(window.zcode.getOmnicodeSessionDbStatus?.()),
+  backupOmnicodeSessionDbNow: (): Promise<OmnicodeSessionDbBackupResult> =>
+    requireBridge(window.zcode.backupOmnicodeSessionDbNow?.()),
 };

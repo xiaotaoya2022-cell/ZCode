@@ -594,6 +594,46 @@ export interface OmnicodeTakeoverDecideInput {
 }
 
 /**
+ * [OmniCode] 新功能批次（2026-11-21 审计会话）：工作区锁占用总览条目（管理器只读快照，
+ * 数据源=listWorkspaceLocks——过期锁在读取时自愈删除，条目恒为活跃持有）。
+ */
+export interface OmnicodeWorkspaceLockSummaryEntry {
+  workspacePath: string;
+  profileId: string;
+  pid: number;
+  /** 持有者实例显示名（锁文件快照；缺省 UI 回退 profileId）。 */
+  displayName?: string;
+}
+
+/** 凭据备份立即执行结果（管理器侧 backupAllOmnicodeCredentials 汇总）。 */
+export interface OmnicodeCredentialBackupNowResult {
+  ok: boolean;
+  /** 成功备份的凭据文件数（ok=false 时为 0）。 */
+  backedUp: number;
+  /** 失败明细（≤5 条，超出截断；ok=true 为空数组）。 */
+  errors: string[];
+}
+
+/** 会话库体检快照（全局共享 db.sqlite 只读 stat；不存在时 exists=false）。 */
+export interface OmnicodeSessionDbStatus {
+  exists: boolean;
+  /** 字节数（exists=false 为 0）。 */
+  sizeBytes: number;
+  /** 最后修改时间 epoch ms（exists=false 为 0）。 */
+  modifiedAt: number;
+  /** 体检时点 epoch ms（UI 计算库龄）。 */
+  checkedAt: number;
+}
+
+/** 会话库手动备份结果（时间戳副本拷贝到 session-db-backups/）。 */
+export interface OmnicodeSessionDbBackupResult {
+  ok: boolean;
+  /** 备份文件绝对路径（ok=false 为空串）。 */
+  backupPath: string;
+  error?: string;
+}
+
+/**
  * [OmniCode] 批次2 B2-3：控制台 UI 状态（管理器持久化 console-ui.json，spec §批次2 D9）。
  * [OmniCode] 批次3 停靠重构：全局 mode（embedded/desktop 二值）退役，改为**每实例停靠态**
  * ——docked=true 停靠（窗口 owned 进卡片画面区）、false 拖出（独立桌面窗口+模糊监控卡片）。
@@ -1571,6 +1611,14 @@ export interface IPlatformService {
   onOmnicodeTakeoverEvent?(handler: (payload: OmnicodeTakeoverEventPayload) => void): () => void;
   /** [OmniCode] D12 接管流：订阅持有者侧确认请求事件，返回 disposer。仅 omnicode 实例 Desktop。 */
   onOmnicodeTakeoverConfirm?(handler: (payload: OmnicodeTakeoverConfirmPayload) => void): () => void;
+  /** [OmniCode] 锁占用总览：全量工作区锁只读快照（管理器；过期锁读取时自愈删除）。仅管理器 Desktop。 */
+  listOmnicodeWorkspaceLocks?(): Promise<OmnicodeWorkspaceLockSummaryEntry[]>;
+  /** [OmniCode] 凭据维护：立即全量备份 + 打开备份目录（管理器）。仅管理器 Desktop。 */
+  backupOmnicodeCredentialsNow?(): Promise<OmnicodeCredentialBackupNowResult>;
+  openOmnicodeCredentialBackupsFolder?(): Promise<{ ok: boolean }>;
+  /** [OmniCode] 会话库体检：全局共享 db.sqlite 只读快照 + 时间戳备份副本。仅管理器 Desktop。 */
+  getOmnicodeSessionDbStatus?(): Promise<OmnicodeSessionDbStatus>;
+  backupOmnicodeSessionDbNow?(): Promise<OmnicodeSessionDbBackupResult>;
   /** [OmniCode] 批次2 B2-1：检测旧控制台数据根是否可收养（存在凭据文件且未被收养）。仅管理器 Desktop。 */
   checkOmnicodeConsoleAdoption?(): Promise<OmnicodeConsoleAdoptionCheckResult>;
   /** [OmniCode] 批次2 B2-1：把旧控制台数据根收养为新实例 profile（零拷贝指向）。仅管理器 Desktop。 */

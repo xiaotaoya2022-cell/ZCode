@@ -363,6 +363,11 @@ export type {
   OmnicodeTakeoverRequestInput,
   OmnicodeTakeoverCancelInput,
   OmnicodeTakeoverDecideInput,
+  // [OmniCode] 新功能批次（2026-11-21 审计会话）：管理器维护面载荷
+  OmnicodeWorkspaceLockSummaryEntry,
+  OmnicodeCredentialBackupNowResult,
+  OmnicodeSessionDbStatus,
+  OmnicodeSessionDbBackupResult,
   // [OmniCode] 批次3：登录态看板 / 赛博鸡蛋数据层（spec: F:\OmniCode\docs\batch3\BATCH3-DESIGN-DISCUSSION.md §2/§3）
   OmnicodeAccountIdentityInfo,
   OmnicodeAccountSessionInfo,

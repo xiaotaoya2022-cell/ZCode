@@ -71,7 +71,9 @@ import {
   setupOmnicodeTakeoverCoordinator,
   type OmnicodeTakeoverLockOwnerView,
 } from "./omnicode/takeoverCoordinator.js";
-import { readWorkspaceLockOwner } from "@zcode/services/node";
+import { listWorkspaceLocks, readWorkspaceLockOwner } from "@zcode/services/node";
+// [OmniCode] 新功能批次（2026-11-21 审计会话）：管理器维护面（锁总览/凭据备份/会话库体检）
+import { registerDesktopOmnicodeConsoleMaintenanceIpcHandlers } from "./omnicode/consoleMaintenance.js";
 import { readOmnicodeLoginHealths } from "./omnicode/loginHealth.js";
 import { readConsoleRootOsMigrationMarker } from "./omnicode/consoleCredentialOsMigration.js";
 import { applyOmnicodePerfPanelState } from "./omnicode/perfMonitor.js";
@@ -200,6 +202,8 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
   // [OmniCode] 批次3：登录态看板数据快照 + 赛博鸡蛋领取执行（数据层，spec:
   // F:\OmniCode\docs\batch3\BATCH3-DESIGN-DISCUSSION.md §2/§3）
   registerDesktopOmnicodeAccountIpcHandlers();
+  // [OmniCode] 新功能批次（2026-11-21 审计会话）：管理器维护面 IPC（锁总览/凭据备份/会话库）
+  registerDesktopOmnicodeConsoleMaintenanceIpcHandlers({ listWorkspaceLocks });
   // [OmniCode] 批次4 单点下沉（spec: docs/omnicode/omnicode-shared-services.md §G3.4）：
   // 管理器共享资产缓存仅 omnicode flavor 装配（官方 flavor 零改动——钩子缺席时桥服务
   // 回结构化错误，实例回退直连）。缓存根懒建：只在首个请求时创建目录。

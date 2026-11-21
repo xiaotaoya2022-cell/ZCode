@@ -181,6 +181,18 @@ declare global {
       onOmnicodeTakeoverConfirm?(
         handler: (payload: import("@zcode/shared").OmnicodeTakeoverConfirmPayload) => void,
       ): () => void;
+      // [OmniCode] 新功能批次（2026-11-21 审计会话）：管理器维护面（仅管理器 preload 暴露）
+      listOmnicodeWorkspaceLocks?(): Promise<
+        import("@zcode/shared").OmnicodeWorkspaceLockSummaryEntry[]
+      >;
+      backupOmnicodeCredentialsNow?(): Promise<
+        import("@zcode/shared").OmnicodeCredentialBackupNowResult
+      >;
+      openOmnicodeCredentialBackupsFolder?(): Promise<{ ok: boolean }>;
+      getOmnicodeSessionDbStatus?(): Promise<import("@zcode/shared").OmnicodeSessionDbStatus>;
+      backupOmnicodeSessionDbNow?(): Promise<
+        import("@zcode/shared").OmnicodeSessionDbBackupResult
+      >;
       /** [OmniCode] 失败态恢复入口：手动粘贴完整 OAuth 回调 URL，main 复用 handleDeepLink 路由 */
       submitOmnicodeCallback?(payload: { url: string }): Promise<{
         ok: boolean;
