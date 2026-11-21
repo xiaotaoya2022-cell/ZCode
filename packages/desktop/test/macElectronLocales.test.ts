@@ -24,8 +24,8 @@ function createPackagedApp(lprojNames: string[]) {
   return resourcesDir;
 }
 
-it("保留下来的 en/zh_CN lproj 通过校验", () => {
-  const resourcesDir = createPackagedApp(["en", "zh_CN"]);
+it("保留下来的 en/zh_CN/ja/ko/ru lproj 通过校验", () => {
+  const resourcesDir = createPackagedApp(["en", "zh_CN", "ja", "ko", "ru"]);
 
   expect(findMissingMacElectronLocales(resourcesDir)).toEqual([]);
 });
@@ -33,7 +33,7 @@ it("保留下来的 en/zh_CN lproj 通过校验", () => {
 it("lproj 被全部删掉时报出缺失的语言包", () => {
   const resourcesDir = createPackagedApp([]);
 
-  expect(findMissingMacElectronLocales(resourcesDir)).toEqual(["en", "zh_CN"]);
+  expect(findMissingMacElectronLocales(resourcesDir)).toEqual(["en", "zh_CN", "ja", "ko", "ru"]);
 });
 
 it("白名单写成 Windows 的 pak 名时同样报缺失", () => {

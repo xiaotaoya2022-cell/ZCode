@@ -12,6 +12,10 @@ import { resolveNativeSearchReleasePlan } from "../../scripts/native-search-tool
 import { getBuildMetadata } from "./scripts/build-metadata.mjs";
 import { collectRuntimeModuleClosureEntries } from "./scripts/runtime-dependency-closure.mjs";
 import {
+  RUNTIME_MODULE_ROOTS,
+  buildRuntimeNodeModulesIncludePatterns,
+} from "./scripts/runtime-node-modules-allowlist.mjs";
+import {
   resolvePackagedNodePtyPrebuildPath,
   restoreTargetNodePtyPrebuild,
 } from "./scripts/node-pty-package-assets.mjs";
@@ -103,64 +107,9 @@ const asarCliPath = resolve(
   "bin",
   "asar.js",
 );
-const REQUIRED_ASAR_RUNTIME_MODULES = [
-  "module-details-from-path",
-  "@opentelemetry/api-logs",
-  // Bugfix: telemetry 的 OTLP exporter 会在启动阶段加载 sdk-metrics。pnpm 开发态可从
-  // workspace 根目录解析，但 electron-builder 不会稳定复制这条 hoisted 依赖，导致安装包启动即崩溃。
-  // 将 sdk-metrics 作为闭包根注入，同时递归带齐它的 OpenTelemetry 运行时依赖。
-  "@opentelemetry/sdk-metrics",
-  // Bugfix：主进程的本地 TTFT / renderer 动作追踪导出器使用 OTLP proto 导出链。pnpm hoisted 布局下
-  // electron-builder 会把 otlp-transformer 打进 app.asar，却漏拷其传递依赖 protobufjs，已安装应用启动即报
-  // Cannot find module protobufjs/minimal（开源侧 3.14.0 arm64 DMG 实测复现）。以两个 proto exporter
-  // 作为闭包根注入，递归带齐 otlp-transformer、protobufjs 与 @protobufjs/* 全链。
-  "@opentelemetry/exporter-trace-otlp-proto",
-  "@opentelemetry/exporter-metrics-otlp-proto",
-  "pngjs",
-  // Bugfix: @arms/rum-core 把 @babel/runtime 声明成 peerDependency，pnpm 安装时可由 peer 解析兜住，
-  // 但 electron-builder 重打 app.asar 时不会因为 @arms/rum-electron 本体进包，就稳定把这个 peer 运行时一起带上。
-  // 线上已出现安装包启动即报 Cannot find module '@babel/runtime/helpers/interopRequireDefault'，
-  // 这里显式把 @babel/runtime 作为闭包根注入，确保 ARMS 主进程埋点链路在生产包内可解析。
-  "@babel/runtime",
-  // Bugfix: @zcode/services 的代理连通性探测会动态 require("undici") 取 ProxyAgent。
-  // tsup 虽然把 services 代码并进了主/host 产物，但不会把这个运行时 require 的包内联进去，
-  // electron-builder 产物又可能漏掉 hoisted 的 undici，最终 mac 安装包启动即报 Cannot find module "undici"。
-  // 这里把 undici 和其他兜底依赖一样强制注入 app.asar，避免用户在已安装应用里主进程直接崩溃。
-  "undici",
-  // node-forge 一直只写在 bundle.mjs 的校验名单里，靠 electron-builder 自己打进 app.asar；
-  // 这与 yauzl 漏 pend 是同一类隐患——校验要求的模块必须有人负责补齐。node-forge 无子依赖，
-  // 已在产物里时 afterPack 扫描会跳过它，不改变现有打包结果。
-  "node-forge",
-  // Main 静态依赖 PKIjs；收集其完整闭包并校验产物，避免 pnpm 去重后漏包。
-  "pkijs",
-  // 2.7.0 起 services 新增反馈日志压缩链路并引入 yazl；2.6.0 没有这条启动期依赖，
-  // pnpm hoisted 布局下 yazl 可能进了 app.asar，但子依赖 buffer-crc32 没有稳定随包进入产物；
-  // 这里显式以 yazl 作为闭包根注入，让递归依赖收集把 ZIP 打包链路所需依赖一起补齐。
-  "yazl",
-  // yauzl 成为 desktop/services 的直接生产依赖后，pnpm list --prod 会把顶层 yauzl 节点
-  // 去重成没有子依赖的空节点；electron-builder 的 pnpm collector 以先登记的空节点为准，
-  // 跳过后面带完整子树的那个，于是 app.asar 里有 yauzl 却没有它的运行时依赖 pend，
-  // 要到 bundle 校验阶段才报「缺少运行时依赖 pend」。这里以 yauzl 作为闭包根注入，
-  // 与 bundle.mjs 的校验名单保持一致，让递归依赖收集把 pend 一起补进产物。
-  "yauzl",
-  // Bugfix: 飞书 SDK 被 desktop main/host 外置后，安装包运行时必须能从 app.asar 解析到它。
-  // 这里显式注入 scoped 包，避免开发态正常、生产包启动时才报 Cannot find module。
-  "@larksuiteoapi/node-sdk",
-  // 生产态里 ssh2 虽然被打进 app.asar，但它的依赖链偶发被 electron-builder 漏拷。
-  // 已出现线上报错 Cannot find module 'asn1'（Require stack: ssh2 keyParser）。
-  // 这里把 ssh2 关键依赖链一起注入，避免远程 SSH 连接在已安装应用里因缺包直接失败。
-  "asn1",
-  "bcrypt-pbkdf",
-  "tweetnacl",
-  // 26.17.0 的 pnpm collector 仍可能漏掉 deduped 传递依赖。以 updater 入口展开完整闭包，
-  // 与现有 afterPack 补齐和最终产物校验共同阻止安装后才暴露 MODULE_NOT_FOUND。
-  "electron-updater",
-  // electron-updater → builder-util-runtime → debug 运行时 require("ms")。
-  // pnpm hoisted 布局下 electron-builder 偶发漏拷这个叶子依赖；3.4.0(ci/cua-v0.3.17 打的)
-  // 已在线上触发安装包启动即报 Cannot find module 'ms'（Require stack: debug/src/common.js），
-  // 自动更新链路直接崩。ms 是叶子包，显式注入即可让 debug 在 app.asar 内稳定解析。
-  "ms",
-];
+// 打包瘦身（2026-11-21）：afterPack 注入名单与 files 白名单共用同一根集合，
+// 证据与维护约定见 scripts/runtime-node-modules-allowlist.mjs。
+const REQUIRED_ASAR_RUNTIME_MODULES = RUNTIME_MODULE_ROOTS;
 // pacman 依赖必须使用 Arch 官方仓库中的包名。electron-builder 的历史默认集合包含
 // 已移除的 libappindicator-gtk3/http-parser，且缺少 Electron 实际需要的运行库；显式
 // 维护最小运行时闭包，避免 pacman -U 无法解析依赖或启动时才暴露缺库。
@@ -273,6 +222,9 @@ const PACKAGING_PRUNE_PATTERNS = [
   "!**/CONTRIBUTING*",
   "!**/CODE_OF_CONDUCT*",
   "!**/SECURITY*",
+  // 打包瘦身（2026-11-21）：tsbuildinfo 是增量编译缓存，任何运行时都不会读取；
+  // out/ 顶层两个 + 随包依赖里的共 ~1.9MB，全部不入包。
+  "!**/*.tsbuildinfo",
   // 26.17 的 pnpm 收集器按 lockfile 全平台图收包，会把纯构建期依赖带进 app.asar
   // （2026-10-26 与 26.8.1 产物 asar 逐包对账 +24MB 未压缩）。以下均已核实零运行时引用：
   // - shadcn 是 @zcode/ui 误声明在生产位的组件脚手架 CLI，连带 @ts-morph/ts-morph、
@@ -280,6 +232,8 @@ const PACKAGING_PRUNE_PATTERNS = [
   // - node-gyp/node-addon-api 是 CUA 原生模块构建工具链；
   // - cpu-features/nan 是 ssh2 的可选原生加速，缺失时 ssh2 自动降级。
   // @babel/runtime 可能被在包库运行时 require，紧随整目录排除后重新包含。
+  // 注意顺序：这批规则整体位于 files 白名单 include 之后（后序模式优先），
+  // 否则白名单 include 会把 shadcn 等重新捞回 app.asar。
   "!node_modules/shadcn/**",
   "!node_modules/@ts-morph/**",
   "!node_modules/ts-morph/**",
@@ -652,8 +606,12 @@ export default {
   // macOS 签名阶段会对 Electron Framework 下每个语言包逐个 codesign。
   // 默认全量语言会产生大量 locale.pak 签名调用，显著拉长打包时长。
   // 这里仅保留当前产品必需语言，减少签名文件数并缩短 CI 总耗时。
+  // 打包瘦身轮（2026-11-21）：Windows/Linux 语言包与 UI locales（en-US/zh-CN/ja-JP/ko-KR/ru-RU）
+  // 对齐——ja/ko/ru 用户的 Chromium 内建 UI（右键菜单/表单控件/播放控件）此前只会回落英文。
+  // 新增 3 个 locale.pak 约 +0.9MB，换 UI 语言一致性；macOS 侧见 mac.electronLanguages 与
+  // assertPackagedMacElectronLocales 的机械校验（名字写错会硬失败，不会静默删光语言包）。
   // builder 按语言包文件名精确匹配：Windows/Linux 是 locales/en-US.pak，macOS 见 mac.electronLanguages。
-  electronLanguages: ["en-US", "zh-CN"],
+  electronLanguages: ["en-US", "zh-CN", "ja-JP", "ko-KR", "ru-RU"],
   // builder 的依赖树推导不稳定；显式读取 package.json，避免开发与安装包版本分叉。
   electronVersion: desktopElectronVersion,
   // 旧 Windows 协议注册可能在应用 JS 重写注册表前注入 --inspect-brk。
@@ -677,10 +635,25 @@ export default {
   files: [
     "out/**/*",
     "package.json",
+    // —— node_modules 运行时白名单（打包瘦身 2026-11-21，约 -244MB 未压缩）——
+    // electron-builder 按生产依赖图收包时会把 @zcode/ui 等构建期 workspace 包的全部
+    // 生产传递依赖（echarts/mermaid/pdfjs-dist/lottie-web/shiki/cytoscape 等约 770 个包）
+    // 也复制进 app.asar；它们只被 vite 打进 out/renderer 的自含产物引用，运行时
+    // （out/main|host|preload|extension-host|scheduler 等）从不加载。改为「排除全部
+    // node_modules + 只重新包含运行时依赖闭包」，闭包根与推导逻辑集中在
+    // scripts/runtime-node-modules-allowlist.mjs（证据链与维护约定见该文件注释）。
+    // 兜底：afterPack 按同一闭包补缺、bundle.mjs 最终机械校验，漏包在打包阶段直接失败。
+    "!node_modules/**",
+    ...buildRuntimeNodeModulesIncludePatterns(runtimeModuleLookupRoots),
+    // —— 白名单之上的统一裁剪（后序模式优先，覆盖上面的 include）——
     // app.asar 会把桌面端运行时 node_modules 一并打进去，依赖包自带的 .map / README
     // 默认也会原样进入安装包。这里统一在主包层做一次裁剪，只移除非运行时文件，LICENSE 继续保留。
     ...PACKAGING_PRUNE_PATTERNS,
+    // 目标平台 native 变体（keyring 其它平台 / canvas / 跨平台 .node）在白名单 include
+    // 之后统一裁剪，避免闭包 include 把非目标平台产物重新带进 app.asar。
     ...createDesktopNativePackagePrunePatterns(targetPlatform.key),
+    // workspace 包本体只做构建期输入，产物（out/）已内联；react/react-dom 仅 renderer
+    // 使用且已打进 out/renderer（保留为显式排除，防止依赖声明变化后被收集器带回）。
     "!node_modules/@zcode/**",
     "!node_modules/react/**",
     "!node_modules/react-dom/**",

@@ -254,8 +254,20 @@ it("files 规则裁剪已核实为构建期的依赖，且保留 @babel/runtime"
   ]) {
     expect(files).toContain(pattern);
   }
+  // 打包瘦身轮（2026-11-21）新增 node_modules 白名单：先整目录排除，再按运行时依赖闭包
+  // 重新包含；白名单内的文件随后仍要被通用裁剪规则（.map/README 等）过滤。
+  const allowlistExclude = files.indexOf("!node_modules/**");
+  const firstAllowlistInclude = files.findIndex((pattern) =>
+    pattern.startsWith("node_modules/"),
+  );
+  const firstGenericPrune = files.indexOf("!**/*.map");
+  expect(allowlistExclude).toBeGreaterThanOrEqual(0);
+  expect(firstAllowlistInclude).toBeGreaterThan(allowlistExclude);
+  expect(firstGenericPrune).toBeGreaterThan(firstAllowlistInclude);
   // @babel/runtime 被部分库运行时 require，重新包含必须晚于整目录排除（后序模式优先）。
-  expect(files.indexOf("node_modules/@babel/runtime/**")).toBeGreaterThan(
+  // 白名单闭包里也会生成一次 runtime re-include，这里校验最后一次出现的 include
+  // 仍然晚于整目录排除，保证最终语义是“包含 runtime、排除其余 @babel/*”。
+  expect(files.lastIndexOf("node_modules/@babel/runtime/**")).toBeGreaterThan(
     files.indexOf("!node_modules/@babel/**"),
   );
 });
