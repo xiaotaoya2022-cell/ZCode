@@ -8816,6 +8816,7 @@ const ruRU: Record<string, string> = {
   "console.maintenance.sessionDbBackupTitle": "Скопировать текущую базу сессий с меткой времени в папку резервных копий менеджера (best-effort снимок активной базы; хранятся последние 10)",
   "console.maintenance.sessionDbBackupDone": "Копия базы сессий создана: {path}",
   "console.maintenance.sessionDbBackupFailed": "Не удалось создать копию базы сессий.",
+  "console.maintenance.actionFailed": "Действие не удалось. Повторите.",
   "console.instanceFilterPlaceholder": "Фильтр экземпляров (имя/№)",
   // [OmniCode] D12 поток перехвата: кнопка баннера наблюдателя + тосты результатов + диалог подтверждения владельца（五語慣例）
   "omnicode.takeover.bannerButton": "Запросить перехват",

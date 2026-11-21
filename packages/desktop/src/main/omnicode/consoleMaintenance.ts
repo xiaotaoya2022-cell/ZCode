@@ -39,15 +39,14 @@ function resolveConsoleCredentialBackupsDir(): string {
 
 async function readSessionDbStatus(): Promise<OmnicodeSessionDbStatus> {
   const dbPath = resolveGlobalSessionDbPath();
-  const checkedAt = Date.now();
   try {
     const info = await stat(dbPath);
     if (!info.isFile()) {
-      return { exists: false, sizeBytes: 0, modifiedAt: 0, checkedAt };
+      return { exists: false, sizeBytes: 0, modifiedAt: 0 };
     }
-    return { exists: true, sizeBytes: info.size, modifiedAt: info.mtimeMs, checkedAt };
+    return { exists: true, sizeBytes: info.size, modifiedAt: info.mtimeMs };
   } catch {
-    return { exists: false, sizeBytes: 0, modifiedAt: 0, checkedAt };
+    return { exists: false, sizeBytes: 0, modifiedAt: 0 };
   }
 }
 
@@ -58,7 +57,12 @@ async function backupSessionDbNow(): Promise<{ ok: boolean; backupPath: string; 
     return { ok: false, backupPath: "", error: "session-db-not-found" };
   }
   const backupsDir = resolveSessionDbBackupsDir();
-  const stamp = new Date().toISOString().replaceAll(":", "").replaceAll("-", "").slice(0, 15);
+  // 审计 R2 P3：本地时间戳含毫秒（db-YYYYMMDDTHHMMSSmmm）——同秒连备不再互相覆盖。
+  const now = new Date();
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  const stamp = `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}T${pad2(
+    now.getHours(),
+  )}${pad2(now.getMinutes())}${pad2(now.getSeconds())}${String(now.getMilliseconds()).padStart(3, "0")}`;
   const target = join(backupsDir, `db-${stamp}.sqlite`);
   try {
     await mkdir(backupsDir, { recursive: true });
@@ -73,7 +77,7 @@ async function backupSessionDbNow(): Promise<{ ok: boolean; backupPath: string; 
 /** 保留最新 N 份（按文件名时间戳排序即按时间），超出删最旧；清理失败不阻塞备份结果。 */
 async function pruneSessionDbBackups(backupsDir: string): Promise<void> {
   const entries = await readdir(backupsDir);
-  const backups = entries.filter((name) => /^db-\d{8}T\d{6}\.sqlite$/.test(name)).sort();
+  const backups = entries.filter((name) => /^db-\d{8}T\d{9}\.sqlite$/.test(name)).sort();
   const excess = backups.slice(0, Math.max(0, backups.length - SESSION_DB_BACKUPS_KEEP));
   for (const name of excess) {
     await rm(join(backupsDir, name), { force: true });

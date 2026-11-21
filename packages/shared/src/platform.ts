@@ -621,8 +621,6 @@ export interface OmnicodeSessionDbStatus {
   sizeBytes: number;
   /** 最后修改时间 epoch ms（exists=false 为 0）。 */
   modifiedAt: number;
-  /** 体检时点 epoch ms（UI 计算库龄）。 */
-  checkedAt: number;
 }
 
 /** 会话库手动备份结果（时间戳副本拷贝到 session-db-backups/）。 */

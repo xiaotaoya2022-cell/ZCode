@@ -8852,6 +8852,7 @@ const jaJP: Record<string, string> = {
   "console.maintenance.sessionDbBackupTitle": "現在のセッション DB のタイムスタンプ付きコピーを管理器バックアップ フォルダーに作成（稼働中 DB のベストエフォートスナップショット、最新 10 件保持）",
   "console.maintenance.sessionDbBackupDone": "セッション DB をバックアップしました：{path}",
   "console.maintenance.sessionDbBackupFailed": "セッション DB のバックアップに失敗しました。",
+  "console.maintenance.actionFailed": "操作に失敗しました。再試行してください。",
   "console.instanceFilterPlaceholder": "インスタンス絞り込み（名前/番号）",
   // [OmniCode] D12 接管流：观察者横幅按钮 + 回执トースト + 保持側確認ダイアログ（五語慣例）
   "omnicode.takeover.bannerButton": "テイクオーバーを要求",

@@ -4008,6 +4008,7 @@ const zhCN: Record<string, string> = {
   "console.maintenance.sessionDbBackupTitle": "复制当前会话库时间戳副本到管理器备份目录（活动库尽力而为快照，保留最新 10 份）",
   "console.maintenance.sessionDbBackupDone": "会话库已备份：{path}",
   "console.maintenance.sessionDbBackupFailed": "会话库备份失败。",
+  "console.maintenance.actionFailed": "操作失败，请重试。",
   "console.instanceFilterPlaceholder": "过滤实例（名称/序号）",
   "console.egg.toastInProgress": "已有一轮领取在进行中",
   "console.egg.autoBadgeTitle": "今日已自动领取 {count} 份",

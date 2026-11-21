@@ -4272,6 +4272,7 @@ const enUS: Record<string, string> = {
   "console.maintenance.sessionDbBackupTitle": "Copy a timestamped snapshot of the session database into the manager backups folder (best-effort copy of a live DB; keeps the latest 10)",
   "console.maintenance.sessionDbBackupDone": "Session DB backed up: {path}",
   "console.maintenance.sessionDbBackupFailed": "Session DB backup failed.",
+  "console.maintenance.actionFailed": "Action failed. Retry.",
   "console.instanceFilterPlaceholder": "Filter instances (name/#seq)",
   "console.egg.toastInProgress": "A claim run is already in progress",
   "console.egg.autoBadgeTitle": "{count} auto-claimed today",

@@ -29,7 +29,7 @@ export function WorkspaceLocksOverview(): React.ReactNode {
       setEntries(result);
     } catch {
       // 读失败保持上次快照（只读面板，失败不打断网格主流程）
-      toast(intl.formatMessage({ id: "console.locksOverview.loadFailed" }), { variant: "default" });
+      toast(intl.formatMessage({ id: "console.locksOverview.loadFailed" }), { variant: "warning" });
     } finally {
       setLoading(false);
     }

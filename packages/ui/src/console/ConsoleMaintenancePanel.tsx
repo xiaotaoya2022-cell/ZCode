@@ -75,6 +75,9 @@ export function ConsoleMaintenancePanel(): React.ReactNode {
           { variant: "warning" },
         );
       }
+    } catch {
+      // 审计 R2 P3：IPC 通道异常（requireBridge 拒绝）不再静默未处理
+      toast(intl.formatMessage({ id: "console.maintenance.actionFailed" }), { variant: "warning" });
     } finally {
       setBusy(null);
     }
@@ -90,6 +93,8 @@ export function ConsoleMaintenancePanel(): React.ReactNode {
           variant: "warning",
         });
       }
+    } catch {
+      toast(intl.formatMessage({ id: "console.maintenance.actionFailed" }), { variant: "warning" });
     } finally {
       setBusy(null);
     }
@@ -113,6 +118,8 @@ export function ConsoleMaintenancePanel(): React.ReactNode {
           { variant: "warning" },
         );
       }
+    } catch {
+      toast(intl.formatMessage({ id: "console.maintenance.actionFailed" }), { variant: "warning" });
     } finally {
       setBusy(null);
     }

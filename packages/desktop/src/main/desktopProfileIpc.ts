@@ -255,29 +255,35 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
   });
   // [OmniCode] D12 接管流协调器装配（桥命令直发 + 锁直读 workspaceLocks 只读原语——
   // 锁核心语义零改动；显示名解析经 Profile 注册表 listOmnicodeProfiles，防伪造）。
-  setupOmnicodeTakeoverCoordinator({
-    readLockOwner: (workspacePath): OmnicodeTakeoverLockOwnerView | undefined => {
-      // 读失败上抛（审计 R1 P2-3）：协调器"读失败→holder-offline"分支负责收口；此前
-      // catch 吞成 undefined 会让协调器误判"无主锁→直接 accepted"，回执语义失真。
-      const owner = readWorkspaceLockOwner(workspacePath);
-      return owner
-        ? {
-            profileId: owner.profileId,
-            ...(owner.displayName ? { displayName: owner.displayName } : {}),
-          }
-        : undefined;
-    },
-    getConnectedProfileIds: () => getOmnicodeConnectedInstanceProfileIds(),
-    sendCommand: (profileId, command) => sendOmnicodeInstanceCommand(profileId, command),
-    resolveProfileDisplayName: async (profileId) => {
-      try {
-        const profiles = await listOmnicodeProfiles();
-        return profiles.find((profile) => profile.id === profileId)?.name ?? null;
-      } catch {
-        return null;
-      }
-    },
-  });
+  // 审计 R1 遗留 1 收口：协调器仅 omnicode flavor 装配（官方 flavor 无桥消息，死装配
+  // 无害但求洁净；实例进程已在函数顶部整体 return）。钩子面照常挂载——internals 缺席
+  // 时 handleOmnicodeTakeover* 全部 no-op，官方零改动语义不变。
+  if (ZCODE_PRODUCT_FLAVOR === "omnicode") {
+    setupOmnicodeTakeoverCoordinator({
+      readLockOwner: (workspacePath): OmnicodeTakeoverLockOwnerView | undefined => {
+        // 读失败上抛（审计 R1 P2-3）：协调器"读失败→holder-offline"分支负责收口；此前
+        // catch 吞成 undefined 会让协调器误判"无主锁→直接 accepted"，回执语义失真。
+        const owner = readWorkspaceLockOwner(workspacePath);
+        return owner
+          ? {
+              profileId: owner.profileId,
+              ...(owner.displayName ? { displayName: owner.displayName } : {}),
+            }
+          : undefined;
+      },
+      getConnectedProfileIds: () => getOmnicodeConnectedInstanceProfileIds(),
+      sendCommand: (profileId, command) => sendOmnicodeInstanceCommand(profileId, command),
+      resolveProfileDisplayName: async (profileId) => {
+        try {
+          const profiles = await listOmnicodeProfiles();
+          return profiles.find((profile) => profile.id === profileId)?.name ?? null;
+        } catch {
+          return null;
+        }
+      },
+    });
+  }
+
   // 装配时初始化持久化模式（窗口引用由 index.ts 在主窗口创建后补挂）
   void setupOmnicodeConsoleEmbedding();
 }
