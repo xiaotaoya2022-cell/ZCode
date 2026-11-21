@@ -109,6 +109,9 @@
     <div id="root"></div>
     <div id="loading" class="[app-region:drag]" role="status" aria-busy="true" aria-label="Loading...">
       <div class="startup-logo-shell">
+        <!-- [OmniCode] omni.5 真机修复（F4-11）：启动壳 logo 双品牌占位——omnicode 域窗口
+            （loadWindow 注入 omnicodeBrand=1）切到 OmniCode 白砖黑标；官方 flavor 保持
+            官方 ZCode SVG（下方 zcode 节点）逐字节原样，切换由下方内联脚本首帧前执行。 -->
         <svg
           xmlns="http://www.w3.org/2000/svg"
           width="118"
@@ -116,6 +119,7 @@
           fill="none"
           viewBox="0 0 256 218"
           class="startup-logo"
+          data-brand="zcode"
           aria-hidden="true"
         >
           <path
@@ -128,9 +132,37 @@
             d="M121.601 217.732L139.65 192.134C142.465 188.166 147.076 185.734 152.067 185.734H249.604V217.736H121.601V217.732Z"
           />
         </svg>
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="56"
+          height="56"
+          fill="none"
+          viewBox="0 0 1024 1024"
+          class="startup-logo"
+          data-brand="omnicode"
+          style="display: none"
+          aria-hidden="true"
+        >
+          <!-- OmniCode 品牌原源：scripts/omnicode/assets/omnicode_concept_01.svg
+              （白圆角方砖 + 黑色门洞剪影；几何与 render-logo.py 同源转录）。 -->
+          <rect x="77" y="77" width="870" height="870" rx="190" fill="#FFFFFF" />
+          <path
+            fill="#080808"
+            fill-rule="evenodd"
+            d="M 278 746 L 278 466 Q 278 386 348 352 L 512 270 L 676 352 Q 746 386 746 466 L 746 746 L 590 746 L 590 466 Q 590 430 554 430 L 470 430 Q 434 430 434 466 L 434 746 Z"
+          />
+        </svg>
       </div>
     </div>
     <script type="module">
+      // [OmniCode] omni.5 真机修复（F4-11）：omnicode 域窗口（loadWindow 注入
+      // omnicodeBrand=1）在首帧前切换启动壳 logo——同步脚本解析期执行，无闪帧。
+      if (new URLSearchParams(window.location.search).get("omnicodeBrand") === "1") {
+        document.querySelector('.startup-logo[data-brand="zcode"]')?.style.setProperty("display", "none");
+        document
+          .querySelector('.startup-logo[data-brand="omnicode"]')
+          ?.style.setProperty("display", "block");
+      }
       const startupLogoShell = document.querySelector(".startup-logo-shell");
       const startupLoading = document.getElementById("loading");
       const isUpdateStatusWindow =

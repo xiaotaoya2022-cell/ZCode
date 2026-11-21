@@ -9,6 +9,10 @@ import zaiLogoUrl from "@/assets/highspeed/zai-logo.png";
 import { Button } from "@/components/ui/button.js";
 import { ZCodeWordmarkLogo } from "@/components/ui/ZCodeAboutLogo.js";
 import {
+  OmniCodeStartupLogo,
+  resolveOmnicodeBrandFromLocation,
+} from "@/root/RootStartupLoading.js";
+import {
   Dialog,
   DialogClose,
   DialogContent,
@@ -74,8 +78,21 @@ export function HighspeedShareNoticeCard({
             data-highspeed-card-background="dark"
           />
           <div className="highspeed-sidebar-share-card__content">
-            <div className="highspeed-sidebar-share-card__title" role="img" aria-label="ZCode">
-              <ZCodeWordmarkLogo className="highspeed-sidebar-share-card__wordmark" />
+            {/* [OmniCode] omni.5 真机修复（F4-11）：侧栏分享卡品牌门控——omnicode 域窗口
+                渲染 OmniCode 剪影（同占位宽度）；官方 flavor 保持 wordmark 零改动。 */}
+            <div
+              className="highspeed-sidebar-share-card__title"
+              role="img"
+              aria-label={resolveOmnicodeBrandFromLocation() ? "OmniCode" : "ZCode"}
+            >
+              {resolveOmnicodeBrandFromLocation() ? (
+                <OmniCodeStartupLogo
+                  className="block h-auto w-7 opacity-60"
+                  animated={false}
+                />
+              ) : (
+                <ZCodeWordmarkLogo className="highspeed-sidebar-share-card__wordmark" />
+              )}
             </div>
             <Button
               type="button"

@@ -335,3 +335,77 @@ Win32 owned window 随 owner 销毁——管理器窗口直接销毁会**连带�
 
 - 纯函数单测：`packages/desktop/test/omnicodeBatch6BackgroundFrame.test.ts`（三档决策全分支 + 优先序 + 间隔常量契约 + framePaused 翻转决策四态），登记 engineering-test-files.json。
 - 已知限制：①被遮挡窗口的帧内容冻结（底座行为，capturePage 拿不到新帧）而非报错；②framePaused 广播依赖实例桥连接，桥断开期间翻转不广播（重连后重报收敛）。
+
+## omni.5 真机验收修复轮（2026-11-21，四 bug + 鸡蛋入口 + 品牌门控）
+
+### F1 装配断链（bug4/bug3 根因）
+
+- **renameOmnicodeProfile 桥映射补齐（bug4）**：实例元数据批次落地时
+  preload/IPC/contract/shared 四层齐全但 `desktopOmnicodePlatformBridge.ts` 逐个枚举时
+  漏装配该方法，UI `platform.renameOmnicodeProfile!` 触发 "not a function" TypeError。
+  修复 = 桥内补 `renameOmnicodeProfile`（与 clone 同 `requireBridge` 模式）。
+- **可选桥方法存在性检查（防御加固）**：`useOmnicodeConsoleInstances` 的
+  launch/stop/clone/remove/rename 五处 `platform.method!` 非空断言统一改为
+  `requireOmnicodeBridgeMethod` 存在性检查——桥装配缺失（官方 flavor/旧 preload/漏装配）
+  时抛 `omnicode.platform-method-unavailable: <name>`，由 runAction 捕获转 toast，
+  不再在 undefined 上裸 crash。
+- **管理器早返回补挂 RootShell（bug3 根因）**：Root.tsx 管理器分支
+  `return <ConsoleHome />` 此前绕过 RootShell → ConfirmDialogHost/AlertDialogHost 等
+  store 驱动对话框无宿主，收养横幅 `requestConfirmation` 永不 resolve（点确认无反应）。
+  修复 = `<RootShell><ConsoleHome /></RootShell>`（与其余早返回分支同语义）。
+  RootShell 职责清单核实：h-dvh 包裹无害（ConsoleHome 自身 min-h-dvh）；
+  ConfirmDialog/AlertDialog/PluginUi 对话宿主需要；PluginUiBackgroundHost 与
+  CuaPermissionObservationAttachment 在管理器无会话=no-op，整壳挂载=与 RootShell
+  演进同步的最小面。
+
+### F2 管理器凭据链（bug1/bug2 根因）
+
+- **host env 透传 ZCODE_CREDENTIAL_SECRET（bug1 根因之一）**：
+  `buildHostProcessEnv` 此前只显式下发 `ZCODE_DATA_BASE_DIR`；现补同门控
+  （dataBaseDir !== homedir()）透传固化凭据密钥——管理器 console 根与 Profile 实例的
+  host 拿到 managed secret，cipher getKey 走 `source="env"` 短路，绕过 OS keyring。
+  官方 flavor（默认 homedir 数据根）不注入，官方 keyring 语义零改动。
+- **console 根 os→env 一次性迁移（bug1 根因之二，"解密失败先备份绝不静默清空"）**：
+  管理器 main 启动 fire-and-forget `runConsoleRootOsCredentialMigration`——
+  ①keyring 探测（`readSystemCredentialKeyringEntry`，与 systemKeyStore 同构造）：
+  条目存在且全部 os: 值可解 → `reWrapOsCredentialValuesWithEnvKey`（shared 纯函数，
+  任一值解不开即整体失败）重加密为 env: + 原子写回 + 内容寻址备份 + 移除
+  credential-source 钉扎标记（任何非 os 标记都会让 keyring 路径 unavailable，解除钉扎
+  后由 managed secret 固定走 env）；②keyring 不可达/条目失配/密文解不开 → os: 密文
+  不可恢复：备份原文件（`.corrupt-<hash>.bak`）+ 落 `credential-os-migration.json`
+  标记（无密钥无明文）+ 管理器首屏琥珀横幅重登引导（新 IPC
+  `OmnicodeConsoleCredentialStateGet`）。live 文件里的 os: 值保持原样，登录新写入因
+  env 密钥已透传落在 env:。
+- **loginHealth unknown 细分（bug2）**：`OmnicodeLoginHealthInfo` 增
+  `unknownReason?: "logged-out" | "unreadable"`——无凭据文件/无 oauth 值=未登录；
+  有凭据但读不出（os: 旧密文/密钥缺失/解密失败/越界）=凭据状态未知；
+  `LoginHealthBadge` 按细分渲染双文案（i18n `console.loginStatusUnknown` zh/en）。
+  管理器读 profile 凭据仍走每数据根 credential-secret 文件路径（X2 设计本意，核实
+  未偏离——readOmnicodeLoginHealthFromDataRoot/readOmnicodeAccountDataFromDataRoot
+  均未使用共享 cipher 服务单例）。
+
+### F3 鸡蛋入口（bug5）
+
+- 浮层零态引导 + 首屏手动检测入口 + 未登录计数显示：详见 console-extras.md X6 修订
+  （零态三态引导条 + 重新检测按钮；missing_jwt 账号计入「N 个实例未登录」）。
+
+### F4 体验与品牌
+
+- **启动/重启按钮 hover 提升（F4-9）**：画面区容器自持命名 hover 组
+  （`group/screen`），停止态按钮 wrapper `opacity-0 group-hover/screen:opacity-100`
+  ——整个黑色画面区 hover 即显示，按钮定位不变；wrapper `pointer-events-none` +
+  按钮 `pointer-events-auto`，点击语义只落按钮本体；resize 手柄（z-10 常驻）在最外
+  6px 仍优先，header 拖拽/双击放大不受影响。
+- **拖拽视觉反馈（F4-10）**：hook 增 `dragActiveId`（激活但无合法落点时被拖卡抬升态
+  仍可见 + 网格 `cursor-not-allowed` 禁用态）；被拖卡抬升 = `scale-[1.03]` + 阴影 +
+  primary ring + opacity-85；插入位置 = primary 实线边 + 同色 ring；pointercancel
+  同样终止视觉态。
+- **品牌门控 logo（F4-11 + 实例窗口追加项）**：omnicode 域窗口（管理器 flavor ∨
+  Profile 实例 env，main 侧 `loadWindow` 统一判据并注入 `omnicodeBrand=1` query；
+  renderer 不自行判 flavor 字符串）渲染 OmniCode 门洞 logo（矢量原源
+  scripts/omnicode/assets/omnicode_concept_01.svg）：HTML 启动壳（双 SVG 占位 + 首帧前
+  内联脚本切换）、RootStartupLoading/WindowsTopLeftLogo/DesktopTopOverlay/
+  OccupationOnboardingVisual（BrandLogoBadge 门控组件）、WelcomeScreen 登录大 logo、
+  侧栏分享卡 wordmark。独立运行的官方 flavor 各挂载点保持 ZCode logo 逐字节零改动。
+  托盘图标与任务栏/窗口 icon 的 build/ 资产此前已替换为 OmniCode 渲染产物
+  （3cc51e2b），本轮无需改动。窗口标题 `ZCode [实例名]` 架构语义暂不动。

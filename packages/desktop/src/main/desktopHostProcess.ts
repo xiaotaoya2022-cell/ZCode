@@ -30,9 +30,11 @@ import {
   type OmnicodeSharedAssetRequest,
   InternalChannels,
   LAUNCH_MARKS_QUERY_KEY,
+  resolveOmnicodeInstanceIdFromEnv,
   RUNTIME_ZCODE_DEBUG,
   serializeLaunchMarks,
   ZCODE_DESKTOP_CONTEXT_PROMPT_ENABLED_ENV,
+  ZCODE_PRODUCT_FLAVOR,
 } from "@zcode/shared";
 import type {
   PluginSandboxHandle,
@@ -142,6 +144,14 @@ export function loadWindow(
       unavailableWorkspacePath: bootstrap?.unavailableWorkspacePath,
       windowKind: bootstrap?.windowKind,
       locale: bootstrap?.locale,
+      // [OmniCode] omni.5 真机修复（F4-11）：HTML 启动壳 logo 品牌门控——omnicode 域
+      // 窗口（管理器 flavor ∨ Profile 实例 env，与 isOmnicodeProfileInstanceEnv 同语义族）
+      // 注入 omnicodeBrand=1，index.html 启动壳据此换 OmniCode logo；官方 flavor 不注入
+      //（启动壳保持官方 ZCode SVG 零改动）。判据在 main 统一计算，renderer 不自行判。
+      ...(ZCODE_PRODUCT_FLAVOR === "omnicode" ||
+      resolveOmnicodeInstanceIdFromEnv(process.env) !== null
+        ? { omnicodeBrand: "1" }
+        : {}),
     }).filter((entry): entry is [string, string] => entry[1] != null),
   );
 

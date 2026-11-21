@@ -75,8 +75,11 @@
   （不走 oauthCredentialRepo / credentialService 的任何读写 API）。
 - 方案 b（桥上报）不需要：解密依赖在管理器进程可用（desktop 已有
   `@zcode/shared/credential-security` 导入先例）。
-- 兼容面：`enc:v2:env:` 与 legacy `enc:v1:` 均可解（legacy 候选密钥表含注入密钥）；
-  收养根的 `enc:v2:os:` 旧密文 source 不匹配 → 解密抛错 → 未知态（如实降级）。
+- 兼容面：`enc:v2:env:` 与 legacy `enc:v1:` 均可解（legacy 候选密钥表含注入密钥）。
+  [OmniCode] omni.5 真机修复（F2-6/bug2）：unknown 细分——数据根无 credentials.json 或
+  无任何 oauth 凭据值 = `unknownReason:"logged-out"`（UI「未登录」）；凭据文件存在但
+  读不出（收养根 `enc:v2:os:` source 不匹配 / 密钥文件缺失 / 解密失败 / 越界）=
+  `unknownReason:"unreadable"`（UI「凭据状态未知」）——不再把"读不出"伪装成"未登录"。
 - **密钥文件空白/长度语义与实例侧 canonical 对齐（R1 P2-2）**：跟随实例侧
   `systemCredentialCipher.resolveManagedSecret` ——原样读取**不 trim**，按
   `Buffer.byteLength` 判界（32..4096 字节）。手工编辑过的密钥文件带尾随空白时，
@@ -135,8 +138,11 @@
 
 1. X1 CPU 列 v1 为 `—`（内存先行）；采样为 tasklist 快照，与任务管理器的瞬时值有秒级偏差。
 2. X1 曲线在面板打开期间从空累积（renderer 侧环形缓冲不跨会话持久化）。
-3. X2 收养根的 `enc:v2:os:` 旧密文无法在管理器侧解密（source 不匹配）→ 未知态；该根实例
-   重新登录一次后即为 env 密文，恢复可见。
+3. X2 收养根的 `enc:v2:os:` 旧密文无法在管理器侧解密（source 不匹配）→ 未知态（omni.5
+   起细分显示为「凭据状态未知」，见 X2 兼容面）；该根实例重新登录一次后即为 env 密文，
+   恢复可见。console 根（管理器自身）的 os: 旧密文由启动期一次性迁移处置：
+   keyring 可达则重加密为 env:（先备份原文件）；不可达则按内容寻址备份 + 落
+   `credential-os-migration.json` 标记，管理器首屏给出明确重登引导横幅（非静默）。
 4. X3 托盘实例项点击的"聚焦卡片"依赖管理器窗口存活；主窗口销毁期间点击只显示/重建主窗口。
 5. X3/X4 与 X1 面板均未做 GUI 运行时实测（本环境无显示），归 omni.4 发版前人工验收清单。
 
@@ -184,6 +190,7 @@
   main 侧逐 profile 串行后经 `aggregateOmnicodeClaimDetection` 汇聚（纯函数，单测锁定），
   邮箱在 main 侧脱敏（`maskOmnicodeAccountEmail`）后才进 IPC 载荷。
 - 触发节奏（红线，无循环重试）：管理器启动一次（浮层挂载拉取）+ 设置分区「手动检测一次」
+  + 浮层零态引导条「重新检测」按钮（omni.5 F3-7 追加，走同一 DetectGet）
   + 自动领取开启时 main 侧 30min 轮询（`claimAutoPoll`，每 tick 重读 console-ui 的
   autoClaimEnabled——开关翻转即时生效；关闭态零网络请求）。
 - 新通道 `OmnicodeAccountDetectGet`（request→response）；自动领取的结果经既有
@@ -191,7 +198,11 @@
 
 ### 浮层交互（对标演示稿 02 节）
 
-- 无蛋/无票空闲态**整个浮层不渲染**（左下角干净无痕）；有可领账号 = 门票叠（每账号一张，
+- [OmniCode] omni.5 真机修复（F3-7，修订上文"无蛋日整个不渲染"）：无蛋/无票空闲态
+  **不再整层静默**——左下角常驻零态引导条（三态按检测实际结果切换：检测中… / 暂无可领
+  额度（可能今日已领或无投放）/ N 个实例未登录——登录实例后可领（F3-8：检测 entries 的
+  missing_jwt 账号计数显示，不静默跳过））+「重新检测」按钮 = **首屏可见**的手动检测入口
+  （不依赖设置页——设置分区「手动检测一次」保留）。有可领账号 = 门票叠（每账号一张，
   4 个错落位钳制 + ×N 角标，hover 散开见各账号——纯 CSS transform，纯函数
   `buildOmnicodeTicketStackLayout` 单测锁定）。
 - 点击门票叠 → `OmnicodeAccountClaimRun(mode manual)`：订阅 ClaimEvent 播逐张动效

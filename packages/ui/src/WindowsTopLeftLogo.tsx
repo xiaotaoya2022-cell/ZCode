@@ -1,5 +1,5 @@
 import { cn } from "@/components/lib/utils.js";
-import { ZCodeStartupLogoBadge } from "@/root/RootStartupLoading.js";
+import { BrandLogoBadge, resolveOmnicodeBrandFromLocation } from "@/root/RootStartupLoading.js";
 
 export function WindowsTopLeftLogo({
   className,
@@ -16,16 +16,18 @@ export function WindowsTopLeftLogo({
         className,
       )}
     >
+      {/* [OmniCode] omni.5 真机修复（F4-11）：标题栏 logo 品牌门控（omnicode 域窗口 →
+          OmniCode 徽标；官方 flavor → ZCode 徽标零改动）。aria-label/testid 语义跟随品牌。 */}
       <span
         role="img"
-        aria-label="ZCode"
+        aria-label={resolveOmnicodeBrandFromLocation() ? "OmniCode" : "ZCode"}
         data-testid="settings-logo"
         className={cn(
           "pointer-events-none flex size-5 items-center justify-center select-none",
           imageClassName,
         )}
       >
-        <ZCodeStartupLogoBadge size="titlebar" animated={false} />
+        <BrandLogoBadge size="titlebar" animated={false} />
       </span>
     </div>
   );

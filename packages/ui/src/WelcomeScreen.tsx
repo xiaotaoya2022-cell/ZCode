@@ -35,6 +35,10 @@ import { Alert, AlertDescription } from "./components/ui/alert.js";
 import { Button } from "./components/ui/button.js";
 import { Input } from "./components/ui/input.js";
 import { ZCodeAboutLogo } from "@/components/ui/ZCodeAboutLogo.js";
+import {
+  OmniCodeStartupLogo,
+  resolveOmnicodeBrandFromLocation,
+} from "@/root/RootStartupLoading.js";
 import { useOAuth } from "./hooks/useOAuth.js";
 import { usePlatform } from "./hooks/usePlatform.js";
 import { useZCodeIntl } from "./i18n/IntlProvider.js";
@@ -876,6 +880,19 @@ function LoginPanelHeader({
 }
 
 function LoginPanelLogo() {
+  // [OmniCode] omni.5 真机修复（F4-11）：欢迎登录页大 logo 品牌门控——omnicode 域窗口
+  //（管理器 + Profile 实例）渲染 OmniCode 白砖黑标；官方 flavor 保持深壳 Z 标零改动。
+  if (resolveOmnicodeBrandFromLocation()) {
+    return (
+      <div
+        className="relative flex size-16 items-center justify-center rounded-2xl bg-[#ffffff] text-[#080808] shadow-lg/20 before:pointer-events-none before:absolute before:inset-0 before:rounded-2xl before:border before:border-black/10"
+        aria-label="OmniCode"
+        role="img"
+      >
+        <OmniCodeStartupLogo className="h-auto w-11" animated={false} />
+      </div>
+    );
+  }
   return (
     // 登录 logo 壳是固定深色底，边框不能跟随浅色主题 token，否则浅色主题下边框过重。
     <div
