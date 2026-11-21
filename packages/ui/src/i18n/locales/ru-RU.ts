@@ -8795,6 +8795,22 @@ const ruRU: Record<string, string> = {
   "console.egg.zeroNoClaim": "Доступных для получения квот нет (возможно, уже получено сегодня или раздачи нет)",
   "console.egg.zeroNeedsLogin": "Не выполнен вход в {count} экземпляр(ах) — после входа можно получить квоту",
   "console.egg.redetect": "Проверить заново",
+  // [OmniCode] D12 поток перехвата: кнопка баннера наблюдателя + тосты результатов + диалог подтверждения владельца（五語慣例）
+  "omnicode.takeover.bannerButton": "Запросить перехват",
+  "omnicode.takeover.bannerPending": "Ожидание ответа…",
+  "omnicode.takeover.requestFailed": "Не удалось отправить запрос перехвата (экземпляр не подключён к менеджеру). Повторите позже.",
+  "omnicode.takeover.acceptedToast": "Перехват принят. Повторно открываем рабочее пространство в режиме редактирования…",
+  "omnicode.takeover.reopenFailed": "Перехват принят, но не удалось повторно открыть {path}. Откройте его вручную.",
+  "omnicode.takeover.deniedToast": "Экземпляр {name} отклонил запрос перехвата.",
+  "omnicode.takeover.timeoutToast": "Экземпляр {name} не ответил на запрос перехвата.",
+  "omnicode.takeover.busyToast": "Владелец обрабатывает другой запрос перехвата. Повторите позже.",
+  "omnicode.takeover.holderOfflineToast": "Экземпляр-владелец не в сети; запрос перехвата доставить не удалось.",
+  "omnicode.takeover.closeFailedToast": "Владелец принял перехват, но не смог закрыть рабочее пространство.",
+  "omnicode.takeover.confirmTitle": "Запрос перехвата рабочего пространства",
+  "omnicode.takeover.confirmDescription":
+    "Экземпляр {name} запрашивает перехват рабочего пространства {path}. При согласии этот экземпляр закроет его и освободит.",
+  "omnicode.takeover.confirmAccept": "Согласиться",
+  "omnicode.takeover.confirmDeny": "Отклонить",
 };
 
 export default ruRU;

@@ -409,3 +409,69 @@ Win32 owned window 随 owner 销毁——管理器窗口直接销毁会**连带�
   侧栏分享卡 wordmark。独立运行的官方 flavor 各挂载点保持 ZCode logo 逐字节零改动。
   托盘图标与任务栏/窗口 icon 的 build/ 资产此前已替换为 OmniCode 渲染产物
   （3cc51e2b），本轮无需改动。窗口标题 `ZCode [实例名]` 架构语义暂不动。
+
+## 批次3 D12：请求接管流（锁体系闭环，2026-11-21 用户批准）
+
+> 状态：实现依据（2026-11-21 接力会话收尾定稿）。D11 自动观察者解决了"被动等待"，D12
+> 补上"主动协商"：观察者可请求持有者让出工作区，全程协商层，锁核心语义零改动。
+
+### 语义（用户批准的闭环）
+
+观察者（D11 自动观察者态打开被占用工作区）→ 琥珀横幅「请求接管」按钮 → 点击：
+1. 观察者实例 → 桥上行 `takeoverRequest {requestId, workspacePath}` → 管理器协调器
+   （requesterProfileId 一律取桥握手已验连接真身，载荷自报身份不参与授权——防伪造；
+   requesterName 以 Profile 注册表解析为准）→ 转投**持有者实例**。
+2. 持有者实例弹应用内确认对话框（与 logout/WSL 确认同风格）：「实例 {name} 请求接管
+   工作区 {path}」同意/拒绝，**30s 超时=默认拒绝**（AbortController 关断对话框 + 自报
+   timeout）；实例 main 侧 45s 渲染层死亡兜底死线。
+3. 同意 → 持有者走既有 tab 关闭链优雅关闭（tabStore.closeTab("user-close") = 草稿/会话
+   自动持久化 + openLocalWorkspaces 写回 → Host 协调器释放锁）→ 有界等待锁实际释放
+   （3s 上限 / 250ms 步长）→ 回执 ack → 管理器通知观察者 → 观察者复用 P1-1 链路
+   （handleSelectProject 成功分支 clearOmnicodeObserver + Normal 打开）以可写身份自动重开。
+4. 拒绝/超时 → 观察者 toast「{holderName} 已拒绝/未响应」；持有者离线/未连桥 → 立即
+   toast「持有者不在线」；同意后关闭失败/锁未释放 → close-failed（等同拒绝带原因）。
+
+### 七态机（transitionOmnicodeTakeover 纯函数，shared/omnicodeTakeover.ts）
+
+状态：`idle → requested → accepted | denied | timeout | holder-offline | cancelled`
+
+| 事件＼状态 | idle | requested | cancelled | 终态槽 |
+| --- | --- | --- | --- | --- |
+| request | →requested | 回 busy（后来者不占槽） | 回 busy | 回 busy |
+| holder-reply | 丢弃 | →accepted/denied/timeout（close-failed 归 denied 带原因） | 静默丢弃（请求方已不等待） | 迟到丢弃 |
+| holder-disconnected | 不变 | →holder-offline（回观察者） | →idle（清槽） | 不变 |
+| deadline（45s） | 不变 | →timeout | →idle | 不变 |
+| cancel（观察者关 tab/断连） | 不变 | →cancelled（槽保留待迟到回执） | 不变 | 不变 |
+| reset | →idle | — | — | →idle（回执后即刻清槽） |
+
+### 边界与红线
+
+- **锁核心语义零改动**：无强制解锁路径；持有者释放锁的唯一途径仍是既有 tab 关闭链。
+- **官方 flavor 零改动**：全部消息只在 omnicode 实例桥链流转；官方进程无桥无观察者态，
+  preload 面板缺席即天然禁用。
+- **不新增常驻轮询**：回执走桥事件推送；唯一等待是持有者关闭后对锁释放的有界一次性确认。
+- **边界处理**：无主锁（持有者已释放）→ 管理器直接回 accepted（重开即拿锁）；请求方=
+  持有者自身 → 防御性丢弃；多观察者并发 → 持有者一次处理一个（后来者 busy）；观察者
+  断连/关 tab → 标记 cancelled，迟到回执静默丢弃；持有者断连 → holder-offline 即时回。
+- **身份绑定**：requesterProfileId=桥连接真身（管理器注入）；requesterName=注册表解析
+  （防伪造名）；holderName=锁占用方快照（toast 插值）。
+
+### 管理器协调器（takeoverCoordinator.ts）
+
+按持有者逐实例维护七态机槽 + 45s 回执死线；锁事实读取经 deps 注入（readWorkspaceLockOwner
+只读原语）；断连对账（持有者断开=holder-offline，观察者断开=标记取消）。
+
+### 实现文件
+
+shared/omnicodeTakeover.ts（状态机+schema）｜main/omnicode/takeoverCoordinator.ts（管理器）｜
+main/omnicode/takeoverInstance.ts（实例 IPC+下行转发）｜ui/root/omnicodeTakeover.ts（纯判定）｜
+ui/root/omnicodeTakeoverRegistry.ts（观察者在途登记表）｜ui/root/useOmnicodeWorkspaceTakeover.ts
+（Root 编排）｜ui/v4/OmnicodeTakeoverBannerAction.tsx（横幅按钮）｜桥上行/下行消息类型接入
+instanceBridgeServer/Client。
+
+### 测试
+
+packages/desktop/test/omnicodeTakeover.test.ts（七态机全迁移 + 桥 schema + 协调器 fake-deps
+装配语义：转投/并发 busy/离线/无主锁 accepted/取消迟到回执丢弃）；
+packages/ui/test/omnicodeTakeoverUi.test.ts（观察者回执呈现/关 tab 取消判定/优雅关闭目标
+tab 判定/锁释放判定 + 登记表 pending 生命周期与重复发起拦截）。

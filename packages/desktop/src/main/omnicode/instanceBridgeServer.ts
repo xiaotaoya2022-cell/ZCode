@@ -54,7 +54,12 @@ export interface OmnicodeInstanceBridgeCommand {
     | "rename"
     // [OmniCode] 批次4 单点下沉：assetFetch 的应答（管理器 → 实例；requestId 关联
     // 实例侧 pending 请求。spec: docs/omnicode/omnicode-shared-services.md §G3.3）。
-    | "assetFetchResult";
+    | "assetFetchResult"
+    // [OmniCode] D12 接管流（spec: docs/omnicode/profile-runtime.md §批次3 D12）：
+    // 转投持有者（载荷已经管理器归一：requesterProfileId=桥连接真身）；
+    // takeoverResult=回执通知观察者（accepted 后观察者复用 P1-1 链路自动重开）。
+    | "takeoverRequest"
+    | "takeoverResult";
   /** arrange 命令的目标矩形（父进程由 workArea 计算后下发）。 */
   bounds?: { x: number; y: number; width: number; height: number };
   /** openWorkspace 命令的工作区目录路径。 */
@@ -71,6 +76,13 @@ export interface OmnicodeInstanceBridgeCommand {
   assetRequestId?: string;
   /** assetFetchResult 命令的结果载荷（ok=false 时实例回退直连）。 */
   assetResult?: { ok: boolean; dataBase64?: string; error?: string };
+  // [OmniCode] D12 接管流：takeoverRequest/takeoverResult 命令载荷（shared schema 校验）。
+  requestId?: string;
+  requesterProfileId?: string;
+  requesterName?: string;
+  outcome?: string;
+  reason?: string;
+  holderName?: string;
 }
 
 /** [OmniCode] 批次4：实例 → 管理器的全局偏好上行消息（reportGlobalPrefs）。 */
@@ -114,6 +126,15 @@ export interface OmnicodeInstanceBridgeManagerHooks {
     profileId: string,
     request: OmnicodeSharedAssetRequest,
   ) => Promise<{ ok: boolean; dataBase64?: string; error?: string }>;
+  // ─── [OmniCode] D12 接管流（spec: docs/omnicode/profile-runtime.md §批次3 D12）───
+  // 三个钩子的首参都是桥握手已验的连接身份（senderProfileId）——请求方/回执方绑定认证
+  // 在这里完成，协调器不信任任何载荷自报身份。
+  /** 观察者上行 takeoverRequest（转投持有者协调）。 */
+  onTakeoverRequestFromInstance?: (profileId: string, message: unknown) => void;
+  /** 持有者上行 takeoverReply（回执转投观察者）。 */
+  onTakeoverReplyFromInstance?: (profileId: string, message: unknown) => void;
+  /** 观察者上行 takeoverCancel（取消在途请求）。 */
+  onTakeoverCancelFromInstance?: (profileId: string, message: unknown) => void;
 }
 
 let managerHooks: OmnicodeInstanceBridgeManagerHooks | null = null;
@@ -306,6 +327,22 @@ export function startOmnicodeInstanceBridgeServer(
                 error: error instanceof Error && error.message ? error.message : "asset_fetch",
               }),
             );
+          return;
+        }
+        // [OmniCode] D12 接管流上行（观察者发起 / 持有者回执 / 观察者取消）。载荷校验与
+        // 授权（连接身份绑定）在协调器内完成；钩子缺席（官方 flavor / 未装配）静默丢弃。
+        if (
+          message.type === "takeoverRequest" ||
+          message.type === "takeoverReply" ||
+          message.type === "takeoverCancel"
+        ) {
+          if (message.type === "takeoverRequest") {
+            void managerHooks?.onTakeoverRequestFromInstance?.(profileIdParam, parsed);
+          } else if (message.type === "takeoverReply") {
+            managerHooks?.onTakeoverReplyFromInstance?.(profileIdParam, parsed);
+          } else {
+            managerHooks?.onTakeoverCancelFromInstance?.(profileIdParam, parsed);
+          }
           return;
         }
       });

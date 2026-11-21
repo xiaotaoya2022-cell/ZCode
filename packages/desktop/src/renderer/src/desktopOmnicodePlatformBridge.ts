@@ -22,6 +22,12 @@ import type {
   OmnicodeProfileRenameInput,
   OmnicodeProfileSummaryInfo,
   OmnicodeConsoleCredentialOsState,
+  OmnicodeTakeoverEventPayload,
+  OmnicodeTakeoverConfirmPayload,
+  OmnicodeTakeoverSubmitResult,
+  OmnicodeTakeoverRequestInput,
+  OmnicodeTakeoverCancelInput,
+  OmnicodeTakeoverDecideInput,
 } from "@zcode/shared";
 
 function requireBridge<T>(result: Promise<T> | undefined): Promise<T> {
@@ -130,4 +136,21 @@ export const desktopOmnicodePlatformBridge = {
   // [OmniCode] omni.5 真机修复（F2-5）：console 根 os: 旧密文迁移状态（无标记=null）
   getOmnicodeConsoleCredentialOsState: (): Promise<OmnicodeConsoleCredentialOsState | null> =>
     window.zcode.getOmnicodeConsoleCredentialOsState?.() ?? Promise.resolve(null),
+  // [OmniCode] D12 接管流（仅 omnicode 实例 preload 暴露；缺席=官方/旧 preload——
+  // 观察者横幅按钮与持有者确认链路据此隐藏，官方零改动铁律）。
+  requestOmnicodeWorkspaceTakeover: (
+    payload: OmnicodeTakeoverRequestInput,
+  ): Promise<OmnicodeTakeoverSubmitResult> =>
+    requireBridge(window.zcode.requestOmnicodeWorkspaceTakeover?.(payload)),
+  cancelOmnicodeWorkspaceTakeover: (payload: OmnicodeTakeoverCancelInput): void => {
+    window.zcode.cancelOmnicodeWorkspaceTakeover?.(payload);
+  },
+  decideOmnicodeWorkspaceTakeover: (payload: OmnicodeTakeoverDecideInput): void => {
+    window.zcode.decideOmnicodeWorkspaceTakeover?.(payload);
+  },
+  onOmnicodeTakeoverEvent: (handler: (payload: OmnicodeTakeoverEventPayload) => void): (() => void) =>
+    window.zcode.onOmnicodeTakeoverEvent?.(handler) ?? (() => {}),
+  onOmnicodeTakeoverConfirm: (
+    handler: (payload: OmnicodeTakeoverConfirmPayload) => void,
+  ): (() => void) => window.zcode.onOmnicodeTakeoverConfirm?.(handler) ?? (() => {}),
 };

@@ -8624,6 +8624,22 @@ const koKR: Record<string, string> = {
   "console.egg.zeroNoClaim": "지금 수령할 수 있는 크레딧이 없습니다(오늘 이미 수령했거나 지급이 없는 것일 수 있습니다)",
   "console.egg.zeroNeedsLogin": "로그인하지 않은 인스턴스가 {count}개 있습니다——로그인하면 수령할 수 있습니다",
   "console.egg.redetect": "다시 확인",
+  // [OmniCode] D12 인수 흐름: 관찰자 배너 버튼 + 결과 토스트 + 보유자 확인 대화상자（五語慣例）
+  "omnicode.takeover.bannerButton": "인수 요청",
+  "omnicode.takeover.bannerPending": "응답 대기 중…",
+  "omnicode.takeover.requestFailed": "인수 요청 전송 실패(인스턴스가 관리자에 연결되지 않음). 나중에 다시 시도하세요.",
+  "omnicode.takeover.acceptedToast": "인수가 승인되었습니다. 워크스페이스를 편집 가능 모드로 다시 여는 중…",
+  "omnicode.takeover.reopenFailed": "인수는 승인되었지만 {path} 다시 열기에 실패했습니다. 수동으로 다시 열어 주세요.",
+  "omnicode.takeover.deniedToast": "인스턴스 {name}이(가) 인수 요청을 거부했습니다.",
+  "omnicode.takeover.timeoutToast": "인스턴스 {name}에서 인수 요청에 응답하지 않았습니다.",
+  "omnicode.takeover.busyToast": "보유자가 다른 인수 요청을 처리 중입니다. 나중에 다시 시도하세요.",
+  "omnicode.takeover.holderOfflineToast": "보유자 인스턴스가 오프라인이어서 인수 요청을 전달할 수 없습니다.",
+  "omnicode.takeover.closeFailedToast": "보유자가 인수를 승인했지만 워크스페이스를 닫지 못했습니다.",
+  "omnicode.takeover.confirmTitle": "워크스페이스 인수 요청",
+  "omnicode.takeover.confirmDescription":
+    "인스턴스 {name}이(가) 워크스페이스 {path}의 인수를 요청했습니다. 승인하면 이 인스턴스는 해당 워크스페이스를 닫고 해제합니다.",
+  "omnicode.takeover.confirmAccept": "승인",
+  "omnicode.takeover.confirmDeny": "거부",
 };
 
 export default koKR;

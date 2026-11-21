@@ -8831,6 +8831,22 @@ const jaJP: Record<string, string> = {
   "console.egg.zeroNoClaim": "現在受け取れる枠はありません（本日分は受取済み、または配布がない可能性があります）",
   "console.egg.zeroNeedsLogin": "未ログインのインスタンスが {count} 件あります——ログインすると受け取れます",
   "console.egg.redetect": "再確認",
+  // [OmniCode] D12 接管流：观察者横幅按钮 + 回执トースト + 保持側確認ダイアログ（五語慣例）
+  "omnicode.takeover.bannerButton": "テイクオーバーを要求",
+  "omnicode.takeover.bannerPending": "応答を待っています…",
+  "omnicode.takeover.requestFailed": "テイクオーバー要求の送信に失敗しました（インスタンスがマネージャーに未接続）。後でもう一度お試しください。",
+  "omnicode.takeover.acceptedToast": "テイクオーバーが承認されました。ワークスペースを編集可能モードで再開しています…",
+  "omnicode.takeover.reopenFailed": "テイクオーバーは承認されましたが、{path} の再オープンに失敗しました。手動で再オープンしてください。",
+  "omnicode.takeover.deniedToast": "インスタンス {name} がテイクオーバー要求を拒否しました。",
+  "omnicode.takeover.timeoutToast": "インスタンス {name} からテイクオーバー要求への応答がありません。",
+  "omnicode.takeover.busyToast": "保持者が別のテイクオーバー要求を処理中です。後でもう一度お試しください。",
+  "omnicode.takeover.holderOfflineToast": "保持者インスタンスがオフラインのため、テイクオーバー要求を転送できません。",
+  "omnicode.takeover.closeFailedToast": "保持者はテイクオーバーを承認しましたが、ワークスペースのクローズに失敗しました。",
+  "omnicode.takeover.confirmTitle": "ワークスペースのテイクオーバー要求",
+  "omnicode.takeover.confirmDescription":
+    "インスタンス {name} がワークスペース {path} のテイクオーバーを要求しています。承認すると、このインスタンスは該当ワークスペースを閉じて解放します。",
+  "omnicode.takeover.confirmAccept": "承認",
+  "omnicode.takeover.confirmDeny": "拒否",
 };
 
 export default jaJP;

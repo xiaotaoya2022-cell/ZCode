@@ -169,6 +169,18 @@ declare global {
       onOmnicodeInstanceEvent?(
         handler: (payload: import("@zcode/shared").OmnicodeInstanceEventPayload) => void,
       ): () => void;
+      // [OmniCode] D12 接管流（仅 omnicode 实例 preload 暴露；管理器/官方缺席即禁用）
+      requestOmnicodeWorkspaceTakeover?(
+        payload: import("@zcode/shared").OmnicodeTakeoverRequestInput,
+      ): Promise<import("@zcode/shared").OmnicodeTakeoverSubmitResult>;
+      cancelOmnicodeWorkspaceTakeover?(payload: import("@zcode/shared").OmnicodeTakeoverCancelInput): void;
+      decideOmnicodeWorkspaceTakeover?(payload: import("@zcode/shared").OmnicodeTakeoverDecideInput): void;
+      onOmnicodeTakeoverEvent?(
+        handler: (payload: import("@zcode/shared").OmnicodeTakeoverEventPayload) => void,
+      ): () => void;
+      onOmnicodeTakeoverConfirm?(
+        handler: (payload: import("@zcode/shared").OmnicodeTakeoverConfirmPayload) => void,
+      ): () => void;
       /** [OmniCode] 失败态恢复入口：手动粘贴完整 OAuth 回调 URL，main 复用 handleDeepLink 路由 */
       submitOmnicodeCallback?(payload: { url: string }): Promise<{
         ok: boolean;

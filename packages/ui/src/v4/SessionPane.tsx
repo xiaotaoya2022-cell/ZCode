@@ -357,6 +357,8 @@ import { useOptionalTabStore } from "@/store/TabStoreProvider.js";
 // [OmniCode] B2-2 观察者横幅：读取观察者 tab 持有者（只读打开，spec §批次2 D8）；
 // B2 评审修复（C5）：展示持有者实例名（displayName 优先，缺省回退 profileId）
 import { findWorkspaceObserverHolder, omnicodeObserverHolderLabel } from "@/store/tabStore.js";
+// [OmniCode] D12 接管流：横幅「请求接管」按钮（registry 发起 + 在途态；spec §批次3 D12）
+import { OmnicodeTakeoverBannerAction } from "@/v4/OmnicodeTakeoverBannerAction.js";
 import { useIsMobileTextInputViewport } from "@/lib/mobileTextInput.js";
 import type {
   OpenPlanDetailSideTabRequest,
@@ -6688,6 +6690,9 @@ export function SessionPane({
                 { name: omnicodeObserverHolderLabel(omnicodeObserverHolder) },
               )}
             </span>
+            {/* [OmniCode] D12 接管流：请求接管按钮（官方 flavor / 管理器 / 旧 preload 桥面
+                缺席时 registry 无处理器 → 隐藏；在途请求禁用防重复发起——管理器侧 busy 兜底） */}
+            <OmnicodeTakeoverBannerAction workspacePath={workspacePath} />
           </div>
         ) : null}
         <ConversationHeader

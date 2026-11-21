@@ -497,6 +497,10 @@ import {
   readLatestOmnicodeProfileDisplayName,
   type WorkspaceLockCoordinator,
 } from "./omnicode/contract.js";
+// [OmniCode] D12 接管流：管理器 main 侧锁占用方查询（桥上行 takeoverRequest 转投持有者
+// 前的锁事实读取；只读原语，锁语义零改动——spec §批次3 D12）。
+export { readWorkspaceLockOwner } from "./omnicode/contract.js";
+export type { WorkspaceLockOwner } from "./omnicode/contract.js";
 import { createCredentialService } from "./credential/credentialService.js";
 import { createBroadcastService } from "./broadcast/broadcastService.js";
 import {

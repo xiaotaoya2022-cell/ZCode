@@ -8,8 +8,11 @@ import { createLocalTtftExporter } from "./localTtftExporter.js";
 // [OmniCode] Profile 实例桥接客户端（spec: docs/omnicode/profile-runtime.md）
 import {
   requestOmnicodeSharedAssetFromManager,
+  sendOmnicodeInstanceBridgeUplink,
   startOmnicodeInstanceBridgeClient,
 } from "./omnicode/instanceBridgeClient.js";
+// [OmniCode] D12 接管流：实例侧 IPC（观察者发起/取消 + 持有者决定；仅实例身份装配）
+import { registerOmnicodeTakeoverInstanceIpcHandlers } from "./omnicode/takeoverInstance.js";
 /* eslint-disable max-lines */
 // [OmniCode] Profile 实例身份引导：必须先于一切早期 bootstrap（spec: docs/omnicode/profile-runtime.md）
 import "./omnicode/profileBootstrap.js";
@@ -3098,6 +3101,11 @@ app.whenReady().then(async () => {
   }
   // [OmniCode] Profile 实例回连控制台桥接（仅实例身份启动时激活；控制台/官方身份为 no-op）
   startOmnicodeInstanceBridgeClient();
+  // [OmniCode] D12 接管流：实例侧接管 IPC（观察者发起/取消 + 持有者决定；仅实例身份
+  // 装配——管理器/官方 flavor 的 renderer 桥面不含这些方法，消费面缺席即天然禁用）
+  if (isOmnicodeProfileInstanceEnv()) {
+    registerOmnicodeTakeoverInstanceIpcHandlers(sendOmnicodeInstanceBridgeUplink);
+  }
   // [OmniCode] 批次2 B2-1（T2）：实例进程自带数据根的凭据备份调度（管理器关闭后实例
   // 独立存活的兜底；管理器的全量调度器不随 T3 门控丢实例侧覆盖）
   if (isOmnicodeProfileInstanceEnv()) {

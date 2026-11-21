@@ -108,6 +108,35 @@ export {
   resolveOmnicodeAssetsCacheEviction,
 } from "./omnicodeSharedAssets.js";
 export type { OmnicodeSharedAssetKind, OmnicodeSharedAssetRequest } from "./omnicodeSharedAssets.js";
+// [OmniCode] D12 请求接管流：七态状态机 + 桥命令 schema（spec:
+// docs/omnicode/profile-runtime.md §批次3 D12）
+export {
+  OMNICODE_TAKEOVER_HOLDER_DECISION_TIMEOUT_MS,
+  OMNICODE_TAKEOVER_LOCK_RELEASE_POLL_MS,
+  OMNICODE_TAKEOVER_LOCK_RELEASE_WAIT_MS,
+  OMNICODE_TAKEOVER_MANAGER_REPLY_DEADLINE_MS,
+  OMNICODE_TAKEOVER_OUTCOMES,
+  omnicodeTakeoverCancelMessageSchema,
+  omnicodeTakeoverForwardCommandSchema,
+  omnicodeTakeoverOutcomeSchema,
+  omnicodeTakeoverReplyMessageSchema,
+  omnicodeTakeoverRequestMessageSchema,
+  omnicodeTakeoverResultCommandSchema,
+  transitionOmnicodeTakeover,
+} from "./omnicodeTakeover.js";
+export type {
+  OmnicodeTakeoverCancelMessage,
+  OmnicodeTakeoverForwardCommand,
+  OmnicodeTakeoverMachineEvent,
+  OmnicodeTakeoverMachineState,
+  OmnicodeTakeoverMachineStatus,
+  OmnicodeTakeoverMachineTransition,
+  OmnicodeTakeoverOutcome,
+  OmnicodeTakeoverPendingRequest,
+  OmnicodeTakeoverReplyMessage,
+  OmnicodeTakeoverRequestMessage,
+  OmnicodeTakeoverResultCommand,
+} from "./omnicodeTakeover.js";
 export { ZCODE_VERSION, ZCODE_COMMIT, ZCODE_BUILD_TIME } from "./version.js";
 export type { HelloMessage, HelloAckMessage } from "./handshake.js";
 export type { ArmsRumEnv, ZCodeEnv, ZCodeProductFlavor } from "./env.js";
@@ -327,6 +356,13 @@ export type {
   OmnicodePerfPanelStateInput,
   OmnicodePerfEventPayload,
   OmnicodeLoginHealthInfo,
+  // [OmniCode] D12 接管流：renderer ↔ 实例 main 的 IPC 载荷（globals.d.ts/桥/registry 共用）
+  OmnicodeTakeoverEventPayload,
+  OmnicodeTakeoverConfirmPayload,
+  OmnicodeTakeoverSubmitResult,
+  OmnicodeTakeoverRequestInput,
+  OmnicodeTakeoverCancelInput,
+  OmnicodeTakeoverDecideInput,
   // [OmniCode] 批次3：登录态看板 / 赛博鸡蛋数据层（spec: F:\OmniCode\docs\batch3\BATCH3-DESIGN-DISCUSSION.md §2/§3）
   OmnicodeAccountIdentityInfo,
   OmnicodeAccountSessionInfo,

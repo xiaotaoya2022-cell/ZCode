@@ -97,6 +97,7 @@ import { consumeZcodeJwtInvalidRestartMarker } from "@/root/zcodeJwtInvalidResta
 import { useDesktopNativeThemeSync } from "@/root/useDesktopNativeThemeSync.js";
 import { useRootPlatformEffects } from "@/root/useRootPlatformEffects.js";
 import { useRootWorkspaceActions } from "@/root/useRootWorkspaceActions.js";
+import { useOmnicodeWorkspaceTakeover } from "@/root/useOmnicodeWorkspaceTakeover.js";
 import { useBotBroadcastEffects } from "@/root/useBotBroadcastEffects.js";
 import { registerBaseWorkspaceServices } from "@/store/remoteWorkspaceSessionStore.js";
 import type { RootProps } from "@/root/types.js";
@@ -844,6 +845,19 @@ function RootInner({
     },
     [isDesktop, startDraftInWorkspace],
   );
+
+  // [OmniCode] D12 请求接管流（锁体系闭环，spec: docs/omnicode/profile-runtime.md
+  // §批次3 D12）：仅 omnicode 实例进程激活——观察者（横幅按钮/回执 toast/accepted
+  // 自动重开/关 tab 取消上报）与持有者（应用内确认对话框/优雅关闭/回执）编排。
+  // 官方 flavor / 管理器全部 no-op（官方零改动铁律）。
+  useOmnicodeWorkspaceTakeover({
+    intl,
+    platform,
+    services,
+    tabStoreApi,
+    handleSelectProject,
+    tabs,
+  });
 
   const {
     remoteWorkspaceSessions,

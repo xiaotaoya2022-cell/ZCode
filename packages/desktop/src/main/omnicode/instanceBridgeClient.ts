@@ -24,6 +24,7 @@ import {
 } from "./embedLayoutMath.js";
 import { MIN_DESKTOP_WINDOW_WIDTH, MIN_DESKTOP_WINDOW_HEIGHT } from "../desktopWindowSize.js";
 import { handleOmnicodeGlobalPrefsApplyCommand } from "./globalPrefs.js";
+import { handleOmnicodeTakeoverDownlink, clearOmnicodeTakeoverInstanceState } from "./takeoverInstance.js";
 
 export const CAPTURE_INTERVAL_MS = 700; // ≈1.4fps；JPEG q55 单帧约 40-80KB，本地回环无压力
 /** [OmniCode] 后台降载·降帧档：可见但失焦（非活动）时的 capture 间隔（≈0.5fps）。 */
@@ -179,6 +180,25 @@ function releaseEmbed(win: BrowserWindow): void {
 }
 
 function applyCommand(command: { type?: string; bounds?: unknown; path?: unknown; rects?: unknown; prefs?: unknown; sourceInstanceId?: unknown; title?: unknown; assetRequestId?: unknown; assetResult?: unknown }): void {
+  // [OmniCode] D12 接管流：takeoverRequest（转投持有者）/ takeoverResult（回执通知
+  // 观察者）不依赖窗口存在性判断的其余分支——转发前自行校验（shared schema）+ 惰性取
+  // 主窗口（渲染层未就绪的确认请求由管理器死线按 timeout 收口）。
+  if (command.type === "takeoverRequest" || command.type === "takeoverResult") {
+    handleOmnicodeTakeoverDownlink(
+      command,
+      (message) => {
+        const ws = activeReportSocket;
+        if (!ws || ws.readyState !== 1) return false;
+        try {
+          ws.send(JSON.stringify(message));
+          return true;
+        } catch {
+          return false;
+        }
+      },
+    );
+    return;
+  }
   // [OmniCode] 批次4 单点下沉：assetFetch 应答不依赖窗口存在性——按 requestId 关联
   // pending 表（响应到达时在途表必有项，迟到/陌生 requestId 直接丢弃防串扰）。
   if (command.type === "assetFetchResult") {
@@ -493,6 +513,8 @@ export function startOmnicodeInstanceBridgeClient(): void {
         pending.resolve({ ok: false, error: "bridge_disconnected" });
       }
       pendingSharedAssetRequests.clear();
+      // [OmniCode] D12 接管流：断连清持有者在途确认簿记（管理器死线按 timeout 收口）。
+      clearOmnicodeTakeoverInstanceState();
       stopHelloLoop();
       lastReportedHwndHex = null;
       // [OmniCode] 后台降载：停帧广播态随连接复位——重连后下一 tick 按当前档位
@@ -511,6 +533,21 @@ export function startOmnicodeInstanceBridgeClient(): void {
     });
   };
   connect();
+}
+
+/**
+ * [OmniCode] D12 接管流：实例桥上行的稳定发送入口（index.ts 装配接管 IPC 时注入）。
+ * 未回连/发送失败返回 false；与 reportOmnicodeGlobalPrefsToManager 同语义（不重试）。
+ */
+export function sendOmnicodeInstanceBridgeUplink(message: unknown): boolean {
+  const ws = activeReportSocket;
+  if (!ws || ws.readyState !== 1) return false;
+  try {
+    ws.send(JSON.stringify(message));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

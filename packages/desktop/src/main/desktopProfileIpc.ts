@@ -23,6 +23,7 @@ import {
   ensureOmnicodeInstanceBridgeServerStarted,
   getOmnicodeConsoleDataBaseDir,
   getOmnicodeProfileDir,
+  getOmnicodeConnectedInstanceProfileIds,
   resolveOmnicodeAssetsCacheRoot,
   bindOmnicodeGlobalPrefsSourceInstanceId,
   handleOmnicodeGlobalPrefsReportFromInstance,
@@ -61,6 +62,16 @@ import { mergeOmnicodeConsoleUiState } from "./omnicode/consoleUiState.js";
 // 实现文件导入，与 consoleUiState 同款约定——经 contract.ts 不含 trayMenu 导出）。
 import { refreshOmnicodeTrayNameCache } from "./omnicode/trayMenu.js";
 import { setOmnicodeInstanceBridgeManagerHooks } from "./omnicode/instanceBridgeServer.js";
+// [OmniCode] D12 接管流：管理器协调器（观察者→持有者转投 + 回执路由；spec §批次3 D12）
+import {
+  handleOmnicodeTakeoverCancelFromInstance,
+  handleOmnicodeTakeoverInstanceDisconnected,
+  handleOmnicodeTakeoverReplyFromInstance,
+  handleOmnicodeTakeoverRequestFromInstance,
+  setupOmnicodeTakeoverCoordinator,
+  type OmnicodeTakeoverLockOwnerView,
+} from "./omnicode/takeoverCoordinator.js";
+import { readWorkspaceLockOwner } from "@zcode/services/node";
 import { readOmnicodeLoginHealths } from "./omnicode/loginHealth.js";
 import { readConsoleRootOsMigrationMarker } from "./omnicode/consoleCredentialOsMigration.js";
 import { applyOmnicodePerfPanelState } from "./omnicode/perfMonitor.js";
@@ -203,7 +214,12 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
       // 长断连实例的收敛兜底；fire-and-forget，spec: docs/omnicode/global-preferences.md）。
       void pushOmnicodeGlobalPrefsSnapshotToInstance(profileId);
     },
-    onInstanceDisconnected: (profileId) => notifyOmnicodeInstanceDisconnected(profileId),
+    onInstanceDisconnected: (profileId) => {
+      notifyOmnicodeInstanceDisconnected(profileId);
+      // [OmniCode] D12 接管流：断连对账——持有者断开 = holder-offline 即时回观察者；
+      // 观察者断开 = 标记取消（持有者回执到达时静默丢弃）。
+      handleOmnicodeTakeoverInstanceDisconnected(profileId);
+    },
     onInstanceHello: (profileId, hwndHex) => notifyOmnicodeInstanceHello(profileId, hwndHex),
     // [OmniCode] 批次4：实例上行全局偏好（载荷已在桥服务侧消毒；协调器内二次消毒 +
     // 管理器写全局层 + state:* 热应用 + 下行广播，spec: docs/omnicode/global-preferences.md）。
@@ -223,6 +239,42 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
             omnicodeSharedAssetsCache.resolve(request),
         }
       : {}),
+    // [OmniCode] D12 接管流：观察者→持有者转投 + 回执路由（身份绑定认证在桥服务侧
+    // 完成——钩子首参 profileId 是桥握手已验连接真身，协调器不信任载荷自报身份）。
+    onTakeoverRequestFromInstance: (profileId, message) => {
+      void handleOmnicodeTakeoverRequestFromInstance(profileId, message);
+    },
+    onTakeoverReplyFromInstance: (profileId, message) =>
+      handleOmnicodeTakeoverReplyFromInstance(profileId, message),
+    onTakeoverCancelFromInstance: (profileId, message) =>
+      handleOmnicodeTakeoverCancelFromInstance(profileId, message),
+  });
+  // [OmniCode] D12 接管流协调器装配（桥命令直发 + 锁直读 workspaceLocks 只读原语——
+  // 锁核心语义零改动；显示名解析经 Profile 注册表 listOmnicodeProfiles，防伪造）。
+  setupOmnicodeTakeoverCoordinator({
+    readLockOwner: (workspacePath): OmnicodeTakeoverLockOwnerView | undefined => {
+      try {
+        const owner = readWorkspaceLockOwner(workspacePath);
+        return owner
+          ? {
+              profileId: owner.profileId,
+              ...(owner.displayName ? { displayName: owner.displayName } : {}),
+            }
+          : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    getConnectedProfileIds: () => getOmnicodeConnectedInstanceProfileIds(),
+    sendCommand: (profileId, command) => sendOmnicodeInstanceCommand(profileId, command),
+    resolveProfileDisplayName: async (profileId) => {
+      try {
+        const profiles = await listOmnicodeProfiles();
+        return profiles.find((profile) => profile.id === profileId)?.name ?? null;
+      } catch {
+        return null;
+      }
+    },
   });
   // 装配时初始化持久化模式（窗口引用由 index.ts 在主窗口创建后补挂）
   void setupOmnicodeConsoleEmbedding();

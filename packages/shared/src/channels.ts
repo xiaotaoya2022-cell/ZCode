@@ -99,6 +99,10 @@ import type {
   OmnicodeAccountDetectResult,
   OmnicodeConsoleCredentialOsState,
   OmnicodeProfileIdInput,
+  OmnicodeTakeoverEventPayload,
+  OmnicodeTakeoverConfirmPayload,
+  OmnicodeTakeoverSubmitResult,
+  OmnicodeTakeoverRequestInput,
   OpenInEditorOptions,
   PostUpdateReleaseNotesPayload,
   RemoteSessionClosedEvent,
@@ -282,6 +286,19 @@ export const PlatformChannels = {
   OmnicodeProfileStop: "zcode:omnicode-profile-stop",
   // [OmniCode] Main → Renderer：实例事件（缩略图帧/连接态）
   OmnicodeInstanceEvent: "zcode:omnicode-instance-event",
+  // [OmniCode] D12 请求接管流（spec: docs/omnicode/profile-runtime.md §批次3 D12）。
+  // 仅 omnicode 实例进程装配（观察者发起/回执 + 持有者确认）；管理器/官方 flavor 的
+  // preload 不暴露这些通道，消费面缺席即天然禁用。
+  // Renderer → Main（观察者发起）：invoke，立即失败（holder-offline/busy/invalid）随响应返回
+  OmnicodeTakeoverRequest: "zcode:omnicode-takeover-request",
+  // Renderer → Main（观察者取消，fire-and-forget）：观察者关掉待接管工作区 tab 时上报
+  OmnicodeTakeoverCancel: "zcode:omnicode-takeover-cancel",
+  // Renderer → Main（持有者决定，fire-and-forget）：确认对话框结论（超时由 renderer 自报）
+  OmnicodeTakeoverDecide: "zcode:omnicode-takeover-decide",
+  // Main → Renderer（观察者侧回执事件）：outcome 全码
+  OmnicodeTakeoverEvent: "zcode:omnicode-takeover-event",
+  // Main → Renderer（持有者侧确认请求事件）：转发桥下行 takeoverRequest
+  OmnicodeTakeoverConfirm: "zcode:omnicode-takeover-confirm",
   // [OmniCode] 实例元数据批次：Main → Renderer（实例进程）改名热更新——实例 main 经桥
   // rename 命令收到新标题后广播；preload 直写 document.title（原生标题经
   // page-title-updated 默认链路对齐同一字符串，win.setTitle 同值双保险）。
@@ -1011,6 +1028,21 @@ export interface PlatformChannelMap {
   // [OmniCode] 实例元数据批次：改名热更新广播（实例 main → 自身 renderer；payload = 新标题）
   [PlatformChannels.OmnicodeInstanceTitleChanged]: {
     request: string;
+    response: void;
+  };
+  // [OmniCode] D12 接管流：观察者发起（立即失败结果随响应返回；pending 结果走事件）
+  [PlatformChannels.OmnicodeTakeoverRequest]: {
+    request: OmnicodeTakeoverRequestInput;
+    response: OmnicodeTakeoverSubmitResult;
+  };
+  // [OmniCode] D12 接管流：观察者回执事件（accepted/denied/timeout/busy/holder-offline/close-failed）
+  [PlatformChannels.OmnicodeTakeoverEvent]: {
+    request: OmnicodeTakeoverEventPayload;
+    response: void;
+  };
+  // [OmniCode] D12 接管流：持有者确认请求事件（桥下行 takeoverRequest 转发）
+  [PlatformChannels.OmnicodeTakeoverConfirm]: {
+    request: OmnicodeTakeoverConfirmPayload;
     response: void;
   };
   [PlatformChannels.OmnicodeProfileFocus]: {

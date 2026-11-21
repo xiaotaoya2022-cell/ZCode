@@ -1,5 +1,6 @@
 /* eslint-disable max-lines -- 跨端 platform contract 集中声明 renderer 能力；OAuth 与 browser lifecycle 必须保持 desktop/web 类型合同，本 MR 不拆分平台边界。 */
 import type { OmnicodeInstanceSortMode } from "./omnicodeInstanceSort.js";
+import type { OmnicodeTakeoverOutcome } from "./omnicodeTakeover.js";
 import type {
   DockerConnectOptions,
   RemoteTarget,
@@ -537,6 +538,59 @@ export interface OmnicodeInstanceEventPayload {
    * 下一帧缩略图到达时消费方也应清除停帧态（兜底，防事件丢失）。
    */
   paused?: boolean;
+}
+
+/**
+ * [OmniCode] D12 请求接管流（spec: docs/omnicode/profile-runtime.md §批次3 D12）。
+ * 观察者发起回执（Main → Renderer，观察者实例）：outcome 全码即七态机结果；
+ * accepted 时观察者复用 P1-1 链路（clearOmnicodeObserver + 正常打开）自动转可写。
+ */
+export interface OmnicodeTakeoverEventPayload {
+  requestId: string;
+  workspacePath: string;
+  outcome: OmnicodeTakeoverOutcome;
+  /** 附加原因（close-failed 的持有者侧关闭失败原因等）。 */
+  reason?: string;
+  /** 持有者显示名（观察者 toast 插值「{holderName} 已拒绝/未响应」）。 */
+  holderName?: string;
+}
+
+/** 持有者确认请求（Main → Renderer，持有者实例）：桥下行 takeoverRequest 转发。 */
+export interface OmnicodeTakeoverConfirmPayload {
+  requestId: string;
+  workspacePath: string;
+  /** 请求方 profileId（管理器按桥连接身份绑定，非请求方自报）。 */
+  requesterProfileId: string;
+  /** 请求方显示名（管理器从 Profile 注册表解析）。 */
+  requesterName: string;
+}
+
+/** 观察者发起接管的入参（renderer → 实例 main → 桥上行；requestId 由 main 生成）。 */
+export interface OmnicodeTakeoverRequestInput {
+  workspacePath: string;
+}
+
+/**
+ * 观察者发起的立即结果：ok=false 时 outcome 为可即时判定的失败码
+ *（holder-offline / busy / invalid）；ok=true 表示已转投持有者，最终结果经
+ * OmnicodeTakeoverEvent 事件回推（不新增轮询）。
+ */
+export interface OmnicodeTakeoverSubmitResult {
+  ok: boolean;
+  requestId?: string;
+  outcome?: OmnicodeTakeoverOutcome;
+}
+
+/** 观察者取消入参（fire-and-forget）：观察者关掉待接管工作区 tab 时上报。 */
+export interface OmnicodeTakeoverCancelInput {
+  requestId: string;
+}
+
+/** 持有者决定入参（fire-and-forget）：reason ∈ timeout/close-failed/user。 */
+export interface OmnicodeTakeoverDecideInput {
+  requestId: string;
+  decision: "accepted" | "denied";
+  reason?: "timeout" | "close-failed" | "user";
 }
 
 /**
@@ -1497,6 +1551,26 @@ export interface IPlatformService {
   onOmnicodeInstanceEvent?(
     handler: (payload: OmnicodeInstanceEventPayload) => void,
   ): () => void;
+  /**
+   * [OmniCode] D12 接管流：观察者实例请求接管被占用工作区（renderer → 实例 main →
+   * 桥上行 → 管理器转投持有者）。立即失败（holder-offline/busy/invalid）随响应返回，
+   * 最终结果经 onOmnicodeTakeoverEvent 事件回推。仅 omnicode 实例 Desktop。
+   */
+  requestOmnicodeWorkspaceTakeover?(input: OmnicodeTakeoverRequestInput): Promise<OmnicodeTakeoverSubmitResult>;
+  /**
+   * [OmniCode] D12 接管流：观察者取消在途接管（fire-and-forget；观察者关掉待接管
+   * 工作区 tab 时上报，持有者回执到达时管理器静默丢弃）。仅 omnicode 实例 Desktop。
+   */
+  cancelOmnicodeWorkspaceTakeover?(input: OmnicodeTakeoverCancelInput): void;
+  /**
+   * [OmniCode] D12 接管流：持有者决定确认请求（fire-and-forget；renderer 侧 30s 超时
+   * 自报 reason=timeout，同意后关闭失败自报 reason=close-failed）。仅 omnicode 实例 Desktop。
+   */
+  decideOmnicodeWorkspaceTakeover?(input: OmnicodeTakeoverDecideInput): void;
+  /** [OmniCode] D12 接管流：订阅观察者侧接管回执事件，返回 disposer。仅 omnicode 实例 Desktop。 */
+  onOmnicodeTakeoverEvent?(handler: (payload: OmnicodeTakeoverEventPayload) => void): () => void;
+  /** [OmniCode] D12 接管流：订阅持有者侧确认请求事件，返回 disposer。仅 omnicode 实例 Desktop。 */
+  onOmnicodeTakeoverConfirm?(handler: (payload: OmnicodeTakeoverConfirmPayload) => void): () => void;
   /** [OmniCode] 批次2 B2-1：检测旧控制台数据根是否可收养（存在凭据文件且未被收养）。仅管理器 Desktop。 */
   checkOmnicodeConsoleAdoption?(): Promise<OmnicodeConsoleAdoptionCheckResult>;
   /** [OmniCode] 批次2 B2-1：把旧控制台数据根收养为新实例 profile（零拷贝指向）。仅管理器 Desktop。 */

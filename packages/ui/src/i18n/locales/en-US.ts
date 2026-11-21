@@ -4275,6 +4275,22 @@ const enUS: Record<string, string> = {
   "omnicode.balance.failure.http": "Service error",
   "omnicode.balance.failure.invalid_response": "Malformed response",
   // [OmniCode] B2-2 workspace lock enforcement + read-only observer mode (spec: docs/omnicode/profile-runtime.md §批次2 D8)
+  // [OmniCode] D12 takeover flow: observer banner button + result toasts + holder confirm dialog
+  "omnicode.takeover.bannerButton": "Request takeover",
+  "omnicode.takeover.bannerPending": "Waiting for response…",
+  "omnicode.takeover.requestFailed": "Failed to send takeover request (instance not connected to the manager). Try again later.",
+  "omnicode.takeover.acceptedToast": "Takeover accepted. Reopening the workspace in editable mode…",
+  "omnicode.takeover.reopenFailed": "Takeover accepted but reopening {path} failed. Please reopen it manually.",
+  "omnicode.takeover.deniedToast": "Instance {name} declined the takeover request.",
+  "omnicode.takeover.timeoutToast": "Instance {name} did not respond to the takeover request.",
+  "omnicode.takeover.busyToast": "The holder is processing another takeover request. Try again later.",
+  "omnicode.takeover.holderOfflineToast": "The holder instance is offline; the takeover request could not be delivered.",
+  "omnicode.takeover.closeFailedToast": "The holder accepted the takeover but failed to close the workspace.",
+  "omnicode.takeover.confirmTitle": "Workspace takeover request",
+  "omnicode.takeover.confirmDescription":
+    "Instance {name} requests takeover of workspace {path}. If accepted, this instance will close the workspace and release it.",
+  "omnicode.takeover.confirmAccept": "Accept",
+  "omnicode.takeover.confirmDeny": "Decline",
   // Review fix (C5): interpolate the instance display name ({name}; falls back to profileId)
   "omnicode.observer.banner":
     "Observer mode (read-only) — this workspace is in use by instance {name}",

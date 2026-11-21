@@ -88,6 +88,8 @@
   "packages/desktop/test/e2eWorkerIsolation.test.ts",
   "packages/desktop/test/electronBuilderLanguages.test.ts",
   "packages/desktop/test/electronBuilderLinuxPackageTargets.test.ts",
+  "packages/desktop/test/omnicodeTakeover.test.ts",
+  "packages/desktop/test/omnicodeAboutBrand.test.ts",
   "packages/desktop/test/electronBuilderSecurity.test.ts",
   "packages/desktop/test/ensureElectronRuntime.test.ts",
   "packages/desktop/test/genUiPresentationClipboard.test.ts",
@@ -188,5 +190,6 @@
   "packages/desktop/test/omnicodeSharedAssetsCache.test.ts",
   "packages/services/test/omnicodeSharedAssetKernel.test.ts",
   "packages/desktop/test/omnicodeOmni5Bugfix.test.ts",
-  "packages/ui/test/omnicodeOmni5BrandLogo.test.tsx"
+  "packages/ui/test/omnicodeOmni5BrandLogo.test.tsx",
+  "packages/ui/test/omnicodeTakeoverUi.test.ts"
 ]

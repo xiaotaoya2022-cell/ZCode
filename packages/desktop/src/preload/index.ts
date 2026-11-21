@@ -135,6 +135,13 @@ import type {
   OmnicodeAccountDetectRequest,
   OmnicodeAccountDetectResult,
   OmnicodeConsoleCredentialOsState,
+  // [OmniCode] D12 接管流（实例侧 IPC 面板；spec: docs/omnicode/profile-runtime.md §批次3 D12）
+  OmnicodeTakeoverEventPayload,
+  OmnicodeTakeoverConfirmPayload,
+  OmnicodeTakeoverSubmitResult,
+  OmnicodeTakeoverRequestInput,
+  OmnicodeTakeoverCancelInput,
+  OmnicodeTakeoverDecideInput,
   SSHConfigAliasOption,
   WebRemoteControlContext,
   WebRemoteControlReconnectWorkspaceRequest,
@@ -513,6 +520,37 @@ contextBridge.exposeInMainWorld("zcode", {
         // [OmniCode] omni.5 真机修复（F2-5）：console 根 os: 迁移状态（重登引导数据源）
         getOmnicodeConsoleCredentialOsState: (): Promise<OmnicodeConsoleCredentialOsState | null> =>
           ipcRenderer.invoke(PlatformChannels.OmnicodeConsoleCredentialStateGet),
+      }
+    : {}),
+  // [OmniCode] D12 接管流：接管协商面仅 omnicode 实例进程暴露（观察者发起/取消 +
+  // 持有者决定/确认事件）。管理器不打开工作区、官方 flavor 无桥——缺席即天然禁用，
+  // 官方零改动铁律（spec: docs/omnicode/profile-runtime.md §批次3 D12）。
+  ...(omnicodeInstanceId !== null
+    ? {
+        requestOmnicodeWorkspaceTakeover: (
+          payload: OmnicodeTakeoverRequestInput,
+        ): Promise<OmnicodeTakeoverSubmitResult> =>
+          ipcRenderer.invoke(PlatformChannels.OmnicodeTakeoverRequest, payload),
+        cancelOmnicodeWorkspaceTakeover: (payload: OmnicodeTakeoverCancelInput): void => {
+          ipcRenderer.send(PlatformChannels.OmnicodeTakeoverCancel, payload);
+        },
+        decideOmnicodeWorkspaceTakeover: (payload: OmnicodeTakeoverDecideInput): void => {
+          ipcRenderer.send(PlatformChannels.OmnicodeTakeoverDecide, payload);
+        },
+        onOmnicodeTakeoverEvent: (callback: (payload: OmnicodeTakeoverEventPayload) => void) => {
+          const handler = (_event: unknown, payload: unknown) =>
+            callback(payload as OmnicodeTakeoverEventPayload);
+          ipcRenderer.on(PlatformChannels.OmnicodeTakeoverEvent, handler);
+          return () => ipcRenderer.removeListener(PlatformChannels.OmnicodeTakeoverEvent, handler);
+        },
+        onOmnicodeTakeoverConfirm: (
+          callback: (payload: OmnicodeTakeoverConfirmPayload) => void,
+        ) => {
+          const handler = (_event: unknown, payload: unknown) =>
+            callback(payload as OmnicodeTakeoverConfirmPayload);
+          ipcRenderer.on(PlatformChannels.OmnicodeTakeoverConfirm, handler);
+          return () => ipcRenderer.removeListener(PlatformChannels.OmnicodeTakeoverConfirm, handler);
+        },
       }
     : {}),
   // [OmniCode] 失败态恢复入口：手动粘贴完整 OAuth 回调 URL，main 复用 handleDeepLink 路由

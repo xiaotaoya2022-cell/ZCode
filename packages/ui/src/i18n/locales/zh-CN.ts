@@ -4011,6 +4011,22 @@ const zhCN: Record<string, string> = {
   "omnicode.balance.failure.http": "服务返回错误",
   "omnicode.balance.failure.invalid_response": "响应格式异常",
   // [OmniCode] B2-2 工作区锁强制 + 只读观察者模式（spec: docs/omnicode/profile-runtime.md §批次2 D8）
+  // [OmniCode] D12 请求接管流：观察者横幅按钮 + 回执 toast + 持有者确认对话框
+  "omnicode.takeover.bannerButton": "请求接管",
+  "omnicode.takeover.bannerPending": "等待响应…",
+  "omnicode.takeover.requestFailed": "接管请求发送失败（实例未连接管理器），请稍后重试。",
+  "omnicode.takeover.acceptedToast": "接管成功，正在以可写模式重新打开工作区…",
+  "omnicode.takeover.reopenFailed": "接管成功但重新打开 {path} 失败，请手动重新打开。",
+  "omnicode.takeover.deniedToast": "实例 {name} 已拒绝接管请求。",
+  "omnicode.takeover.timeoutToast": "实例 {name} 未响应接管请求。",
+  "omnicode.takeover.busyToast": "持有者正在处理其他接管请求，请稍后重试。",
+  "omnicode.takeover.holderOfflineToast": "持有者实例不在线，无法转发接管请求。",
+  "omnicode.takeover.closeFailedToast": "持有者同意接管但关闭工作区失败，接管未完成。",
+  "omnicode.takeover.confirmTitle": "请求接管工作区",
+  "omnicode.takeover.confirmDescription":
+    "实例 {name} 请求接管工作区 {path}。同意后本实例将关闭该工作区并释放占用。",
+  "omnicode.takeover.confirmAccept": "同意",
+  "omnicode.takeover.confirmDeny": "拒绝",
   // B2 评审修复（C5）：插值改为实例名 {name}（锁文件 displayName 优先，缺省回退 profileId）
   "omnicode.observer.banner": "观察者模式（只读）— 该工作区正被实例 {name} 使用",
   "omnicode.observer.readOnlyReason":
