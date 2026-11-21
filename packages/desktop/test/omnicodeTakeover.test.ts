@@ -375,6 +375,38 @@ describe("D12 管理器协调器（fake deps 装配语义）", () => {
     expect(sentTo(REQUESTER)[0]).toMatchObject({ outcome: "holder-offline" });
   });
 
+  it("审计 R1 P2-2 双角色：断连实例既是持有者又是另一槽请求者——两角色各自收敛不早退", async () => {
+    // 槽 1：OTHER_REQUESTER 请求、HOLDER 持有（工作区 A）
+    lockOwner = { profileId: HOLDER, displayName: "持有者实例" };
+    await handleOmnicodeTakeoverRequestFromInstance(OTHER_REQUESTER, {
+      type: "takeoverRequest",
+      requestId: "tk-cccccccc-0000-0000-0000-000000000010",
+      workspacePath: "F:\\work\\a",
+    });
+    // 槽 2：HOLDER 请求、REQUESTER 持有（工作区 B）——HOLDER 同人双角色
+    lockOwner = { profileId: REQUESTER, displayName: "请求者也持有" };
+    const sentBefore = sent.length;
+    await handleOmnicodeTakeoverRequestFromInstance(HOLDER, {
+      type: "takeoverRequest",
+      requestId: "tk-cccccccc-0000-0000-0000-000000000011",
+      workspacePath: "F:\\work\\b",
+    });
+    // 转投 REQUESTER（槽 2 持有者）
+    expect(sent.slice(sentBefore).some((e) => e.profileId === REQUESTER)).toBe(true);
+
+    // HOLDER 断连：作为槽 1 持有者 → OTHER_REQUESTER 收 holder-offline；
+    // 作为槽 2 请求者 → REQUESTER 的槽被标记 cancelled（其迟到回执将被静默丢弃）。
+    handleOmnicodeTakeoverInstanceDisconnected(HOLDER);
+    expect(sentTo(OTHER_REQUESTER).some((c) => c.outcome === "holder-offline")).toBe(true);
+    handleOmnicodeTakeoverReplyFromInstance(REQUESTER, {
+      type: "takeoverReply",
+      requestId: "tk-cccccccc-0000-0000-0000-000000000011",
+      outcome: "accepted",
+    });
+    // cancelled 槽迟到回执：HOLDER 已不等待 → 静默丢弃（无任何下行给 HOLDER）
+    expect(sentTo(HOLDER).every((c) => c.type !== "takeoverResult")).toBe(true);
+  });
+
   it("回执死线 45s：无人回执 → timeout 收口（vi 假时钟推进）", async () => {
     await handleOmnicodeTakeoverRequestFromInstance(REQUESTER, {
       type: "takeoverRequest",

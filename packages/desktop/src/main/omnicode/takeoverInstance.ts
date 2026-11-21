@@ -25,10 +25,16 @@ export type OmnicodeTakeoverUplinkSend = (message: unknown) => boolean;
 const holderPending = new Map<string, NodeJS.Timeout>();
 
 function getInstanceWindowWebContents(): Electron.WebContents | null {
-  // 实例是单主窗口应用（primaryWindowCoordinator 单飞）。
-  const win = BrowserWindow.getAllWindows()[0];
-  if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return null;
-  return win.webContents;
+  // 实例是单主窗口应用（primaryWindowCoordinator 单飞）。审计 R1 P2-4：兜底跳过
+  // data: 协议的辅助窗（如 About 自绘窗口）——主窗口销毁后它可能短暂存活且无接管
+  // 监听，确认事件发给它只会被 45s 兜底死线误收口为 timeout。
+  const win = BrowserWindow.getAllWindows().find(
+    (candidate) =>
+      !candidate.isDestroyed() &&
+      !candidate.webContents.isDestroyed() &&
+      !candidate.webContents.getURL().startsWith("data:"),
+  );
+  return win ? win.webContents : null;
 }
 
 /**

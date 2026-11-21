@@ -46,6 +46,7 @@ import {
 import {
   findDesktopNativePackageViolations,
   createDesktopNativePackagePrunePatterns,
+  isPrunedNativeVariantModule,
   parseAsarListWithPackState,
 } from "./scripts/desktop-native-package-policy.mjs";
 import { replaceAppAsarFromStaging } from "./scripts/app-asar-repack.mjs";
@@ -324,7 +325,13 @@ function resolveMissingRuntimeModules(appAsarPath) {
     REQUIRED_ASAR_RUNTIME_MODULES,
     runtimeModuleLookupRoots,
   );
-  const resolvableRuntimeModules = runtimeModules.filter((entry) => {
+  // 打包瘦身构建实测修复（2026-11-21）：非目标平台 native 变体（keyring 全平台族等）在
+  // files 层已被裁剪，注入阶段必须同口径跳过——否则"裁掉→注回"自相矛盾，native 边界
+  // 校验必挂（首跑实锤）。与 include 生成、bundle 校验共用 isPrunedNativeVariantModule。
+  const injectableRuntimeModules = runtimeModules.filter(
+    (entry) => !isPrunedNativeVariantModule(entry.moduleName, targetPlatform.key),
+  );
+  const resolvableRuntimeModules = injectableRuntimeModules.filter((entry) => {
     if (!entry.sourceModulePath) {
       // 不同平台/安装布局下，部分运行时依赖可能被裁剪或未落到本次打包工作区。
       // 之前这里直接在 copy 阶段抛错会中断整个平台出包；改为记录告警并跳过该模块，
@@ -644,7 +651,7 @@ export default {
     // scripts/runtime-node-modules-allowlist.mjs（证据链与维护约定见该文件注释）。
     // 兜底：afterPack 按同一闭包补缺、bundle.mjs 最终机械校验，漏包在打包阶段直接失败。
     "!node_modules/**",
-    ...buildRuntimeNodeModulesIncludePatterns(runtimeModuleLookupRoots),
+    ...buildRuntimeNodeModulesIncludePatterns(runtimeModuleLookupRoots, targetPlatform.key),
     // —— 白名单之上的统一裁剪（后序模式优先，覆盖上面的 include）——
     // app.asar 会把桌面端运行时 node_modules 一并打进去，依赖包自带的 .map / README
     // 默认也会原样进入安装包。这里统一在主包层做一次裁剪，只移除非运行时文件，LICENSE 继续保留。

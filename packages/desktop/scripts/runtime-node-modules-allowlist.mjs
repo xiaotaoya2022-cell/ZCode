@@ -22,6 +22,7 @@
 // 白名单由闭包推导自动跟随，不需要手改 electron-builder files。
 
 import { collectRuntimeModuleClosure } from "./runtime-dependency-closure.mjs";
+import { isPrunedNativeVariantModule } from "./desktop-native-package-policy.mjs";
 
 // app.asar 必须携带的运行时模块闭包根。以下每一项都有明确的运行时解析证据：
 // —— 优先级：宁多勿漏。闭包展开（dependencies/optionalDependencies 递归）由
@@ -117,12 +118,19 @@ export const RUNTIME_MODULE_ROOTS = [
 // 生成 electron-builder files 的 node_modules 白名单 include 模式。
 // 每个闭包成员映射为 `node_modules/<name>/**`；pnpm hoisted 布局下 electron-builder
 // 会把包平铺进 asar 顶层 node_modules，模式与产物布局一一对应。
-// 目标平台专属的 native 变体（如 @napi-rs/keyring-*、node-pty prebuilds）由
-// createDesktopNativePackagePrunePatterns 在这些 include 之后统一裁剪（后序模式优先）。
-export function buildRuntimeNodeModulesIncludePatterns(moduleLookupRoots) {
+// targetPlatformKey 给定时（构建实测修复 2026-11-21）：闭包经 optionalDependencies 展开
+// 会带上 @napi-rs/keyring 的全部平台变体，这里按 native 裁剪口径直接从 include 里剔除
+// 非目标变体——与 afterPack 注入 / bundle 校验共用 isPrunedNativeVariantModule 同一判定，
+// 避免"files 裁掉→afterPack 注回"的自相矛盾。
+export function buildRuntimeNodeModulesIncludePatterns(moduleLookupRoots, targetPlatformKey) {
   const closureModuleNames = collectRuntimeModuleClosure(
     RUNTIME_MODULE_ROOTS,
     moduleLookupRoots,
   );
-  return closureModuleNames.map((moduleName) => `node_modules/${moduleName}/**`);
+  const filteredModuleNames = targetPlatformKey
+    ? closureModuleNames.filter(
+        (moduleName) => !isPrunedNativeVariantModule(moduleName, targetPlatformKey),
+      )
+    : closureModuleNames;
+  return filteredModuleNames.map((moduleName) => `node_modules/${moduleName}/**`);
 }

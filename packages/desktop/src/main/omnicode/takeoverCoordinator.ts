@@ -285,7 +285,9 @@ export function handleOmnicodeTakeoverCancelFromInstance(
   }
 }
 
-/** 实例断连对账：持有者断开 → holder-offline 回观察者；观察者断开 → 标记取消。 */
+/** 实例断连对账：持有者断开 → holder-offline 回观察者；观察者断开 → 标记取消。
+ * 同一实例可同时是 A 的持有者与 Z 的请求者（审计 R1 P2-2）：持有者槽命中后**不早退**，
+ * 继续请求方取消扫描，两个角色各自收敛。 */
 export function handleOmnicodeTakeoverInstanceDisconnected(profileId: string): void {
   const coordinator = internals;
   if (!coordinator) return;
@@ -299,9 +301,8 @@ export function handleOmnicodeTakeoverInstanceDisconnected(profileId: string): v
     if (transition.replyOutcome && request) {
       notifyRequester(request, transition.replyOutcome, transition.replyReason, log);
     }
-    return;
   }
-  // 该实例不是任何在途请求的持有者：可能是请求方断连 → 标记取消（回执丢弃）。
+  // 请求方断连 → 标记取消（持有者回执到达时静默丢弃）；与上方持有者角色不互斥。
   for (const [holderProfileId, holderState] of coordinator.machineByHolder) {
     if (holderState.request?.requesterProfileId === profileId && holderState.status === "requested") {
       const transition = transitionOmnicodeTakeover(holderState, { type: "cancel" });
@@ -310,8 +311,10 @@ export function handleOmnicodeTakeoverInstanceDisconnected(profileId: string): v
   }
 }
 
-/** 装配（仅管理器进程调用；重复装配替换 deps，状态清零）。 */
+/** 装配（仅管理器进程调用；重复装配替换 deps，状态清零——旧死线计时器一并清理，
+ * 审计 R1 P2-1：此前不清旧 map 计时器，属有界滞留（unref+45s 自灭），仍一并收敛）。 */
 export function setupOmnicodeTakeoverCoordinator(deps: OmnicodeTakeoverManagerDeps): void {
+  resetOmnicodeTakeoverCoordinatorForTest();
   internals = {
     deps,
     machineByHolder: new Map(),

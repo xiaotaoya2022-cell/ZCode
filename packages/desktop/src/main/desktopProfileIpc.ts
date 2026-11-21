@@ -253,17 +253,15 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
   // 锁核心语义零改动；显示名解析经 Profile 注册表 listOmnicodeProfiles，防伪造）。
   setupOmnicodeTakeoverCoordinator({
     readLockOwner: (workspacePath): OmnicodeTakeoverLockOwnerView | undefined => {
-      try {
-        const owner = readWorkspaceLockOwner(workspacePath);
-        return owner
-          ? {
-              profileId: owner.profileId,
-              ...(owner.displayName ? { displayName: owner.displayName } : {}),
-            }
-          : undefined;
-      } catch {
-        return undefined;
-      }
+      // 读失败上抛（审计 R1 P2-3）：协调器"读失败→holder-offline"分支负责收口；此前
+      // catch 吞成 undefined 会让协调器误判"无主锁→直接 accepted"，回执语义失真。
+      const owner = readWorkspaceLockOwner(workspacePath);
+      return owner
+        ? {
+            profileId: owner.profileId,
+            ...(owner.displayName ? { displayName: owner.displayName } : {}),
+          }
+        : undefined;
     },
     getConnectedProfileIds: () => getOmnicodeConnectedInstanceProfileIds(),
     sendCommand: (profileId, command) => sendOmnicodeInstanceCommand(profileId, command),

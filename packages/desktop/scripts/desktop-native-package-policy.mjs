@@ -45,6 +45,33 @@ function assertSupportedTargetPlatformKey(targetPlatformKey) {
   }
 }
 
+/**
+ * 打包瘦身（2026-11-21 构建实测修复）：按模块名判定是否为"被 native 裁剪规则排除的
+ * 非目标变体"。闭包推导（dependencies/optionalDependencies 递归）会把 @napi-rs/keyring
+ * 的全部平台变体展开进白名单——files 层虽被 createDesktopNativePackagePrunePatterns
+ * 裁掉，但 afterPack 补缺注入与 bundle 最终校验按同一闭包工作，会把非目标变体重新
+ * 注回 app.asar（native 边界校验即挂）。本过滤器让 include 生成 / afterPack 注入 /
+ * bundle 校验三处与 files 裁剪保持同一平台口径。
+ */
+export function isPrunedNativeVariantModule(moduleName, targetPlatformKey) {
+  assertSupportedTargetPlatformKey(targetPlatformKey);
+  const keyringVariantMatch = /^@napi-rs\/keyring-[a-z0-9-]+$/.exec(moduleName);
+  if (keyringVariantMatch && moduleName !== keyringPlatformPackage(targetPlatformKey)) {
+    return true;
+  }
+  if (moduleName === "@napi-rs/canvas" || moduleName.startsWith("@napi-rs/canvas-")) {
+    return true;
+  }
+  if (moduleName.startsWith("@lydell/node-pty-")) {
+    return true;
+  }
+  const sharpVariantMatch = /^@img\/(sharp-[a-z0-9-]+)$/.exec(moduleName);
+  if (sharpVariantMatch && !SHARP_VARIANTS_BY_PLATFORM[targetPlatformKey].includes(sharpVariantMatch[1])) {
+    return true;
+  }
+  return false;
+}
+
 export function createDesktopNativePackagePrunePatterns(targetPlatformKey) {
   assertSupportedTargetPlatformKey(targetPlatformKey);
 

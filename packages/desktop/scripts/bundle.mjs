@@ -16,6 +16,7 @@ import { RUNTIME_MODULE_ROOTS } from "./runtime-node-modules-allowlist.mjs";
 import { resolveDesktopProductIdentity } from "./desktop-product-identity.mjs";
 import {
   findDesktopNativePackageViolations,
+  isPrunedNativeVariantModule,
   parseAsarListWithPackState,
 } from "./desktop-native-package-policy.mjs";
 import {
@@ -678,7 +679,12 @@ function verifyPackagedRuntimeDependencies(os, arch) {
     requiredRuntimeModules,
     runtimeModuleLookupRoots,
   );
-  const resolvableRuntimeModules = runtimeModules.filter((entry) => {
+  // 打包瘦身构建实测修复（2026-11-21）：非目标平台 native 变体被 files/afterPack 主动
+  // 裁剪，校验阶段同口径豁免（否则必然误报缺失）。三处共用 isPrunedNativeVariantModule。
+  const targetFilteredRuntimeModules = runtimeModules.filter(
+    (entry) => !isPrunedNativeVariantModule(entry.moduleName, targetPlatformKey),
+  );
+  const resolvableRuntimeModules = targetFilteredRuntimeModules.filter((entry) => {
     if (!entry.sourceModulePath) {
       // afterPack 会按当前平台实际可解析依赖注入；bundle 校验也需保持同口径。
       // 否则在某些 CI 安装布局中会出现“注入阶段已跳过，但校验阶段仍硬失败”的误报。

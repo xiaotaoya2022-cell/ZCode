@@ -201,15 +201,20 @@ export function useOmnicodeWorkspaceTakeover({
         timer.unref?.();
         let confirmed: boolean;
         try {
-          confirmed = await requestConfirmation({
-            title: intlRef.current.formatMessage({ id: "omnicode.takeover.confirmTitle" }),
-            description: intlRef.current.formatMessage(
-              { id: "omnicode.takeover.confirmDescription" },
-              { name: payload.requesterName, path: payload.workspacePath },
-            ),
-            confirmLabel: intlRef.current.formatMessage({ id: "omnicode.takeover.confirmAccept" }),
-            cancelLabel: intlRef.current.formatMessage({ id: "omnicode.takeover.confirmDeny" }),
-          });
+          confirmed = await requestConfirmation(
+            {
+              title: intlRef.current.formatMessage({ id: "omnicode.takeover.confirmTitle" }),
+              description: intlRef.current.formatMessage(
+                { id: "omnicode.takeover.confirmDescription" },
+                { name: payload.requesterName, path: payload.workspacePath },
+              ),
+              confirmLabel: intlRef.current.formatMessage({ id: "omnicode.takeover.confirmAccept" }),
+              cancelLabel: intlRef.current.formatMessage({ id: "omnicode.takeover.confirmDeny" }),
+            },
+            // 30s 超时经 AbortSignal 关断对话框（审计 R1 P1-1：此前漏传 signal，超时后
+            // 对话框滞留、迟到点击被 timedOut 守卫丢弃——与 spec/文件头声明不符）。
+            controller.signal,
+          );
         } finally {
           clearTimeout(timer);
         }

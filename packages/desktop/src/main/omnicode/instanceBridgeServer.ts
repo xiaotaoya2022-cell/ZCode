@@ -289,6 +289,7 @@ export function startOmnicodeInstanceBridgeServer(
           const sourceInstanceId =
             typeof message.sourceInstanceId === "string" ? message.sourceInstanceId : "";
           managerHooks?.onOmnicodeGlobalPrefsReport?.(profileIdParam, prefs, sourceInstanceId);
+          return; // 审计 R1 遗留 2：命中后即收口，免落后续分支判型
         }
         // [OmniCode] 批次4 单点下沉：实例共享资产取回请求。先按 shared 契约校验形态
         //（https 直链/sha256/kind 白名单），再交管理器缓存解析；应答只回请求实例。

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolve } from "node:path";
 import { buildRuntimeNodeModulesIncludePatterns, RUNTIME_MODULE_ROOTS } from "../scripts/runtime-node-modules-allowlist.mjs";
+import { isPrunedNativeVariantModule } from "../scripts/desktop-native-package-policy.mjs";
 
 // 打包瘦身（2026-11-21）白名单的机械回归门：
 // - 运行时闭包根里的每个包都必须生成 include 模式（漏掉会在打包阶段静默丢运行时依赖）；
@@ -53,5 +54,43 @@ describe("runtime node_modules allowlist", () => {
     }
     // scoped 目录也不能整段包含
     expect(patterns).not.toContain("node_modules/@zcode/**");
+  });
+
+  // 打包瘦身构建实测修复（2026-11-21）：targetPlatformKey 过滤让 include 生成 /
+  // afterPack 注入 / bundle 校验与 files 裁剪同一平台口径——首跑实锤"裁掉→注回"矛盾。
+  it("targetPlatformKey 给定时：非目标平台 native 变体被剔除、目标变体保留", () => {
+    const winX64Patterns = buildRuntimeNodeModulesIncludePatterns(
+      [process.cwd(), resolve(process.cwd(), "../..")],
+      "win32-x64",
+    );
+    // keyring 闭包经 optionalDependencies 展开的全平台族
+    expect(winX64Patterns).toContain("node_modules/@napi-rs/keyring/**");
+    expect(winX64Patterns).toContain("node_modules/@napi-rs/keyring-win32-x64-msvc/**");
+    for (const pruned of [
+      "@napi-rs/keyring-win32-arm64-msvc",
+      "@napi-rs/keyring-darwin-arm64",
+      "@napi-rs/keyring-darwin-x64",
+      "@napi-rs/keyring-linux-x64-gnu",
+      "@napi-rs/keyring-linux-arm64-musl",
+      "@napi-rs/keyring-win32-ia32-msvc",
+    ]) {
+      expect(winX64Patterns).not.toContain(`node_modules/${pruned}/**`);
+    }
+    // 不给 targetPlatformKey：保持旧行为（全闭包展开，供闭包诊断用途）
+    expect(patterns).toContain("node_modules/@napi-rs/keyring-win32-x64-msvc/**");
+  });
+
+  it("isPrunedNativeVariantModule：模块名级平台判定（keyring/canvas/node-pty 源包/sharp）", () => {
+    expect(isPrunedNativeVariantModule("@napi-rs/keyring-linux-x64-gnu", "win32-x64")).toBe(true);
+    expect(isPrunedNativeVariantModule("@napi-rs/keyring-win32-x64-msvc", "win32-x64")).toBe(false);
+    expect(isPrunedNativeVariantModule("@napi-rs/keyring", "win32-x64")).toBe(false);
+    expect(isPrunedNativeVariantModule("@napi-rs/canvas", "win32-x64")).toBe(true);
+    expect(isPrunedNativeVariantModule("@napi-rs/canvas-linux-x64-gnu", "win32-x64")).toBe(true);
+    expect(isPrunedNativeVariantModule("@lydell/node-pty-win32-x64", "win32-x64")).toBe(true);
+    expect(isPrunedNativeVariantModule("node-pty", "win32-x64")).toBe(false);
+    expect(isPrunedNativeVariantModule("@img/sharp-darwin-arm64", "win32-x64")).toBe(true);
+    expect(isPrunedNativeVariantModule("@img/sharp-win32-x64", "win32-x64")).toBe(false);
+    expect(isPrunedNativeVariantModule("ws", "win32-x64")).toBe(false);
+    expect(() => isPrunedNativeVariantModule("ws", "plan9-arm")).toThrow();
   });
 });
