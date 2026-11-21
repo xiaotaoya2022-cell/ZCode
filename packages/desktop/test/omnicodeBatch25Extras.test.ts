@@ -781,7 +781,7 @@ describe("omnicode batch2.5 X2: readOmnicodeLoginHealthFromDataRoot (fs + cipher
 
 describe("omnicode batch2.5 X3: trayMenu model (pure)", () => {
   it("buildOmnicodeTraySectionModel：实例项 label / 启停全部可用性与双语", () => {
-    const empty = buildOmnicodeTraySectionModel({ instances: [], profileCount: 3, isZh: true });
+    const empty = buildOmnicodeTraySectionModel({ instances: [], profileCount: 3, isZh: true, arrangeEnabled: false });
     expect(empty.instanceItems).toEqual([]);
     expect(empty.launchAllLabel).toBe("启动全部");
     expect(empty.launchAllEnabled).toBe(true); // 有停止实例（3-0）
@@ -794,6 +794,7 @@ describe("omnicode batch2.5 X3: trayMenu model (pure)", () => {
       ],
       profileCount: 2,
       isZh: false,
+      arrangeEnabled: true,
     });
     expect(running.instanceItems).toEqual([
       { profileId: "pa111111111", label: "● 账号A" },
@@ -808,17 +809,18 @@ describe("omnicode batch2.5 X3: trayMenu model (pure)", () => {
       instances: [{ profileId: "pa111111111", name: "A" }],
       profileCount: 2,
       isZh: true,
+      arrangeEnabled: true,
     });
     expect(partial.launchAllEnabled).toBe(true);
     expect(partial.stopAllEnabled).toBe(true);
   });
 
   it("[R1 P2-3] 0 profile：启动全部与停止全部双双禁用（无操作对象即禁用）", () => {
-    const zero = buildOmnicodeTraySectionModel({ instances: [], profileCount: 0, isZh: true });
+    const zero = buildOmnicodeTraySectionModel({ instances: [], profileCount: 0, isZh: true, arrangeEnabled: false });
     expect(zero.instanceItems).toEqual([]);
     expect(zero.launchAllEnabled).toBe(false); // 0 < 0 不成立 → 禁用（不再 no-op 可点）
     expect(zero.stopAllEnabled).toBe(false);
-    const zeroEn = buildOmnicodeTraySectionModel({ instances: [], profileCount: 0, isZh: false });
+    const zeroEn = buildOmnicodeTraySectionModel({ instances: [], profileCount: 0, isZh: false, arrangeEnabled: false });
     expect(zeroEn.launchAllEnabled).toBe(false);
     expect(zeroEn.stopAllEnabled).toBe(false);
   });
@@ -890,7 +892,9 @@ describe("omnicode batch2.5 X3: trayMenu wiring + debounce", () => {
     expect(items[1]).toEqual({ type: "separator" });
     expect(items[2]).toMatchObject({ label: "启动全部", enabled: true }); // 2 profile 1 running
     expect(items[3]).toMatchObject({ label: "停止全部", enabled: true });
-    expect(items[4]).toMatchObject({ label: "平铺全部窗口", enabled: true });
+    // 审计 R2 P2 真实门控：默认停靠态（dockDefault=true 且无覆盖）下运行实例全停靠
+    // → 平铺无未停靠目标=置灰（此前有运行实例即可点的空操作语义已修正）
+    expect(items[4]).toMatchObject({ label: "平铺全部窗口", enabled: false });
     expect(items[5]).toMatchObject({ label: "还原窗口位置" });
     expect(items[6]).toEqual({ type: "separator" });
     // 点击实例项 = 广播 focusRequested + 桥 focus 命令（spec §X3 聚焦链路）

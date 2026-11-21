@@ -10,10 +10,11 @@ describe("新功能批次：托盘快捷编排模型", () => {
       instances: [{ profileId: "pa", name: "工作" }],
       profileCount: 2,
       isZh: true,
+      arrangeEnabled: true,
     });
     expect(zh.arrangeAllLabel).toBe("平铺全部窗口");
     expect(zh.restoreAllLabel).toBe("还原窗口位置");
-    const en = buildOmnicodeTraySectionModel({ instances: [], profileCount: 0, isZh: false });
+    const en = buildOmnicodeTraySectionModel({ instances: [], profileCount: 0, isZh: false, arrangeEnabled: false });
     expect(en.arrangeAllLabel).toBe("Arrange all windows");
     expect(en.restoreAllLabel).toBe("Restore window positions");
   });
@@ -26,6 +27,7 @@ describe("新功能批次：托盘快捷编排模型", () => {
       ],
       profileCount: 3,
       isZh: true,
+      arrangeEnabled: true,
     });
     expect(model.instanceItems).toEqual([
       { profileId: "pa", label: "● A" },
@@ -33,7 +35,7 @@ describe("新功能批次：托盘快捷编排模型", () => {
     ]);
     expect(model.launchAllEnabled).toBe(true);
     expect(model.stopAllEnabled).toBe(true);
-    const empty = buildOmnicodeTraySectionModel({ instances: [], profileCount: 0, isZh: true });
+    const empty = buildOmnicodeTraySectionModel({ instances: [], profileCount: 0, isZh: true, arrangeEnabled: false });
     expect(empty.launchAllEnabled).toBe(false);
     expect(empty.stopAllEnabled).toBe(false);
   });

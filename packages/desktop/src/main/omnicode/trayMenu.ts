@@ -37,6 +37,7 @@ import {
   subscribeOmnicodeRunningStateChanges,
 } from "./instanceManager.js";
 import { listOmnicodeProfiles } from "./profileRuntime.js";
+import { resolveOmnicodeInstanceDocked } from "@zcode/shared";
 import { readOmnicodeConsoleUiState } from "./consoleUiState.js";
 
 /** 去抖窗口：launch/stop 风暴下每次状态变化只重建一次菜单。 */
@@ -61,6 +62,8 @@ export function buildOmnicodeTraySectionModel(input: {
   instances: readonly OmnicodeTrayInstanceEntry[];
   profileCount: number;
   isZh: boolean;
+  /** 审计 R2 P2：平铺全部的真实门控（有未停靠运行实例；装配方按停靠态缓存计算）。 */
+  arrangeEnabled: boolean;
 }): {
   instanceItems: { profileId: string; label: string }[];
   launchAllLabel: string;
@@ -71,6 +74,8 @@ export function buildOmnicodeTraySectionModel(input: {
   // ——与网格工具栏同款 instanceManager 动作；仅未停靠运行实例参与）
   arrangeAllLabel: string;
   restoreAllLabel: string;
+  /** 平铺全部 enabled（有未停靠运行实例；还原=回基线语义恒可点）。 */
+  arrangeEnabled: boolean;
 } {
   return {
     instanceItems: input.instances.map((entry) => ({
@@ -83,6 +88,7 @@ export function buildOmnicodeTraySectionModel(input: {
     stopAllEnabled: input.instances.length > 0,
     arrangeAllLabel: input.isZh ? "平铺全部窗口" : "Arrange all windows",
     restoreAllLabel: input.isZh ? "还原窗口位置" : "Restore window positions",
+    arrangeEnabled: input.arrangeEnabled,
   };
 }
 
@@ -98,6 +104,12 @@ interface OmnicodeTrayProfileMeta {
 const profileMetaByProfileId = new Map<string, OmnicodeTrayProfileMeta>();
 let cachedSortMode: OmnicodeInstanceSortMode = "seq";
 let cachedCustomOrder: string[] = [];
+// 审计 R2 P2：停靠态缓存（dockDefault+覆盖表）——托盘「平铺全部」enabled 的真实门控
+// （有未停靠运行实例才可平铺；与网格工具栏 undockedRunningCount 同口径）。
+let cachedDockState: { dockDefault: boolean; dockedByProfileId: Record<string, boolean> } = {
+  dockDefault: true,
+  dockedByProfileId: {},
+};
 let rebuildTimer: NodeJS.Timeout | null = null;
 let showConsoleWindow: (() => void) | null = null;
 let isZhReader: (() => boolean) | null = null;
@@ -122,8 +134,12 @@ async function refreshMetaCache(): Promise<void> {
     const state = await readOmnicodeConsoleUiState();
     cachedSortMode = state.sortMode ?? "seq";
     cachedCustomOrder = state.customOrder ?? [];
+    cachedDockState = {
+      dockDefault: state.dockDefault !== false,
+      dockedByProfileId: state.dockedByProfileId ?? {},
+    };
   } catch {
-    // 排序态读取失败保留旧值（与名称缓存同策略，菜单重建不阻断）
+    // 排序/停靠态读取失败保留旧值（与名称缓存同策略，菜单重建不阻断）
   }
 }
 
@@ -170,7 +186,12 @@ function focusInstanceFromTray(profileId: string): void {
  */
 export function buildOmnicodeTrayMenuSection(): MenuItemConstructorOptions[] {
   if (!wired) return [];
+  // 审计 R2 P2：真实门控——任一运行实例未停靠（resolveOmnicodeInstanceDocked 唯一口径）
+  const undockedRunningCount = listOmnicodeRunningInstances().filter(
+    (entry) => !resolveOmnicodeInstanceDocked(cachedDockState, entry.profileId),
+  ).length;
   const model = buildOmnicodeTraySectionModel({
+    arrangeEnabled: undockedRunningCount > 0,
     instances: currentTrayInstances(),
     // [R1 P2-3] profileCount 直接用名称缓存条目数（不再 max(...,1)）：0 profile 时
     // 「启动全部」禁用（0<0 不成立）、「停止全部」因无运行实例同样禁用——与菜单既有
@@ -212,7 +233,7 @@ export function buildOmnicodeTrayMenuSection(): MenuItemConstructorOptions[] {
     // 置灰、restore 保持可点——restore 语义是"编排后回基线"，有无目标由实例侧判定）
     {
       label: model.arrangeAllLabel,
-      enabled: model.stopAllEnabled,
+      enabled: model.arrangeEnabled,
       click: () => {
         if (arrangeOmnicodeInstances().delivered.length === 0) {
           console.warn("[omnicode] 托盘「平铺全部」无未停靠运行实例可投递");
