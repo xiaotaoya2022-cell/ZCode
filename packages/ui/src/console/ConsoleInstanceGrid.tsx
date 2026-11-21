@@ -4,7 +4,7 @@
 // 卡片画面区矩形（embedLayout 跟随 + resize 手柄拖高），拖出实例卡片转纯监控态；
 // 视口可见性经 IntersectionObserver 驱动预览订阅；数据与操作来自
 // useOmnicodeConsoleInstances（与设置页分区共享）。
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   LayoutGrid,
@@ -27,6 +27,8 @@ import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
 import { cn } from "@/components/lib/utils.js";
 import { useOmnicodeConsoleInstances } from "@/console/useOmnicodeConsoleInstances.js";
+// [OmniCode] 新功能批次（2026-11-21 审计会话）：实例名称/序号过滤（多实例快速定位）
+import { filterOmnicodeInstancesForQuery } from "@/console/instanceGridFilter.js";
 import {
   ConsoleInstanceCard,
   CreateInstanceDialog,
@@ -495,6 +497,8 @@ export function ConsoleInstanceGrid() {
   // ─── [OmniCode] 批次2.5 X3：托盘聚焦请求 → 滚动定位对应卡片 + 短暂高亮
   //（main 广播 focusRequested；目标在其他实例的单视图时先退回网格让卡片回 DOM，spec §X3） ───
   const [focusHighlightId, setFocusHighlightId] = useState<string | null>(null);
+  // [OmniCode] 新功能批次：实例过滤查询（本地态不持久化——过滤是临时定位动作）
+  const [instanceFilter, setInstanceFilter] = useState("");
   useEffect(() => {
     if (!focusRequest) return;
     const { profileId } = focusRequest;
@@ -528,6 +532,13 @@ export function ConsoleInstanceGrid() {
       toggleEnlarge(profile.id, profile.running),
   };
 
+  // [OmniCode] 新功能批次：过滤后的渲染名单（sortedProfiles 是排序事实源，过滤只作用
+  // 于渲染不改排序/拖拽提交序；custom 模式下过滤激活时禁拖拽手柄——拖"半份名单"语义混乱）
+  const filterActive = instanceFilter.trim().length > 0;
+  const visibleProfiles = useMemo(
+    () => filterOmnicodeInstancesForQuery(sortedProfiles, instanceFilter),
+    [sortedProfiles, instanceFilter],
+  );
   // ─── [OmniCode] 实例元数据批次：自定义排序拖拽 + 排序模式切换（交互编排拆分见
   // ConsoleGridSorting.tsx——冲突裁决/落点语义/阈值判定注释集中在该文件头） ───
   const { dragState, dragActiveId, handleGridPointerDown, dragCommitAtRef } = useOmnicodeCardDragSort({
@@ -610,6 +621,14 @@ export function ConsoleInstanceGrid() {
             console-ui.json，托盘菜单与设置分区列表共用同一排序事实源）。切到 custom
             时提示拖拽入口；其余模式拖拽手柄不渲染（禁用）。 */}
         <ConsoleSortModeDropdown sortMode={sortMode} disabled={busy} onChange={setSortMode} />
+        {/* [OmniCode] 新功能批次：实例过滤（名称子串/序号；custom 模式过滤时拖拽禁用） */}
+        <input
+          data-testid="omnicode-instance-filter"
+          value={instanceFilter}
+          onChange={(event) => setInstanceFilter(event.target.value)}
+          placeholder={intl.formatMessage({ id: "console.instanceFilterPlaceholder" })}
+          className="h-8 w-36 rounded-md border border-border bg-background px-2 text-ui-sm text-foreground outline-none placeholder:text-foreground-subtle focus-visible:border-primary"
+        />
         <label className="flex items-center gap-2 text-ui-sm text-foreground-subtle">
           <Switch
             checked={uiState.previewEnabled}
@@ -714,7 +733,7 @@ export function ConsoleInstanceGrid() {
             {/* [OmniCode] 实例元数据批次：sortedProfiles（seq 默认/名称/自定义三模式，
                 与设置分区列表、托盘菜单共用 shared 排序函数；custom 模式卡片 header
                 渲染拖拽手柄，落点以 primary 上/下边线提示） */}
-            {sortedProfiles
+            {visibleProfiles
               .filter((profile) => !enlargedId || profile.id === enlargedId)
               .map((profile) => (
                 <ConsoleInstanceCard
@@ -730,7 +749,7 @@ export function ConsoleInstanceGrid() {
                   onDockChange={(docked) => handleInstanceDockChange(profile.id, docked)}
                   reportEmbedLayoutNow={reportEmbedLayoutNow}
                   embedScaleRef={embedScaleRef}
-                  dragHandle={sortMode === "custom" && !enlargedId}
+                  dragHandle={sortMode === "custom" && !enlargedId && !filterActive}
                   dragging={dragActiveId === profile.id}
                   dropIndicator={
                     dragState?.targetId === profile.id ? dragState.position : null

@@ -87,21 +87,45 @@ win-unpacked 总计 834.7 MiB：
 
 ## 四、门禁
 
-（回填：typecheck / architecture / lint / vitest 15 基线 / verify:pre-push / 构建 exit code）
+| 门禁 | 结果 |
+| --- | --- |
+| pnpm typecheck | exit 0 |
+| pnpm architecture:check --changed | violations 0 |
+| pnpm lint | 551 warnings = 基线零新增 |
+| npx vitest run omnicode | 22 文件 343/343 全绿（含白名单回归门） |
+| npx vitest run 全套 | 14 失败 ⊆ 基线 15 同名单（windowsInstallerPreserveFiles 因本批打包规则变化转绿） |
+| pnpm verify:pre-push | 全绿（618 passed；architecture-upstream-admission 首跑 EBUSY 为 Windows 临时目录清理抖动，单跑 12 过 0 挂） |
+| 双步构建（CLI + desktop bundle） | BUILD_OK（首跑 native 边界校验挂→根因修复后复跑通过，见 §七） |
 
 ## 五、收益（构建后回填）
 
 | 指标 | 前 | 后 | Δ |
 | --- | --- | --- | --- |
-| 安装包字节数 | 202,233,130 | （回填） | （回填） |
-| win-unpacked 未压缩 | 834,655,946 | （回填） | （回填） |
-| app.asar | 382,767,860 | （回填） | （回填） |
-| asar 内 node_modules | 297.9 MB/882 包 | （回填） | （回填） |
+| 安装包字节数 | 202,233,130（192.8 MiB） | **156,642,995（149.4 MiB）** | **-45,590,135（-22.5%）** |
+| win-unpacked 未压缩 | 834,655,946 | 575,795,394 | -258,860,552（-31.0%） |
+| app.asar | 382,767,860 | 122,360,001 | -260,407,859（-68.0%） |
+| asar 内 node_modules | 297.9 MB / 882 包 | ~38 MB / 133 包 | -244 MB / -749 包 |
+
+产物哨兵核验（@electron/asar 逐包清点）：16 个运行时哨兵（@arms/rum-electron/ssh2/node-pty/
+@napi-rs/keyring(+win32-x64-msvc)/ajv/playwright-core/@larksuiteoapi/node-sdk/ws/
+electron-updater/yauzl/yaml/undici/semver/node-forge/pkijs）全部 IN；
+echarts/mermaid/pdfjs-dist/lottie-web/world-atlas/非目标平台 keyring 变体/canvas 全部 absent。
 
 ## 六、遗留与后续
 
-- 并行工作树风险：本次打包期间工作树出现另一进程的 D12 接管流半成品（详见 progress 文件），
-  打包结果包含其已落盘代码；正式发布前应以主控终态代码重跑一次打包验证。
+- ~~并行工作树风险~~：复跑构建已由主控终态代码（f14b6fe1 + 7578f21b 审计修复轮）完成，无并行写入。
 - NSIS 差分更新：本轮体积骤降导致老用户升级走全量下载（blockmap 差分跨大版本失效），一次性成本。
-- 后续候选（本轮不实施）：electronLanguages 与 UI locales 已对齐；dmg size 可随瘦身后下调；
-  licenses 双份、dxcompiler、es/ 变体等已记录取舍理由。
+- 后续候选（本轮不实施）：dmg sizeLimit 可随瘦身后下调；licenses 双份、dxcompiler、es/ 变体等已记录取舍理由。
+
+## 七、构建实测与根因修复（2026-11-21 审计会话）
+
+- **首跑 BUILD_FAILED**：desktop-native-package-policy 边界校验挂——@napi-rs/keyring 非目标平台
+  变体混入 app.asar。根因：闭包推导递归 optionalDependencies 把 keyring 全平台变体展开进白名单；
+  files 层虽被 native 裁剪规则裁掉，但 **afterPack 补缺注入按同一闭包工作，把已裁变体重新注回**，
+  bundle.mjs 最终校验同口径要求它们在包里——三处口径互相矛盾。
+- **修复**：desktop-native-package-policy.mjs 新增 `isPrunedNativeVariantModule(moduleName,
+  targetPlatformKey)` 模块名级判定（keyring 非目标变体/canvas 族/@lydell/node-pty 源包/@img/sharp
+  非目标变体），include 生成（buildRuntimeNodeModulesIncludePatterns 第二参）、afterPack 注入
+  （resolveMissingRuntimeModules）、bundle 校验三处同源应用——files 裁剪、注入、校验从此同一平台口径。
+- **复跑 BUILD_OK**（OmniCode-3.18.2-omni.1-win-x64.exe = 156,642,995 B）；回归门测试 +2
+  （目标平台保留/非目标剔除 + 判定矩阵）。

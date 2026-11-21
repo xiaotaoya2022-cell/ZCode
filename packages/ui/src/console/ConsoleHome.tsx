@@ -27,6 +27,9 @@ import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { usePlatform } from "@/hooks/usePlatform.js";
 import { useTabStore } from "@/store/TabStoreProvider.js";
 import { useOmnicodeConsoleAdoption } from "@/settings/ProfileMultiInstanceSection.js";
+// [OmniCode] 新功能批次（2026-11-21 审计会话）：锁占用总览（D12 接管决策前提）+ 数据维护面板
+import { WorkspaceLocksOverview } from "@/console/WorkspaceLocksOverview.js";
+import { ConsoleMaintenancePanel } from "@/console/ConsoleMaintenancePanel.js";
 
 /** ConsoleHome 二视图（网格=实例管理中枢主视图；dashboard=账号看板检视视图）。 */
 type ConsoleHomeView = "grid" | "dashboard";
@@ -75,6 +78,9 @@ export function ConsoleHome() {
           <>
             <AdoptionBanner />
             <ConsoleInstanceGrid />
+            {/* [OmniCode] 新功能批次：锁占用总览 + 数据维护（紧凑分区；桥方法缺席自隐藏） */}
+            <WorkspaceLocksOverview />
+            <ConsoleMaintenancePanel />
           </>
         ) : null}
       </div>

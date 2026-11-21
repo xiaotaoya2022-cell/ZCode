@@ -881,15 +881,18 @@ describe("omnicode batch2.5 X3: trayMenu wiring + debounce", () => {
     }
   });
 
-  it("buildOmnicodeTrayMenuSection：实例项+启停全部+分隔符；点击实例项走聚焦链路", () => {
+  it("buildOmnicodeTrayMenuSection：实例项+启停全部+快捷编排+分隔符；点击实例项走聚焦链路", () => {
     const items: MenuItemConstructorOptions[] = buildOmnicodeTrayMenuSection();
-    // 结构：[实例项, separator, 启动全部, 停止全部, separator]
-    expect(items).toHaveLength(5);
+    // 结构：[实例项, separator, 启动全部, 停止全部, 平铺全部窗口, 还原窗口位置, separator]
+    //（新功能批次 2026-11-21：托盘快捷编排两项插入停止全部之后）
+    expect(items).toHaveLength(7);
     expect(items[0]).toMatchObject({ label: "● 账号A" });
     expect(items[1]).toEqual({ type: "separator" });
     expect(items[2]).toMatchObject({ label: "启动全部", enabled: true }); // 2 profile 1 running
     expect(items[3]).toMatchObject({ label: "停止全部", enabled: true });
-    expect(items[4]).toEqual({ type: "separator" });
+    expect(items[4]).toMatchObject({ label: "平铺全部窗口", enabled: true });
+    expect(items[5]).toMatchObject({ label: "还原窗口位置" });
+    expect(items[6]).toEqual({ type: "separator" });
     // 点击实例项 = 广播 focusRequested + 桥 focus 命令（spec §X3 聚焦链路）
     items[0].click?.(undefined as never, undefined as never, undefined as never);
     expect(bridgeState.broadcasts).toEqual([{ profileId: "pa111111111", type: "focusRequested" }]);

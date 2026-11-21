@@ -2420,6 +2420,12 @@ exceptions:
       - packages/ui/src/root/useOmnicodeTakeoverPending.ts
       - packages/ui/src/root/useOmnicodeWorkspaceTakeover.ts
       - packages/ui/src/v4/OmnicodeTakeoverBannerAction.tsx
+      # [OmniCode] 新功能批次（2026-11-21 审计会话）：管理器维护面（锁总览/数据维护/
+      # 实例过滤——console 域既有豁免同款委托模式；纯函数 + 只读面板组件）
+      - packages/ui/src/console/WorkspaceLocksOverview.tsx
+      - packages/ui/src/console/ConsoleMaintenancePanel.tsx
+      - packages/ui/src/console/consoleMaintenanceModel.ts
+      - packages/ui/src/console/instanceGridFilter.ts
     reason: OmniCode profile runtime wiring files follow the exact same structure as the existing desktopSaveFile IPC registration and desktopBrowserPlatformBridge delegation patterns; the files are OmniCode-fork feature additions reviewed line-by-line (580-finding sealed scan passed), and adopting the whole desktop/ui module trees needs a separate boundary refactor. Batch-1 adds atomicJson.ts (profile registry atomic write/recovery, mirrors Cockpit atomic_write.rs invariants) and instanceReconcile.ts (running-state rebuild via process-table scan keyed on --omnicode-profile argv, mirrors Cockpit resolve_pid). Batch-2 B2-3 adds the console grid files (shared instances hook + card view + grid orchestrator, reusing the same platform bridge delegation pattern as ConsoleHome). Batch-2.5 adds the perf panel files (ConsolePerfPanel drawer + perfSpark pure functions, reusing the same delegation pattern; spec docs/omnicode/console-extras.md X1). Batch-3 D11 adds omnicodeLockConflictOpen.ts (renderer-side lock-conflict open decision pure functions — three-state action resolution, observer toast dedupe — no React/service imports, unit-tested in omnicodeAutoObserverConflict.test.ts; spec docs/omnicode/profile-runtime.md §批次2 B2-2 D11).
   # [OmniCode] M4b Browser Relay：新文件落在既有未受管 shared/server/desktop 大模块内的精确路径准入。
   # shared/browserRelay.ts 为 fork-only 事件契约（沿用 browser-use 既有类型，不发明新形状）；
