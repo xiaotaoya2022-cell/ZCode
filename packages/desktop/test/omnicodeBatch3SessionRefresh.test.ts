@@ -1,14 +1,24 @@
-// [OmniCode] 批次3 会话同步 Phase 1：项目行「刷新会话列表」按钮纯逻辑单测。
-// 根因：Host 同步器首帧快照静默补 tasks-index 行但不广播，侧栏要等下一次
-// workspace_task_list_changed 才重拉；按钮=手动触发 useProjectTree.refreshDirectory。
+// [OmniCode] 批次3 会话同步 Phase 1 + Phase 2：项目行「刷新会话列表」按钮纯逻辑单测。
+// 根因：Host 同步器首帧快照静默补 tasks-index 行但不广播，且首帧快照的前提是该 workspace
+// 有 CLI runtime（被动 UI 订阅 runtime 缺失时进 dormant）。Phase 2 真修 = 按钮复用
+// 「+添加会话」的唤醒原语（initializeWorkspace 拉起 CLI runtime + 确保同步器订阅），
+// 再轮询重读 tasks-index 直到静默补库写入（行签名变化）或有界超时。
 // ui 包没有组件渲染测试先例（无 testing-library），按仓库现状退而测 refresh 管道
-// 纯逻辑（点击编排/重入合并/转圈清态）；按钮渲染与 tooltip 走手动验证项
-// （spec: F:\OmniCode\docs\batch3\research\session-sync-mechanism.md §刷新按钮）。
+// 纯逻辑（点击编排/重入合并/转圈清态/唤醒-轮询-重读序列/唤醒目标与服务解析）；
+// 按钮渲染与 tooltip 走手动验证项
+// （spec: F:\OmniCode\docs\batch3\research\session-sync-mechanism.md §刷新按钮/§七）。
 // 写法参照 omnicodeBatch3DashboardUi.test.ts。
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  buildSessionRefreshWakeTarget,
   createSessionRefreshState,
+  projectTaskListSignature,
+  resolveSessionWakeService,
+  runSessionWakeAndReread,
+  SESSION_REFRESH_POLL_INTERVAL_MS,
+  SESSION_REFRESH_WAKE_TIMEOUT_MS,
   triggerSessionRefresh,
+  type SessionWakeTiming,
 } from "@/project-sidebar/refreshSessions.js";
 
 /** 手动 resolve 的延迟 promise：精确控制一次刷新的在途窗口。 */
@@ -143,5 +153,246 @@ describe("triggerSessionRefresh 项目行刷新编排", () => {
     await flushAsync();
     expect(rowA.inFlight).toBe(false);
     expect(rowB.inFlight).toBe(false);
+  });
+});
+
+// ── Phase 2：唤醒 → 轮询补库 → 重读（runSessionWakeAndReread）─────────────────
+
+/** 注入式时钟：delay 推进时钟，轮询窗口用例完全确定，无真实定时器。 */
+function createFakeTiming(): SessionWakeTiming & { clock: number } {
+  const timing = {
+    clock: 0,
+    now() {
+      return timing.clock;
+    },
+    async delay(ms: number) {
+      timing.clock += ms;
+    },
+  };
+  return timing;
+}
+
+describe("runSessionWakeAndReread 唤醒→轮询补库→重读编排", () => {
+  it("唤醒成功且补库到达：轮询到行签名变化即提前收口（不再继续轮询）", async () => {
+    let rereadCount = 0;
+    let delayCount = 0;
+    const signature = vi.fn(() => (rereadCount >= 2 ? "old-a:1|old-b:2" : ""));
+    const result = await runSessionWakeAndReread(
+      {
+        wake: vi.fn(async () => true),
+        reread: vi.fn(async () => {
+          rereadCount += 1;
+          return undefined;
+        }),
+        signature,
+      },
+      {
+        now: () => 0,
+        async delay() {
+          delayCount += 1;
+        },
+      },
+    );
+
+    expect(result).toEqual({ woke: true, changed: true });
+    expect(rereadCount).toBe(2); // 第 1 轮签名未变，第 2 轮补库写入
+    expect(delayCount).toBe(1);
+    // baseline 1 次 + 每轮重读后各 1 次。
+    expect(signature).toHaveBeenCalledTimes(3);
+  });
+
+  it("唤醒成功但补库超时未到：窗口内继续轮询，到 deadline 停止且不空转", async () => {
+    const timing = createFakeTiming();
+    let rereadCount = 0;
+    const result = await runSessionWakeAndReread(
+      {
+        wake: async () => true,
+        reread: async () => {
+          rereadCount += 1;
+          return undefined;
+        },
+        signature: () => "same:0",
+      },
+      timing,
+    );
+
+    expect(result).toEqual({ woke: true, changed: false });
+    // 每轮 delay 推进 400ms；deadline=5000 → 首轮重读后再轮 ceil(5000/400)=13 次。
+    const expectedPolls = Math.ceil(SESSION_REFRESH_WAKE_TIMEOUT_MS / SESSION_REFRESH_POLL_INTERVAL_MS) + 1;
+    expect(rereadCount).toBe(expectedPolls);
+    expect(timing.clock).toBeGreaterThanOrEqual(SESSION_REFRESH_WAKE_TIMEOUT_MS);
+  });
+
+  it("唤醒明确不可用（provider 未就绪 available=false）：不进轮询，只重读一次（Phase 1 语义）", async () => {
+    let delayCount = 0;
+    const reread = vi.fn(async () => undefined);
+    const result = await runSessionWakeAndReread(
+      {
+        wake: vi.fn(async () => false),
+        reread,
+        signature: () => "whatever:0",
+      },
+      {
+        now: () => 0,
+        async delay() {
+          delayCount += 1;
+        },
+      },
+    );
+
+    expect(result).toEqual({ woke: false, changed: false });
+    expect(reread).toHaveBeenCalledTimes(1);
+    expect(delayCount).toBe(0);
+  });
+
+  it("无法安全唤醒（远端未连接 wake=null）与唤醒抛错：同样只重读一次，不吞重读", async () => {
+    const rereadNull = vi.fn(async () => undefined);
+    expect(
+      await runSessionWakeAndReread(
+        { wake: async () => null, reread: rereadNull, signature: () => "" },
+        { now: () => 0, async delay() {} },
+      ),
+    ).toEqual({ woke: false, changed: false });
+    expect(rereadNull).toHaveBeenCalledTimes(1);
+
+    const rereadThrow = vi.fn(async () => undefined);
+    expect(
+      await runSessionWakeAndReread(
+        {
+          wake: vi.fn(async () => {
+            throw new Error("host unreachable");
+          }),
+          reread: rereadThrow,
+          signature: () => "",
+        },
+        { now: () => 0, async delay() {} },
+      ),
+    ).toEqual({ woke: false, changed: false });
+    expect(rereadThrow).toHaveBeenCalledTimes(1);
+  });
+
+  it("唤醒首轮重读就发现补库：changed=true 且只重读一次", async () => {
+    let rereadCount = 0;
+    const result = await runSessionWakeAndReread(
+      {
+        wake: async () => true,
+        reread: vi.fn(async () => {
+          rereadCount += 1;
+          return undefined;
+        }),
+        signature: () => (rereadCount > 0 ? "seeded:9" : ""),
+      },
+      { now: () => 0, async delay() {} },
+    );
+    expect(result).toEqual({ woke: true, changed: true });
+    expect(rereadCount).toBe(1);
+  });
+});
+
+// ── Phase 2：唤醒目标 / 服务解析 / 行签名 ─────────────────────────────────────
+
+describe("buildSessionRefreshWakeTarget / resolveSessionWakeService / projectTaskListSignature", () => {
+  it("本地项目取主根 workspace，不带 identity；无 root 返回 null", () => {
+    expect(
+      buildSessionRefreshWakeTarget({
+        hostId: "local",
+        roots: [
+          { rootPath: "/w/secondary", position: 1, isPrimary: false },
+          { rootPath: "/w/primary", position: 0, isPrimary: true },
+        ],
+      }),
+    ).toEqual({ workspacePath: "/w/primary" });
+    expect(buildSessionRefreshWakeTarget({ hostId: "local", roots: [] })).toBeNull();
+  });
+
+  it("远端项目带 host 前缀 identity（与 useProjectTree scopes 同一构造规则）", () => {
+    // 远端 hostId 本身是远端 host 根的 workspace identity（remote:* 前缀），可被统一解析。
+    const target = buildSessionRefreshWakeTarget({
+      hostId: "remote:ssh:myhost:22:me",
+      roots: [{ rootPath: "/remote/work", position: 0, isPrimary: true }],
+    });
+    expect(target?.workspacePath).toBe("/remote/work");
+    expect(target?.workspaceIdentity).toBe("remote:ssh:myhost:22:me:/remote/work");
+  });
+
+  it("本地目标解析到根 services 的 zcodeSessionService；缺根 services 时返回 null 不误判", () => {
+    const sessionService = { initializeWorkspace: async () => ({ available: true }) };
+    expect(
+      resolveSessionWakeService({
+        target: { workspacePath: "/w/primary" },
+        baseServices: { zcodeSessionService: sessionService },
+        remoteSessions: {
+          baseServices: null,
+          sessionsById: {},
+          sessionIdByWorkspacePath: {},
+          sessionIdByWorkspaceIdentity: {},
+        },
+      }),
+    ).toBe(sessionService);
+    expect(
+      resolveSessionWakeService({
+        target: { workspacePath: "/w/primary" },
+        baseServices: null,
+        remoteSessions: {
+          baseServices: null,
+          sessionsById: {},
+          sessionIdByWorkspacePath: {},
+          sessionIdByWorkspaceIdentity: {},
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("远端目标必须解析到已连接 session；解析不到返回 null（绝不回落本机 Host）", () => {
+    const remoteSessionService = { initializeWorkspace: async () => ({ available: true }) };
+    const remoteSessions = {
+      baseServices: { zcodeSessionService: { initializeWorkspace: async () => ({ available: true }) } },
+      sessionsById: { "session-1": { services: { zcodeSessionService: remoteSessionService } } },
+      sessionIdByWorkspacePath: {},
+      sessionIdByWorkspaceIdentity: { "remote:ssh:myhost:22:me:/remote/work": "session-1" },
+    };
+    expect(
+      resolveSessionWakeService({
+        target: {
+          workspacePath: "/remote/work",
+          workspaceIdentity: "remote:ssh:myhost:22:me:/remote/work",
+        },
+        baseServices: null,
+        remoteSessions,
+      }),
+    ).toBe(remoteSessionService);
+
+    // identity 无对应 session：resolved 为 null / 本机占位 → null。
+    expect(
+      resolveSessionWakeService({
+        target: {
+          workspacePath: "/remote/other",
+          workspaceIdentity: "remote:ssh:myhost:22:me:/remote/other",
+        },
+        baseServices: null,
+        remoteSessions,
+      }),
+    ).toBeNull();
+    // 目标缺失（数据残缺项目行）：null。
+    expect(
+      resolveSessionWakeService({
+        target: null,
+        baseServices: null,
+        remoteSessions,
+      }),
+    ).toBeNull();
+  });
+
+  it("行签名由 taskId+updatedAt 组成；补库写入新行必然改变签名", () => {
+    const before = projectTaskListSignature([{ taskId: "a", updatedAt: 1 }]);
+    const after = projectTaskListSignature([
+      { taskId: "a", updatedAt: 1 },
+      { taskId: "b", updatedAt: 42 },
+    ]);
+    expect(before).toBe("a:1");
+    expect(after).toBe("a:1|b:42");
+    expect(before).not.toBe(after);
+    // 同一行的 updatedAt 变化（标题/状态镜像）同样算变化，避免只数条数漏报。
+    expect(projectTaskListSignature([{ taskId: "a", updatedAt: 2 }])).not.toBe(before);
   });
 });

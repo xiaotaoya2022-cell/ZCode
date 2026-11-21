@@ -46,9 +46,15 @@ import {
 } from "@/components/ui/context-menu.js";
 import { ProjectTaskRows } from "@/project-sidebar/ProjectTaskRows.js";
 import {
+  buildSessionRefreshWakeTarget,
   createSessionRefreshState,
+  projectTaskListSignature,
+  resolveSessionWakeService,
+  runSessionWakeAndReread,
   triggerSessionRefresh,
 } from "@/project-sidebar/refreshSessions.js";
+import { useBaseWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
+import { useRemoteWorkspaceSessionStore } from "@/store/remoteWorkspaceSessionStore.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { resolveRemoteConnectionPresentation } from "@/lib/remoteConnectionPresentation.js";
 import { RemoteConnectionStateIcon } from "@/remote-connection/RemoteConnectionStateIcon.js";
@@ -122,15 +128,49 @@ export const ProjectNodeContent = memo(function ProjectNodeContent({
   }) {
   const { intl } = useZCodeIntl();
   const msg = (id: string) => intl.formatMessage({ id: `project.${id}` });
-  // 批次3 会话同步 Phase 1：项目行「刷新会话列表」按钮。refresh 回调管道=
-  // useProjectTree.refreshDirectory（整树重拉直读 tasks-index），Host 同步器静默补行的
-  // 旧会话点击后立即可见；in-flight 重入合并 + 转圈态由纯函数 triggerSessionRefresh 编排
-  // （spec: F:\OmniCode\docs\batch3\research\session-sync-mechanism.md §四）。
+  // 批次3 会话同步 Phase 1 + Phase 2：项目行「刷新会话列表」按钮。
+  // Phase 2 真修：按钮先复用「+添加会话」的唤醒原语（initializeWorkspace = getClient
+  // start-if-needed 拉起 CLI runtime + taskIndexSyncer.ensureWorkspaceSubscription），
+  // Host 同步器随后首帧 snapshot 静默补库；再在 5s 窗口内轮询重读 tasks-index，
+  // 行签名变化（旧会话补进）即提前收口，超时也保证至少重读一次。唤醒不可用
+  // （provider 未就绪/远端未连接/服务缺失）降级为 Phase 1 的纯重读。
+  // in-flight 重入合并 + 转圈态仍由纯函数 triggerSessionRefresh 编排
+  // （spec: F:\OmniCode\docs\batch3\research\session-sync-mechanism.md §四/§七）。
   const [sessionsRefreshing, setSessionsRefreshing] = useState(false);
   const sessionRefreshState = useRef(createSessionRefreshState());
+  // 轮询判定补库到达的行签名；经 ref 读取，轮询期间拿到的是最新提交而不是点击时的闭包。
+  const tasksSignatureRef = useRef("");
+  tasksSignatureRef.current = projectTaskListSignature(tasks);
+  const baseServices = useBaseWorkspaceServices();
   const refreshSessions = useCallback(() => {
-    triggerSessionRefresh(sessionRefreshState.current, refresh, setSessionsRefreshing);
-  }, [refresh]);
+    const wakeTarget = buildSessionRefreshWakeTarget(project);
+    triggerSessionRefresh(
+      sessionRefreshState.current,
+      () =>
+        runSessionWakeAndReread({
+          wake: async () => {
+            if (!wakeTarget) return null;
+            // 解析不到可安全唤醒的 Host（远端未连接等）→ null，降级为纯重读。
+            const sessionService = resolveSessionWakeService({
+              target: wakeTarget,
+              baseServices,
+              remoteSessions: useRemoteWorkspaceSessionStore.getState(),
+            });
+            if (!sessionService) return null;
+            const result = await sessionService.initializeWorkspace({
+              workspacePath: wakeTarget.workspacePath,
+              ...(wakeTarget.workspaceIdentity
+                ? { workspaceIdentity: wakeTarget.workspaceIdentity }
+                : {}),
+            });
+            return result.available === true;
+          },
+          reread: refresh,
+          signature: () => tasksSignatureRef.current,
+        }),
+      setSessionsRefreshing,
+    );
+  }, [project, baseServices, refresh]);
   // 修复原因：新项目行曾无条件显示本地文件夹；远程图标只读 Host 现有投影，复用统一五态。
   const remotePresentation = remoteHost
     ? resolveRemoteConnectionPresentation({
