@@ -15,9 +15,11 @@ import {
   projectTaskListSignature,
   resolveSessionWakeService,
   runSessionWakeAndReread,
+  SESSION_REFRESH_POLL_INTERVAL_MAX_MS,
   SESSION_REFRESH_POLL_INTERVAL_MS,
   SESSION_REFRESH_WAKE_TIMEOUT_MS,
   triggerSessionRefresh,
+  wakeSessionForRefresh,
   type SessionWakeTiming,
 } from "@/project-sidebar/refreshSessions.js";
 
@@ -172,6 +174,23 @@ function createFakeTiming(): SessionWakeTiming & { clock: number } {
   return timing;
 }
 
+/**
+ * 按 runSessionWakeAndReread 的退避规则推演到 deadline 为止的重读次数：
+ * 时刻 0 起，间隔 400→800→1600 递增，最后一拍用 min(interval, remaining) 补齐到 deadline。
+ * 常量不变时 5s 窗口 = 6 次重读（0/400/1200/2800/4400/5000）。
+ */
+function computeBackoffRereadCount(): number {
+  let clock = 0;
+  let interval = SESSION_REFRESH_POLL_INTERVAL_MS;
+  let rereads = 1;
+  while (clock < SESSION_REFRESH_WAKE_TIMEOUT_MS) {
+    clock += Math.min(interval, SESSION_REFRESH_WAKE_TIMEOUT_MS - clock);
+    interval = Math.min(interval * 2, SESSION_REFRESH_POLL_INTERVAL_MAX_MS);
+    rereads += 1;
+  }
+  return rereads;
+}
+
 describe("runSessionWakeAndReread 唤醒→轮询补库→重读编排", () => {
   it("唤醒成功且补库到达：轮询到行签名变化即提前收口（不再继续轮询）", async () => {
     let rereadCount = 0;
@@ -201,7 +220,7 @@ describe("runSessionWakeAndReread 唤醒→轮询补库→重读编排", () => {
     expect(signature).toHaveBeenCalledTimes(3);
   });
 
-  it("唤醒成功但补库超时未到：窗口内继续轮询，到 deadline 停止且不空转", async () => {
+  it("唤醒成功但补库超时未到：窗口内退避轮询（400→800→1600），到 deadline 停止且不空转", async () => {
     const timing = createFakeTiming();
     let rereadCount = 0;
     const result = await runSessionWakeAndReread(
@@ -217,10 +236,34 @@ describe("runSessionWakeAndReread 唤醒→轮询补库→重读编排", () => {
     );
 
     expect(result).toEqual({ woke: true, changed: false });
-    // 每轮 delay 推进 400ms；deadline=5000 → 首轮重读后再轮 ceil(5000/400)=13 次。
-    const expectedPolls = Math.ceil(SESSION_REFRESH_WAKE_TIMEOUT_MS / SESSION_REFRESH_POLL_INTERVAL_MS) + 1;
-    expect(rereadCount).toBe(expectedPolls);
-    expect(timing.clock).toBeGreaterThanOrEqual(SESSION_REFRESH_WAKE_TIMEOUT_MS);
+    // 终审 P2（已同步空转）：签名未变轮次按 400→800→1600 退避，整树重读从固定 400ms 的
+    // ~13 次降到 6 次（时刻 0/400/1200/2800/4400/5000），窗口总量仍是 deadline=5s 整。
+    expect(rereadCount).toBe(computeBackoffRereadCount());
+    expect(timing.clock).toBe(SESSION_REFRESH_WAKE_TIMEOUT_MS);
+  });
+
+  it("退避中途补库到达：间隔按 400→800 递增且立即收口（不因退避漏检已落库行）", async () => {
+    let rereadCount = 0;
+    const delays: number[] = [];
+    const result = await runSessionWakeAndReread(
+      {
+        wake: async () => true,
+        reread: vi.fn(async () => {
+          rereadCount += 1;
+          return undefined;
+        }),
+        signature: () => (rereadCount >= 3 ? "seeded:1" : ""),
+      },
+      {
+        now: () => 0,
+        async delay(ms: number) {
+          delays.push(ms);
+        },
+      },
+    );
+    expect(result).toEqual({ woke: true, changed: true });
+    expect(rereadCount).toBe(3);
+    expect(delays).toEqual([SESSION_REFRESH_POLL_INTERVAL_MS, SESSION_REFRESH_POLL_INTERVAL_MS * 2]);
   });
 
   it("唤醒明确不可用（provider 未就绪 available=false）：不进轮询，只重读一次（Phase 1 语义）", async () => {
@@ -286,6 +329,149 @@ describe("runSessionWakeAndReread 唤醒→轮询补库→重读编排", () => {
     );
     expect(result).toEqual({ woke: true, changed: true });
     expect(rereadCount).toBe(1);
+  });
+});
+
+// ── 终审 P2：卸载取消（isCancelled）────────────────────────────────────────────
+
+describe("runSessionWakeAndReread 卸载取消", () => {
+  it("wake 成功后已取消（行已卸载）：不再发起任何重读，直接收口", async () => {
+    const reread = vi.fn(async () => undefined);
+    const result = await runSessionWakeAndReread(
+      {
+        wake: async () => true,
+        reread,
+        signature: () => "whatever:0",
+        isCancelled: () => true,
+      },
+      { now: () => 0, async delay() {} },
+    );
+    expect(result).toEqual({ woke: true, changed: false });
+    expect(reread).not.toHaveBeenCalled();
+  });
+
+  it("轮询中途取消：停止后续轮拍，不再为已卸载的行烧满 5s", async () => {
+    let rereadCount = 0;
+    let delayCount = 0;
+    const result = await runSessionWakeAndReread(
+      {
+        wake: async () => true,
+        reread: async () => {
+          rereadCount += 1;
+          return undefined;
+        },
+        signature: () => "same:0",
+        isCancelled: () => rereadCount >= 2,
+      },
+      { now: () => 0, async delay() { delayCount += 1; } },
+    );
+    expect(result).toEqual({ woke: true, changed: false });
+    // 取消在每轮拍头检测：reread#2 后多走一拍 delay（≤1.6s 退避上限）即收口，
+    // 相比旧实现烧满 5s 的 13 拍已经收敛。
+    expect(rereadCount).toBe(2);
+    expect(delayCount).toBe(2);
+  });
+
+  it("wake 不可用且已取消：Phase 1 的收尾重读也一并取消", async () => {
+    const reread = vi.fn(async () => undefined);
+    const result = await runSessionWakeAndReread(
+      {
+        wake: async () => null,
+        reread,
+        signature: () => "",
+        isCancelled: () => true,
+      },
+      { now: () => 0, async delay() {} },
+    );
+    expect(result).toEqual({ woke: false, changed: false });
+    expect(reread).not.toHaveBeenCalled();
+  });
+
+  it("未取消时 isCancelled 缺省为 false：编排与旧语义完全一致", async () => {
+    const reread = vi.fn(async () => undefined);
+    const result = await runSessionWakeAndReread(
+      { wake: async () => false, reread, signature: () => "" },
+      { now: () => 0, async delay() {} },
+    );
+    expect(result).toEqual({ woke: false, changed: false });
+    expect(reread).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── 终审 P1-1：flavor 门控（omnicode 域才允许唤醒链）──────────────────────────
+// 门控判据本身（resolveOmnicodeBrandFromLocation 的 true/false/无 window 分支）由
+// packages/ui/test/omnicodeOmni5BrandLogo.test.tsx 覆盖；这里锁门控在编排里的接线语义。
+
+/** 与既有用例同构的远端 store 空快照（无任何已连接 session）。 */
+const EMPTY_REMOTE_SESSIONS = {
+  baseServices: null,
+  sessionsById: {},
+  sessionIdByWorkspacePath: {},
+  sessionIdByWorkspaceIdentity: {},
+} as const;
+
+describe("wakeSessionForRefresh 唤醒步骤（含门控分支）", () => {
+  it("wakeAllowed=false（官方 flavor）：不解析服务、不调 initializeWorkspace，恒 null", async () => {
+    const initializeWorkspace = vi.fn(async () => ({ available: true }));
+    expect(
+      await wakeSessionForRefresh({
+        target: { workspacePath: "/w/primary" },
+        baseServices: { zcodeSessionService: { initializeWorkspace } },
+        remoteSessions: EMPTY_REMOTE_SESSIONS,
+        wakeAllowed: false,
+      }),
+    ).toBeNull();
+    expect(initializeWorkspace).not.toHaveBeenCalled();
+    // 目标缺失同样被门控短路（不会先解析再拒绝）。
+    expect(
+      await wakeSessionForRefresh({
+        target: null,
+        baseServices: null,
+        remoteSessions: EMPTY_REMOTE_SESSIONS,
+        wakeAllowed: false,
+      }),
+    ).toBeNull();
+    expect(initializeWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("wakeAllowed=true（omnicode 域）：本地目标调 initializeWorkspace 并透传 available", async () => {
+    const initializeWorkspace = vi.fn(async () => ({ available: true }));
+    expect(
+      await wakeSessionForRefresh({
+        target: { workspacePath: "/w/primary" },
+        baseServices: { zcodeSessionService: { initializeWorkspace } },
+        remoteSessions: EMPTY_REMOTE_SESSIONS,
+        wakeAllowed: true,
+      }),
+    ).toBe(true);
+    expect(initializeWorkspace).toHaveBeenCalledTimes(1);
+    expect(initializeWorkspace).toHaveBeenCalledWith({ workspacePath: "/w/primary" });
+
+    // provider 未就绪（available=false）→ false，由编排降级为 Phase 1 纯重读。
+    expect(
+      await wakeSessionForRefresh({
+        target: { workspacePath: "/w/primary" },
+        baseServices: { zcodeSessionService: { initializeWorkspace: async () => ({ available: false }) } },
+        remoteSessions: EMPTY_REMOTE_SESSIONS,
+        wakeAllowed: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("wakeAllowed=true 但远端解析不到：null 且绝不回落本机 Host", async () => {
+    const localInitialize = vi.fn(async () => ({ available: true }));
+    expect(
+      await wakeSessionForRefresh({
+        target: {
+          workspacePath: "/remote/work",
+          workspaceIdentity: "remote:ssh:myhost:22:me:/remote/work",
+        },
+        baseServices: { zcodeSessionService: { initializeWorkspace: localInitialize } },
+        remoteSessions: EMPTY_REMOTE_SESSIONS,
+        wakeAllowed: true,
+      }),
+    ).toBeNull();
+    expect(localInitialize).not.toHaveBeenCalled();
   });
 });
 

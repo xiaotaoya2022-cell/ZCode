@@ -8613,6 +8613,17 @@ const koKR: Record<string, string> = {
   "remoteSync.providers.error.sessionUnavailable": "원격 연결을 더 이상 사용할 수 없습니다",
   "remoteSync.providers.error.hostExecutionFailed": "이 기기에서 동기화를 실행할 수 없습니다",
   "remoteSync.providers.error.unknown": "알 수 없는 오류",
+  // [OmniCode] omni.5 终审 P1-2：管理器 console 域 8 key 补齐（zh/en 同批新增；ja/ko/ru
+  // 缺 key 时 IntlProvider 是整表回退无 per-key 兜底，会直出裸 key id，按四语惯例补齐）。
+  "console.loginStatusUnknown": "자격 증명 상태를 알 수 없습니다",
+  "console.credentialOsUnrecoverableTitle": "이전 암호화 키가 없어 다시 로그인이 필요합니다",
+  "console.credentialOsUnrecoverableBody":
+    "console 데이터 루트의 기존 로그인 자격 증명은 이전 시스템 키스토어로 암호화되어 있으며, 현재 해당 키 항목을 읽을 수 없습니다(원본 파일은 보존되어 있고 로그인 데이터는 삭제되지 않았습니다). 설정에서 한 번 더 로그인해 주세요. 새 로그인은 내장 키를 사용하며 이후에는 안정적으로 유지됩니다.",
+  "console.credentialOsUnrecoverableBackedUp": "원본 자격 증명 파일은 내용 기반 주소 방식으로 백업되었습니다.",
+  "console.egg.zeroDetecting": "확인 중…",
+  "console.egg.zeroNoClaim": "지금 수령할 수 있는 크레딧이 없습니다(오늘 이미 수령했거나 지급이 없는 것일 수 있습니다)",
+  "console.egg.zeroNeedsLogin": "로그인하지 않은 인스턴스가 {count}개 있습니다——로그인하면 수령할 수 있습니다",
+  "console.egg.redetect": "다시 확인",
 };
 
 export default koKR;

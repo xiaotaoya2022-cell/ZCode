@@ -8820,6 +8820,17 @@ const jaJP: Record<string, string> = {
   "remoteSync.providers.error.sessionUnavailable": "リモート接続は利用できなくなりました",
   "remoteSync.providers.error.hostExecutionFailed": "このデバイスで同期を実行できませんでした",
   "remoteSync.providers.error.unknown": "不明なエラー",
+  // [OmniCode] omni.5 终审 P1-2：管理器 console 域 8 key 补齐（zh/en 同批新增；ja/ko/ru
+  // 缺 key 时 IntlProvider 是整表回退无 per-key 兜底，会直出裸 key id，按四语惯例补齐）。
+  "console.loginStatusUnknown": "認証情報の状態は不明です",
+  "console.credentialOsUnrecoverableTitle": "旧システムキーストアの鍵が見つからず、再ログインが必要です",
+  "console.credentialOsUnrecoverableBody":
+    "console データルートの過去のログイン認証情報は旧システムキーストアで暗号化されており、現在その鍵エントリを読み取れません（元のファイルは保持されており、ログインデータは失われていません）。設定でもう一度ログインしてください。新しいログインは内蔵の鍵を使用し、以降は恒久的に安定します。",
+  "console.credentialOsUnrecoverableBackedUp": "元の認証情報ファイルは内容アドレス方式でバックアップ済みです。",
+  "console.egg.zeroDetecting": "確認中…",
+  "console.egg.zeroNoClaim": "現在受け取れる枠はありません（本日分は受取済み、または配布がない可能性があります）",
+  "console.egg.zeroNeedsLogin": "未ログインのインスタンスが {count} 件あります——ログインすると受け取れます",
+  "console.egg.redetect": "再確認",
 };
 
 export default jaJP;

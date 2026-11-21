@@ -8784,6 +8784,17 @@ const ruRU: Record<string, string> = {
   "remoteSync.providers.error.hostExecutionFailed":
     "Синхронизацию не удалось выполнить на этом устройстве",
   "remoteSync.providers.error.unknown": "Неизвестная ошибка",
+  // [OmniCode] omni.5 终审 P1-2：管理器 console 域 8 key 补齐（zh/en 同批新增；ja/ko/ru
+  // 缺 key 时 IntlProvider 是整表回退无 per-key 兜底，会直出裸 key id，按四语惯例补齐）。
+  "console.loginStatusUnknown": "Состояние учётных данных неизвестно",
+  "console.credentialOsUnrecoverableTitle": "Прежний ключ шифрования отсутствует — требуется повторный вход",
+  "console.credentialOsUnrecoverableBody":
+    "Исторические учётные данные корня console были зашифрованы устаревшим системным хранилищем ключей, и сейчас запись ключа недоступна для чтения (исходный файл сохранён, данные для входа не потеряны). Войдите ещё раз в настройках: новые входы используют встроенный ключ и в дальнейшем остаются стабильными.",
+  "console.credentialOsUnrecoverableBackedUp": "Исходный файл учётных данных сохранён в резервную копию с адресацией по содержимому.",
+  "console.egg.zeroDetecting": "Проверка…",
+  "console.egg.zeroNoClaim": "Доступных для получения квот нет (возможно, уже получено сегодня или раздачи нет)",
+  "console.egg.zeroNeedsLogin": "Не выполнен вход в {count} экземпляр(ах) — после входа можно получить квоту",
+  "console.egg.redetect": "Проверить заново",
 };
 
 export default ruRU;

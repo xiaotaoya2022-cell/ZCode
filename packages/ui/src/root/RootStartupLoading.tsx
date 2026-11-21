@@ -170,6 +170,8 @@ export function OmniCodeStartupLogoBadge({
  * query（main 侧按 flavor==="omnicode" ∨ OMNICODE_PROFILE_ID 注入，与
  * isOmnicodeProfileInstanceEnv 同语义族；实例 renderer 可能不带 flavor 字段但带实例
  * env——query 参数由 main 统一计算，renderer 不自行判 flavor 字符串）。
+ * 终审 P1-1：刷新按钮唤醒链（ProjectNodeContent）以同一原语做 flavor 门控，
+ * 官方窗口点刷新恢复 Phase 1 幂等只读树重拉。
  */
 export function resolveOmnicodeBrandFromLocation(): boolean {
   if (typeof window === "undefined") return false;

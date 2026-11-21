@@ -1,7 +1,7 @@
 import { SidebarNativeTooltip, ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { ProjectIdentityHoverCard } from "@/project-sidebar/ProjectIdentityHoverCard.js";
 import { remoteHostLabel } from "@/project-sidebar/RemoteHostSection.js";
-import { useCallback, memo, useRef, useState } from "react";
+import { useCallback, useEffect, memo, useRef, useState } from "react";
 import type { useSortable } from "@dnd-kit/sortable";
 import {
   Ellipsis,
@@ -49,10 +49,13 @@ import {
   buildSessionRefreshWakeTarget,
   createSessionRefreshState,
   projectTaskListSignature,
-  resolveSessionWakeService,
   runSessionWakeAndReread,
   triggerSessionRefresh,
+  wakeSessionForRefresh,
 } from "@/project-sidebar/refreshSessions.js";
+// 终审 P1-1 flavor 门控：与 F4-11 品牌徽标同原语（WindowsTopLeftLogo/HighspeedShareNoticeCard
+// 同一 import 面）。omnicode 域窗口才允许唤醒链；官方 flavor 保持 Phase 1 幂等只读树重拉。
+import { resolveOmnicodeBrandFromLocation } from "@/root/RootStartupLoading.js";
 import { useBaseWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
 import { useRemoteWorkspaceSessionStore } from "@/store/remoteWorkspaceSessionStore.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
@@ -134,10 +137,20 @@ export const ProjectNodeContent = memo(function ProjectNodeContent({
   // Host 同步器随后首帧 snapshot 静默补库；再在 5s 窗口内轮询重读 tasks-index，
   // 行签名变化（旧会话补进）即提前收口，超时也保证至少重读一次。唤醒不可用
   // （provider 未就绪/远端未连接/服务缺失）降级为 Phase 1 的纯重读。
+  // 终审 P1-1 flavor 门控：唤醒链仅 omnicode 域执行（resolveOmnicodeBrandFromLocation，
+  // F4-11 同原语）；官方窗口点刷新=Phase 1 幂等只读树重拉（e11f282b 豁免理由保持成立）。
   // in-flight 重入合并 + 转圈态仍由纯函数 triggerSessionRefresh 编排
   // （spec: F:\OmniCode\docs\batch3\research\session-sync-mechanism.md §四/§七）。
   const [sessionsRefreshing, setSessionsRefreshing] = useState(false);
   const sessionRefreshState = useRef(createSessionRefreshState());
+  // 终审 P2（卸载取消）：行卸载/列表切换后置 false，唤醒轮询见此立即收口，
+  // 不再为已卸载的行烧满 5s 的整树重读（wake 在途的服务调用无法中止，start-if-needed 幂等）。
+  const sessionRefreshAliveRef = useRef(true);
+  useEffect(() => {
+    return () => {
+      sessionRefreshAliveRef.current = false;
+    };
+  }, []);
   // 轮询判定补库到达的行签名；经 ref 读取，轮询期间拿到的是最新提交而不是点击时的闭包。
   const tasksSignatureRef = useRef("");
   tasksSignatureRef.current = projectTaskListSignature(tasks);
@@ -148,25 +161,18 @@ export const ProjectNodeContent = memo(function ProjectNodeContent({
       sessionRefreshState.current,
       () =>
         runSessionWakeAndReread({
-          wake: async () => {
-            if (!wakeTarget) return null;
-            // 解析不到可安全唤醒的 Host（远端未连接等）→ null，降级为纯重读。
-            const sessionService = resolveSessionWakeService({
+          // P1-1 flavor 门控：仅 omnicode 域（管理器/Profile 实例）走完整唤醒+轮询；
+          // 官方 flavor 保持 Phase 1 幂等只读树重拉（wakeAllowed=false → wake=null → 纯重读）。
+          wake: () =>
+            wakeSessionForRefresh({
               target: wakeTarget,
               baseServices,
               remoteSessions: useRemoteWorkspaceSessionStore.getState(),
-            });
-            if (!sessionService) return null;
-            const result = await sessionService.initializeWorkspace({
-              workspacePath: wakeTarget.workspacePath,
-              ...(wakeTarget.workspaceIdentity
-                ? { workspaceIdentity: wakeTarget.workspaceIdentity }
-                : {}),
-            });
-            return result.available === true;
-          },
+              wakeAllowed: resolveOmnicodeBrandFromLocation(),
+            }),
           reread: refresh,
           signature: () => tasksSignatureRef.current,
+          isCancelled: () => !sessionRefreshAliveRef.current,
         }),
       setSessionsRefreshing,
     );

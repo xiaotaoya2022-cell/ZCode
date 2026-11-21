@@ -2,6 +2,9 @@
 // omnicode 域窗口（loadWindow 注入 omnicodeBrand=1）渲染 OmniCode 白砖黑标；
 // 官方 flavor（无注入）渲染官方 ZCode 徽标（逐行原语义）。SSR renderToStaticMarkup
 // 断言两类徽标的容器类名互斥（白砖 vs 深色渐变壳）。
+// 终审 P2：文件名从 omni5BrandLogo.test.tsx 改为 omnicode 前缀——纳入
+// `npx vitest run omnicode` 过滤门禁（原文件名不含 omnicode 子串，不在该门禁内易漏跑），
+// scripts/engineering-test-files.json 登记同步更新。
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrandLogoBadge, resolveOmnicodeBrandFromLocation } from "@/root/RootStartupLoading.js";

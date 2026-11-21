@@ -127,6 +127,36 @@ export function resolveSessionWakeService(params: {
     : null;
 }
 
+/**
+ * 刷新按钮的唤醒步骤（组件接线抽为可注入纯函数，便于门控分支单测）：
+ * - wakeAllowed=false（官方 flavor / SSR，由组件用 F4-11 原语 resolveOmnicodeBrandFromLocation
+ *   判定后传入——终审 P1-1：官方窗口点刷新保持 Phase 1 幂等只读树重拉，不进唤醒链）：
+ *   直接 null，绝不触碰 session 服务；
+ * - 其余按 resolveSessionWakeService 的规则解析（远端解析不到不回落本机），解析到
+ *   服务才调 initializeWorkspace（start-if-needed），available=true 视为唤醒成功。
+ */
+export async function wakeSessionForRefresh(params: {
+  target: SessionRefreshWakeTarget | null;
+  baseServices: WorkspaceServiceResolverState["sessionsById"][string]["services"] | null;
+  remoteSessions: WorkspaceServiceResolverState;
+  wakeAllowed: boolean;
+}): Promise<boolean | null> {
+  // P1-1：官方 flavor 不进入唤醒链（保持 Phase 1 幂等只读），也不解析服务。
+  if (!params.wakeAllowed) return null;
+  if (!params.target) return null;
+  const sessionService = resolveSessionWakeService({
+    target: params.target,
+    baseServices: params.baseServices,
+    remoteSessions: params.remoteSessions,
+  });
+  if (!sessionService) return null;
+  const result = await sessionService.initializeWorkspace({
+    workspacePath: params.target.workspacePath,
+    ...(params.target.workspaceIdentity ? { workspaceIdentity: params.target.workspaceIdentity } : {}),
+  });
+  return result.available === true;
+}
+
 /** 唤醒编排注入面（纯函数可测）：wake/reread 由组件用真实服务接线。 */
 export interface SessionWakeRuntime {
   /**
@@ -140,10 +170,18 @@ export interface SessionWakeRuntime {
   reread(): Promise<unknown>;
   /** 当前行任务签名（taskListSignature(tasks)），由组件读 ref 保证拿到最新提交。 */
   signature(): string;
+  /**
+   * 终审 P2 取消探测（可选）：组件卸载/列表切换后为 true。轮询（与 wake 后的重读收尾）
+   * 见到取消立即停止——已卸载的行不再烧满 5s 的整树重读；wake 本身在途的服务调用
+   * 无法中止（start-if-needed 幂等，无副作用放大量）。
+   */
+  isCancelled?(): boolean;
 }
 
 export const SESSION_REFRESH_WAKE_TIMEOUT_MS = 5_000;
 export const SESSION_REFRESH_POLL_INTERVAL_MS = 400;
+/** 终审 P2（已同步空转）：签名未变轮次按 400→800→1600 退避，减少无补库可来时的整树重读浪费。 */
+export const SESSION_REFRESH_POLL_INTERVAL_MAX_MS = 1_600;
 
 export interface SessionWakeTiming {
   now(): number;
@@ -164,6 +202,8 @@ const realTiming: SessionWakeTiming = {
  *   签名变化即提前结束，超时也保证最后完成一次重读，绝不吞掉 Phase 1 的可见性。
  * - reread 抛错（树暂不可读）：向上传播（与 Phase 1 同语义），由 triggerSessionRefresh
  *   统一清转圈态，错误展示交给 useProjectTree 的既有 error 投影。
+ * - isCancelled（组件卸载/列表切换）：轮询各拍与 wake 后的收尾重读见到取消立即停止，
+ *   不再为已卸载的行烧整树重读（终审 P2 修复）。
  */
 export async function runSessionWakeAndReread(
   runtime: SessionWakeRuntime,
@@ -176,14 +216,22 @@ export async function runSessionWakeAndReread(
       .then((result) => result === true)
       .catch(() => false)) === true;
   if (!woke) {
+    if (runtime.isCancelled?.()) return { woke: false, changed: false };
     await runtime.reread();
     return { woke: false, changed: false };
   }
   const deadline = timing.now() + SESSION_REFRESH_WAKE_TIMEOUT_MS;
+  let interval = SESSION_REFRESH_POLL_INTERVAL_MS;
   for (;;) {
+    if (runtime.isCancelled?.()) return { woke: true, changed: false };
     await runtime.reread();
     if (runtime.signature() !== baseline) return { woke: true, changed: true };
     if (timing.now() >= deadline) return { woke: true, changed: false };
-    await timing.delay(SESSION_REFRESH_POLL_INTERVAL_MS);
+    // 已同步场景签名不会变化（订阅已建、无补库可来）：间隔退避，整树重读次数从
+    // ~13 次降到 ~6 次，窗口总量仍是 5s（终审 P2；真正的"提前收口"需要 seed 完成
+    // 信号，renderer 侧无此投影，记录为已知项——转圈仍会跑满 5s）。
+    const remaining = deadline - timing.now();
+    await timing.delay(Math.min(interval, Math.max(remaining, 0)));
+    interval = Math.min(interval * 2, SESSION_REFRESH_POLL_INTERVAL_MAX_MS);
   }
 }
