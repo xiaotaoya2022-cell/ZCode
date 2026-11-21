@@ -9,6 +9,7 @@ import {
   ZCODE_BUILD_TIME,
   ZCODE_COMMIT,
   ZCODE_ENV,
+  ZCODE_PRODUCT_FLAVOR,
   ZCODE_VERSION,
 } from "@zcode/shared";
 import { createCustomAboutDialogHtml } from "./aboutWindow.js";
@@ -54,6 +55,24 @@ interface AboutSnapshotOptions {
 }
 
 const ABOUT_APPLICATION_NAME = "ZCode Desktop App";
+/**
+ * [OmniCode] About 品牌门控（D12 任务 B）：OmniCode 构建（管理器 + Profile 实例同
+ * ZCODE_PRODUCT_FLAVOR=omnicode）显示 OmniCode 品牌名/版权/门洞标；官方 flavor 独立
+ * 运行时门控恒 false，名称、文案、logo、版本行与官方完全一致（零改动铁律）。
+ * 解析为显式 flavor 入参的纯函数（测试双分支注入；生产路径传编译期常量）。
+ */
+const OMNICODE_ABOUT_APPLICATION_NAME = "OmniCode Desktop App";
+
+export interface AboutBrand {
+  applicationName: string;
+  logoVariant: "zcode" | "omnicode";
+}
+
+export function resolveAboutBrandForFlavor(flavor: string): AboutBrand {
+  return flavor === "omnicode"
+    ? { applicationName: OMNICODE_ABOUT_APPLICATION_NAME, logoVariant: "omnicode" }
+    : { applicationName: ABOUT_APPLICATION_NAME, logoVariant: "zcode" };
+}
 // 自定义 About 内容本体是 256x280；原生窗口如果同尺寸会让内容贴满透明窗口边界。
 // 这里给 BrowserWindow 额外留出背景呼吸空间，避免正式 About 看起来比 demo 更局促。
 const ABOUT_WINDOW_WIDTH = 256;
@@ -99,8 +118,18 @@ function normalizePackageVersion(version: string | undefined): string {
   return normalized === "unknown" ? normalized : normalized.replace(/^[^\d]*/, "") || normalized;
 }
 
-function getAboutMessages(locale: Locale): (typeof ABOUT_MESSAGES)["en-US"] {
-  return ABOUT_MESSAGES[toZhOrEnLocale(locale)];
+function getAboutMessages(locale: Locale, flavor: string = ZCODE_PRODUCT_FLAVOR): (typeof ABOUT_MESSAGES)["en-US"] {
+  const messages = ABOUT_MESSAGES[toZhOrEnLocale(locale)];
+  if (flavor !== "omnicode") {
+    return messages;
+  }
+  // [OmniCode] About 品牌：标题/版权行换 OmniCode 署名（其余文案结构与官方一致）。
+  return {
+    ...messages,
+    aboutTitle: locale === "zh-CN" ? "关于 OmniCode" : "About OmniCode",
+    copyright: (year) =>
+      locale === "zh-CN" ? `版权所有 © ${year} OmniCode。` : `Copyright © ${year} OmniCode.`,
+  };
 }
 
 function readJsonFile<T>(filePath: string): T | null {
@@ -195,8 +224,9 @@ export function formatAboutDetail(snapshot: AboutSnapshot): string {
 export function formatAboutCopyright(
   year = new Date().getFullYear(),
   locale: Locale = DEFAULT_LOCALE,
+  flavor: string = ZCODE_PRODUCT_FLAVOR,
 ): string {
-  return getAboutMessages(locale).copyright(year);
+  return getAboutMessages(locale, flavor).copyright(year);
 }
 
 export function formatAboutOptimizationLine(
@@ -214,13 +244,15 @@ export function createSystemAboutPanelOptions(
   snapshot: AboutSnapshot,
   year = new Date().getFullYear(),
   locale: Locale = DEFAULT_LOCALE,
+  flavor: string = ZCODE_PRODUCT_FLAVOR,
 ): AboutPanelOptionsOptions {
-  const messages = getAboutMessages(locale);
+  const messages = getAboutMessages(locale, flavor);
   const credits = formatAboutOptimizationLine(snapshot, locale);
+  const brand = resolveAboutBrandForFlavor(flavor);
   return {
-    applicationName: ABOUT_APPLICATION_NAME,
+    applicationName: brand.applicationName,
     applicationVersion: `${messages.versionLabel} ${snapshot.appVersion}`,
-    copyright: formatAboutCopyright(year, locale),
+    copyright: formatAboutCopyright(year, locale, flavor),
     // 设计原因：macOS About Panel 的 credits 区最接近参考图里的硬件优化说明位置。
     // 保持信息交给系统级面板渲染，避免自绘窗口和原生关于弹窗风格割裂。
     ...(credits ? { credits } : {}),
@@ -274,12 +306,13 @@ export async function showAboutDialog(
   void aboutWindow.loadURL(
     `data:text/html;charset=utf-8,${encodeURIComponent(
       createCustomAboutDialogHtml({
-        applicationName: ABOUT_APPLICATION_NAME,
+        applicationName: resolveAboutBrandForFlavor(ZCODE_PRODUCT_FLAVOR).applicationName,
         appVersion: snapshot.appVersion,
         copyright: formatAboutCopyright(undefined, locale),
         optimizationLine: formatAboutOptimizationLine(snapshot, locale),
         versionLabel: aboutMessages.versionLabel,
         okButtonLabel: aboutMessages.okButtonLabel,
+        logoVariant: resolveAboutBrandForFlavor(ZCODE_PRODUCT_FLAVOR).logoVariant,
       }),
     )}`,
   );

@@ -5,6 +5,11 @@ interface CustomAboutDialogHtmlInput {
   optimizationLine: string;
   versionLabel: string;
   okButtonLabel: string;
+  /**
+   * [OmniCode] 品牌变体（about.ts 按 ZCODE_PRODUCT_FLAVOR 门控传入）：zcode=官方深壳
+   * Z 标（官方 flavor 零改动的默认值）；omnicode=OmniCode 白砖黑门洞标。
+   */
+  logoVariant?: "zcode" | "omnicode";
 }
 
 function escapeHtml(value: string): string {
@@ -16,7 +21,56 @@ function escapeHtml(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
+/** OmniCode 门洞剪影（与 packages/ui/src/root/RootStartupLoading.tsx OmniCodeStartupLogo 同源 path；viewBox=剪影包围盒）。 */
+const OMNICODE_ABOUT_LOGO_SVG = `<svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="118"
+              height="120"
+              fill="none"
+              viewBox="278 270 468 476"
+              class="app-logo"
+              focusable="false"
+            >
+              <path
+                fill="currentColor"
+                fillRule="evenodd"
+                d="M 278 746 L 278 466 Q 278 386 348 352 L 512 270 L 676 352 Q 746 386 746 466 L 746 746 L 590 746 L 590 466 Q 590 430 554 430 L 470 430 Q 434 430 434 466 L 434 746 Z"
+              />
+            </svg>`;
+
+const ZCODE_ABOUT_LOGO_SVG = `<svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="118"
+              height="100"
+              fill="none"
+              viewBox="0 0 256 218"
+              class="app-logo"
+              focusable="false"
+            >
+              <path
+                fill="currentColor"
+                d="M134.4 0.130152L116.48 25.6022C113.665 29.5699 109.054 32.0019 104.064 32.0019H6.3999V0C6.3999 0.130149 134.4 0.130152 134.4 0.130152Z"
+              />
+              <path fill="currentColor" d="M256 0.130127L102.401 217.732H0L153.599 0.130127H256Z" />
+              <path
+                fill="currentColor"
+                d="M121.601 217.732L139.65 192.134C142.465 188.166 147.076 185.734 152.067 185.734H249.604V217.736H121.601V217.732Z"
+              />
+            </svg>`;
+
 export function createCustomAboutDialogHtml(input: CustomAboutDialogHtmlInput): string {
+  // [OmniCode] 品牌壳类与 CSS 随变体整体注入：官方缺省 HTML 不含任何 omnicode 类名/样式。
+  const isOmnicode = input.logoVariant === "omnicode";
+  const brandIconCss = isOmnicode
+    ? `
+      /* [OmniCode] 白砖黑标壳（与 OmniCodeStartupLogoBadge 同款：亮砖 + 黑色门洞剪影） */
+      .app-icon--omnicode {
+        border: 1px solid rgba(0, 0, 0, 0.1);
+        background: #ffffff;
+        color: #080808;
+      }
+`
+    : "";
   return `<!doctype html>
 <html>
   <head>
@@ -100,6 +154,7 @@ export function createCustomAboutDialogHtml(input: CustomAboutDialogHtmlInput): 
         color: #ffffff;
         box-shadow: 0 10px 13px -3px rgb(0 0 0 / 0.2), 0 4px 5px -3px rgb(0 0 0 / 0.2);
       }
+${brandIconCss}
 
       .app-logo {
         width: 30px;
@@ -170,26 +225,8 @@ export function createCustomAboutDialogHtml(input: CustomAboutDialogHtmlInput): 
     <main class="about-window" aria-label="${escapeHtml(input.applicationName)} About Window">
       <section class="about-card" role="dialog" aria-modal="true" aria-labelledby="about-title">
         <div class="content">
-          <div class="app-icon" aria-hidden="true">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="118"
-              height="100"
-              fill="none"
-              viewBox="0 0 256 218"
-              class="app-logo"
-              focusable="false"
-            >
-              <path
-                fill="currentColor"
-                d="M134.4 0.130152L116.48 25.6022C113.665 29.5699 109.054 32.0019 104.064 32.0019H6.3999V0C6.3999 0.130149 134.4 0.130152 134.4 0.130152Z"
-              />
-              <path fill="currentColor" d="M256 0.130127L102.401 217.732H0L153.599 0.130127H256Z" />
-              <path
-                fill="currentColor"
-                d="M121.601 217.732L139.65 192.134C142.465 188.166 147.076 185.734 152.067 185.734H249.604V217.736H121.601V217.732Z"
-              />
-            </svg>
+          <div class="app-icon${input.logoVariant === "omnicode" ? " app-icon--omnicode" : ""}" aria-hidden="true">
+            ${input.logoVariant === "omnicode" ? OMNICODE_ABOUT_LOGO_SVG : ZCODE_ABOUT_LOGO_SVG}
           </div>
           <h1 id="about-title" class="title">
             ${escapeHtml(input.applicationName)}<br />
