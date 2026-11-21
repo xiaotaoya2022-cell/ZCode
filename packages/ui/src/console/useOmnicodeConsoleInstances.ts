@@ -22,6 +22,19 @@ export interface OmnicodeInstanceFrame {
   height?: number;
 }
 
+/** [OmniCode] omni.5 真机验收修复：可选桥方法统一存在性检查——桥装配缺失（官方
+ * flavor / 旧 preload / 漏装配）时抛可读错误，由 runAction 捕获转 toast，替代此前
+ * `platform.method!` 非空断言在 undefined 上触发的裸 TypeError crash。 */
+function requireOmnicodeBridgeMethod<TResult>(
+  method: ((...args: never[]) => Promise<TResult>) | undefined,
+  name: string,
+): (...args: unknown[]) => Promise<TResult> {
+  if (!method) {
+    throw new Error(`omnicode.platform-method-unavailable: ${name}`);
+  }
+  return method as (...args: unknown[]) => Promise<TResult>;
+}
+
 export function useOmnicodeConsoleInstances() {
   const { intl } = useZCodeIntl();
   const platform = usePlatform();
@@ -174,7 +187,7 @@ export function useOmnicodeConsoleInstances() {
     (profile: OmnicodeProfileSummaryInfo) => {
       // 批次1 P1-4「启动=重启」：已运行实例点击启动 = 先三段式优雅停再启动。
       void runAction(
-        () => platform.launchOmnicodeProfile!({ id: profile.id }),
+        () => requireOmnicodeBridgeMethod(platform.launchOmnicodeProfile, "launchOmnicodeProfile")({ id: profile.id }),
         "settings.omnicodeProfiles.toastLaunched",
       );
     },
@@ -185,7 +198,7 @@ export function useOmnicodeConsoleInstances() {
     (profile: OmnicodeProfileSummaryInfo) => {
       if (!profile.running) return;
       void runAction(
-        () => platform.stopOmnicodeProfile!({ id: profile.id }),
+        () => requireOmnicodeBridgeMethod(platform.stopOmnicodeProfile, "stopOmnicodeProfile")({ id: profile.id }),
         "settings.omnicodeProfiles.toastStopped",
       );
     },
@@ -195,7 +208,7 @@ export function useOmnicodeConsoleInstances() {
   const handleClone = useCallback(
     (profile: OmnicodeProfileSummaryInfo) => {
       void runAction(
-        () => platform.cloneOmnicodeProfile!({ id: profile.id, name: `${profile.name} 2` }),
+        () => requireOmnicodeBridgeMethod(platform.cloneOmnicodeProfile, "cloneOmnicodeProfile")({ id: profile.id, name: `${profile.name} 2` }),
         "settings.omnicodeProfiles.toastCloned",
       );
     },
@@ -262,7 +275,7 @@ export function useOmnicodeConsoleInstances() {
         });
         if (!confirmed) return;
         await runAction(
-          () => platform.removeOmnicodeProfile!({ id: profile.id }),
+          () => requireOmnicodeBridgeMethod(platform.removeOmnicodeProfile, "removeOmnicodeProfile")({ id: profile.id }),
           "settings.omnicodeProfiles.toastRemoved",
         );
       })();
@@ -295,7 +308,7 @@ export function useOmnicodeConsoleInstances() {
         return;
       }
       void runAction(
-        () => platform.renameOmnicodeProfile!({ id: profile.id, name: trimmed }),
+        () => requireOmnicodeBridgeMethod(platform.renameOmnicodeProfile, "renameOmnicodeProfile")({ id: profile.id, name: trimmed }),
         "console.toastRenamed",
       );
     },

@@ -19,7 +19,9 @@ import type {
   OmnicodeProfileCloneInput,
   OmnicodeProfileCreateInput,
   OmnicodeProfileIdInput,
+  OmnicodeProfileRenameInput,
   OmnicodeProfileSummaryInfo,
+  OmnicodeConsoleCredentialOsState,
 } from "@zcode/shared";
 
 function requireBridge<T>(result: Promise<T> | undefined): Promise<T> {
@@ -42,6 +44,13 @@ export const desktopOmnicodePlatformBridge = {
     payload: OmnicodeProfileCloneInput,
   ): Promise<{ profile: OmnicodeProfileSummaryInfo }> =>
     requireBridge(window.zcode.cloneOmnicodeProfile?.(payload)),
+  // [OmniCode] 实例元数据批次：重命名（omni.5 真机验收修复——实例元数据批次落地时
+  // preload/IPC/contract 三层齐全但此处桥漏装配，UI `platform.renameOmnicodeProfile!`
+  // 触发 "not a function" TypeError；与 clone 同模式补齐映射）。
+  renameOmnicodeProfile: (
+    payload: OmnicodeProfileRenameInput,
+  ): Promise<{ profile: OmnicodeProfileSummaryInfo }> =>
+    requireBridge(window.zcode.renameOmnicodeProfile?.(payload)),
   launchOmnicodeProfile: (payload: OmnicodeProfileIdInput): Promise<{ pid: number }> =>
     requireBridge(window.zcode.launchOmnicodeProfile?.(payload)),
   stopOmnicodeProfile: (payload: OmnicodeProfileIdInput): Promise<{ ok: boolean }> =>
@@ -118,4 +127,7 @@ export const desktopOmnicodePlatformBridge = {
     payload: OmnicodeAccountDetectRequest,
   ): Promise<OmnicodeAccountDetectResult> =>
     requireBridge(window.zcode.getOmnicodeAccountDetect?.(payload)),
+  // [OmniCode] omni.5 真机修复（F2-5）：console 根 os: 旧密文迁移状态（无标记=null）
+  getOmnicodeConsoleCredentialOsState: (): Promise<OmnicodeConsoleCredentialOsState | null> =>
+    window.zcode.getOmnicodeConsoleCredentialOsState?.() ?? Promise.resolve(null),
 };

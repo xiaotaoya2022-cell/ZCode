@@ -1668,8 +1668,23 @@ function RootInner({
   // 批次3 设置入口：管理器开着设置 tab 时放行，落进下方既有
   // 「!workspaceShellPath && isSettingsTabActive」全屏设置渲染分支（该分支本就不依赖
   // workspace 存在）；官方 flavor 的 isOmnicodeManagerConsole 恒为 false，逐行原样。
+  // [OmniCode] omni.5 真机验收修复（bug3 根因）：早返回此前为裸 <ConsoleHome />，
+  // 绕过 RootShell → ConfirmDialogHost/AlertDialogHost 等 store 驱动对话框无宿主，
+  // 收养横幅 requestConfirmation 永不 resolve。改挂 RootShell（与其余早返回分支同
+  // 语义）。RootShell 职责清单与在本分支的适用性核实：
+  //   1. div.relative h-dvh 包裹 — 无害（ConsoleHome 自身 min-h-dvh，桌面管理器无
+  //      Web 远控地址栏问题）；
+  //   2. ConfirmDialogHost / AlertDialogHost / PluginUiFollowUpDialogHost — 需要
+  //      （store 驱动，挂载即兜底；plugin host 无会话时为 no-op）；
+  //   3. PluginUiBackgroundHost — manager 窗口无插件会话，no-op，随壳挂载无成本；
+  //   4. CuaPermissionObservationAttachment — 仅响应 agent 会话事件，管理器无会话，
+  //      no-op。整壳挂载=与 RootShell 演进同步的最小面（子集手挂会随壳漂移）。
   if (isOmnicodeManagerConsole && !isSettingsTabActive) {
-    return <ConsoleHome />;
+    return (
+      <RootShell>
+        <ConsoleHome />
+      </RootShell>
+    );
   }
 
   if (isStartupRenderBlocked) {
