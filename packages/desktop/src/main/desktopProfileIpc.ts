@@ -322,9 +322,13 @@ function registerDesktopOmnicodeConsoleViewportIpcHandlers(): void {
       }
       // [OmniCode] 实例元数据批次：排序态变化（sortMode/customOrder）同步托盘菜单顺序
       //（三处一致：托盘与网格/设置列表共用同一排序函数与同一持久化态）。
+      // 审计 R2 复核 P3：停靠态（dockDefault/dockedByProfileId）变化同样触发托盘缓存刷新
+      // ——「平铺全部」enabled 依赖未停靠运行计数，切换停靠后及时收敛（不再等下一次运行态事件）。
       if (
         current.sortMode !== merged.sortMode ||
-        JSON.stringify(current.customOrder ?? []) !== JSON.stringify(merged.customOrder ?? [])
+        JSON.stringify(current.customOrder ?? []) !== JSON.stringify(merged.customOrder ?? []) ||
+        current.dockDefault !== merged.dockDefault ||
+        JSON.stringify(current.dockedByProfileId ?? {}) !== JSON.stringify(merged.dockedByProfileId ?? {})
       ) {
         refreshOmnicodeTrayNameCache();
       }
