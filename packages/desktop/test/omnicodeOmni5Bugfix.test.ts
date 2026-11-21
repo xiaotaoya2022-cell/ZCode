@@ -11,6 +11,7 @@ import {
   createSystemCredentialCipher,
   reWrapOsCredentialValuesWithEnvKey,
 } from "@zcode/shared/credential-security";
+import { backupCorruptFile } from "@zcode/shared/node";
 
 vi.mock("electron", () => ({ BrowserWindow: { getAllWindows: () => [] } }));
 vi.mock("../src/main/omnicode/profileRuntime.js", () => ({
@@ -19,6 +20,23 @@ vi.mock("../src/main/omnicode/profileRuntime.js", () => ({
   getOmnicodeProfileDir: (id: string) => `/virtual/omnicode/${id}`,
   getOmnicodeConsoleDataBaseDir: () => "/virtual/omnicode-console-data",
 }));
+// 终审 P2-2：测试环境无系统 keyring——迁移成功路径用注入式假探测（默认 null=条目缺失，
+// 成功用例再 mockResolvedValue 为可用 key）。其余导出保持真实实现。
+vi.mock("@zcode/shared/credential-security", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@zcode/shared/credential-security")>();
+  return {
+    ...actual,
+    readSystemCredentialKeyringEntry: vi.fn(async () => null),
+  };
+});
+// 终审 P2-1：备份失败分支的可注入断言面（默认走真实实现，备份失败用例一次性拒绝）。
+vi.mock("@zcode/shared/node", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@zcode/shared/node")>();
+  return {
+    ...actual,
+    backupCorruptFile: vi.fn(actual.backupCorruptFile),
+  };
+});
 
 import { readOmnicodeLoginHealthFromDataRoot } from "../src/main/omnicode/loginHealth.js";
 import {
@@ -26,6 +44,7 @@ import {
   readConsoleRootOsMigrationMarker,
   runConsoleRootOsCredentialMigration,
 } from "../src/main/omnicode/consoleCredentialOsMigration.js";
+import { readSystemCredentialKeyringEntry } from "@zcode/shared/credential-security";
 
 const SECRET = "omni5-fix-secret-0123456789abcdef-0123456789";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -199,6 +218,123 @@ describe("omni.5 F2-6(bug2): loginHealth unknown 细分", () => {
     await expect(readOmnicodeLoginHealthFromDataRoot(root, NOW)).resolves.toEqual({
       status: "unknown",
       unknownReason: "unreadable",
+    });
+  });
+});
+
+// ── 终审 P2-2：迁移成功路径编排（注入式 keyring 探测，全链断言）─────────────────
+// 此前仅有 reWrap 纯函数双向断言与 unrecoverable 守卫路径；keyring 可达 → reWrap →
+// rm 钉扎 → 原子写回的成功编排此前只靠实现阅读。本组用注入式假探测锁住完整编排。
+describe("omni.5 终审: 迁移成功路径编排（假 keyring 探测注入）", () => {
+  let root: string;
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "omni5-os-migration-success-"));
+    await mkdir(join(root, ".zcode", "v2"), { recursive: true });
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  // env 密文指纹 = sha256(env 密钥字节)，密钥字节 = sha256(固化 secret)（与 reWrap 同构造）。
+  const envKeyFingerprint = createHash("sha256")
+    .update(createHash("sha256").update(SECRET).digest())
+    .digest("hex")
+    .slice(0, 24);
+  const osKeyRaw = createHash("sha256").update("omni5-integration-os-key").digest();
+  const osKeyEncoded = osKeyRaw.toString("base64url");
+  const osKeyFingerprint = createHash("sha256").update(osKeyRaw).digest("hex").slice(0, 24);
+
+  /** 用 os: 原始密钥手工构造 enc:v2:os: 密文（aes-256-gcm，iv.tag.ciphertext base64url）。 */
+  function sealOs(plain: string): string {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", osKeyRaw, iv);
+    const bytes = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
+    return [iv, cipher.getAuthTag(), bytes]
+      .map((part) => part.toString("base64url"))
+      .join(".");
+  }
+
+  /** 布置迁移前置状态：两个 os: 值 + credential-source 钉扎 + 旧 marker。 */
+  async function setupMigrationInput(): Promise<{ credentialsPath: string; raw: string }> {
+    const credentialsPath = join(root, ".zcode", "v2", "credentials.json");
+    const raw = JSON.stringify({
+      "oauth:zai:expires_at": `enc:v2:os:${osKeyFingerprint}:${sealOs(String(1_700_000_000_000))}`,
+      "oauth:active_provider": `enc:v2:os:${osKeyFingerprint}:${sealOs("zai")}`,
+    });
+    await writeFile(credentialsPath, raw, "utf8");
+    // 钉扎标记（成功迁移后必须移除）与旧 marker（成功迁移后必须清除）。
+    await writeFile(join(root, ".zcode", "v2", "credential-source"), "os", "utf8");
+    await writeFile(join(root, ".zcode", "v2", OMNICODE_MIGRATION_MARKER_FILE), "{}", "utf8");
+    return { credentialsPath, raw };
+  }
+
+  it("keyring 可达 → reWrap → 原子写回 env: → 备份存在 → 钉扎/marker 清除（全链）", async () => {
+    const { credentialsPath, raw } = await setupMigrationInput();
+    vi.mocked(readSystemCredentialKeyringEntry).mockResolvedValue(osKeyEncoded);
+
+    const outcome = await runConsoleRootOsCredentialMigration(root, SECRET);
+    expect(outcome.status).toBe("migrated");
+    expect(outcome.migratedCount).toBe(2);
+    // 备份先行：内容寻址备份存在且内容与原文件一致（原 os: 密文证据不丢）。
+    expect(outcome.backupPath).toBeTruthy();
+    await expect(readFile(outcome.backupPath!, "utf8")).resolves.toBe(raw);
+
+    // live 文件已重写为 env: 密文（不再是 os:），且能被固化 env 密钥解回明文（全链可解）。
+    const migratedRaw = await readFile(credentialsPath, "utf8");
+    expect(migratedRaw).not.toContain("enc:v2:os:");
+    expect(migratedRaw).toContain("enc:v2:env:");
+    const migrated = JSON.parse(migratedRaw) as Record<string, string>;
+    const cipher = createSystemCredentialCipher({
+      filePath: "/virtual/omni5-migrated.json",
+      env: { ZCODE_CREDENTIAL_SECRET: SECRET },
+    });
+    await expect(cipher.decrypt(migrated["oauth:active_provider"]!)).resolves.toBe("zai");
+    await expect(cipher.decrypt(migrated["oauth:zai:expires_at"]!)).resolves.toBe(
+      String(1_700_000_000_000),
+    );
+    // 密文指纹为 env 密钥指纹（host 后续用 managed secret 短路读取，不再触 keyring）。
+    expect(migrated["oauth:active_provider"]).toMatch(new RegExp(`^enc:v2:env:${envKeyFingerprint}:`));
+
+    // 编排收尾：钉扎解除 + marker 清除（成功路径不给 UI 留重登引导）。
+    await expect(
+      readFile(join(root, ".zcode", "v2", "credential-source"), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readConsoleRootOsMigrationMarker(root)).resolves.toBeNull();
+  });
+
+  it("备份失败 → unrecoverable(backup-failed) + 补写 marker，live 文件保持 os: 原样（终审 P2-1）", async () => {
+    const { credentialsPath, raw } = await setupMigrationInput();
+    vi.mocked(readSystemCredentialKeyringEntry).mockResolvedValue(osKeyEncoded);
+    // 证据备份与 markUnrecoverable 的兜底重试各拒绝一次（备份持续失败 → 无证据路径）。
+    vi.mocked(backupCorruptFile)
+      .mockRejectedValueOnce(new Error("backup disk full"))
+      .mockRejectedValueOnce(new Error("backup disk full"));
+
+    const outcome = await runConsoleRootOsCredentialMigration(root, SECRET);
+    // 解密其实已成功：reason 不得误标 decrypt-failed（终审 P2-1 修复点）。
+    expect(outcome).toEqual({ status: "unrecoverable", reason: "backup-failed" });
+    // live 文件未动（os: 值留存待重登），UI 有重登引导（marker 已补写、无备份证据）。
+    await expect(readFile(credentialsPath, "utf8")).resolves.toBe(raw);
+    await expect(readConsoleRootOsMigrationMarker(root)).resolves.toMatchObject({
+      status: "unrecoverable",
+      reason: "backup-failed",
+      backedUp: false,
+    });
+  });
+
+  it("keyring 探测不可达（抛错）→ unrecoverable(keyring-unavailable)，备份+标记，live 原样", async () => {
+    const { credentialsPath, raw } = await setupMigrationInput();
+    vi.mocked(readSystemCredentialKeyringEntry).mockRejectedValue(new Error("dbus down"));
+
+    const outcome = await runConsoleRootOsCredentialMigration(root, SECRET);
+    expect(outcome.status).toBe("unrecoverable");
+    expect(outcome.reason).toBe("keyring-unavailable");
+    expect(outcome.backupPath).toBeTruthy();
+    await expect(readFile(outcome.backupPath!, "utf8")).resolves.toBe(raw);
+    await expect(readFile(credentialsPath, "utf8")).resolves.toBe(raw);
+    await expect(readConsoleRootOsMigrationMarker(root)).resolves.toMatchObject({
+      status: "unrecoverable",
+      backedUp: true,
     });
   });
 });

@@ -21,8 +21,12 @@
 //    处置，登录新写入因 env 密钥已透传（desktopRuntimeEnv buildHostProcessEnv）落在
 //    enc:v2:env:，重登一次后永久稳定）。
 //
-// 运行时机：管理器 main 启动一次性 fire-and-forget（先于 host 大规模凭据读取即可；
-// 迁移用 withFileLock 与 host 凭据访问互斥，并发安全）。官方 flavor 恒不调用（零改动）。
+// 运行时机：管理器 main 启动一次性 fire-and-forget（先于 host 大规模凭据读取即可）。
+// 并发说明（终审 P2 如实修订）：withFileLock 是迁移自身的文件锁，锁内做双检重读防"读旧
+// 值写回"；但 host/实例侧 credentialService 的 writeAll/readAll **并不持同一把锁**，
+// 二者并无真正互斥。实际风险窗口不可达：bug1 态下 host 对 os: 值解密失败→save/readAll
+// 在写之前就失败；迁移成功后 os: 值已不存在，"锁内旧值覆盖新写"的窗口随之关闭。
+// 官方 flavor 恒不调用（零改动）。
 import { readFile, rm } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
@@ -49,8 +53,9 @@ export interface ConsoleOsCredentialMigrationOutcome {
   /** 迁移/备份到的文件路径（unrecoverable 时为 .corrupt-<hash>.bak 证据路径）。 */
   backupPath?: string;
   migratedCount?: number;
-  /** 探测判定的 keyring 失败原因（unrecoverable 时填，供日志与 UI 引导措辞）。 */
-  reason?: "keyring-unavailable" | "keyring-entry-missing" | "decrypt-failed";
+  /** 探测判定的失败原因（unrecoverable 时填，供日志与 UI 引导措辞；backup-failed=解密
+   * 已成功但备份失败，放弃写回——终审 P2 修复：不再误标 decrypt-failed）。 */
+  reason?: "keyring-unavailable" | "keyring-entry-missing" | "decrypt-failed" | "backup-failed";
 }
 
 function readOsKeyFingerprints(record: Record<string, string>): Set<string> {
@@ -101,7 +106,10 @@ export async function runConsoleRootOsCredentialMigration(
     return markUnrecoverable(credentialsPath, "keyring-unavailable", "env-secret-missing");
   }
 
-  // 迁移全程持凭据文件锁，与 host/实例侧凭据访问互斥（keyring 锁序同 cipher：文件锁内探测）。
+  // 迁移持迁移自己的凭据文件锁（锁内双检重读防"读旧值写回"）。如实说明（终审 P2）：
+  // host/实例侧 writeAll/readAll 不持这把锁，二者并无真正互斥——实际风险窗口不可达：
+  // bug1 态 host 对 os: 值解密失败（save/readAll 在写之前失败），迁移成功后 os: 值
+  // 已不存在；keyring 锁序同 cipher：文件锁内探测。
   return withFileLock(credentialsPath, async () => {
     // 双检：锁内重读（host 可能已并发写入 env: 值）。
     let lockedRaw: string;
@@ -140,12 +148,14 @@ export async function runConsoleRootOsCredentialMigration(
     if (!migrated) {
       return markUnrecoverable(credentialsPath, "decrypt-failed");
     }
-    // 先备份原文件（内容寻址 0600 排他），再原子写回；备份失败则放弃写回（证据优先）。
+    // 先备份原文件（内容寻址 0600 排他），再原子写回；备份失败则放弃写回（证据优先），
+    // 并按不可恢复处置补写 marker——此时 reWrap 已成功（解密未失败），reason 不能误标
+    // decrypt-failed（终审 P2：原实现误标且不写 marker，UI 无重登引导）。
     let backupPath: string;
     try {
       backupPath = await backupCorruptFile(credentialsPath);
     } catch {
-      return { status: "unrecoverable", reason: "decrypt-failed" };
+      return await markUnrecoverable(credentialsPath, "backup-failed");
     }
     await atomicWritePrivateTextFile(credentialsPath, `${JSON.stringify(migrated, null, 2)}\n`);
     // 解除 os 钉扎：删除 credential-source（cipher 契约里任何非 os 标记都会让 keyring

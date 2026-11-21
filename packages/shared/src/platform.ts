@@ -478,7 +478,7 @@ export interface OmnicodeLoginHealthInfo {
  */
 export interface OmnicodeConsoleCredentialOsState {
   status: "unrecoverable";
-  /** 探测失败原因：keyring-unavailable / keyring-entry-missing / decrypt-failed / env-secret-missing。 */
+  /** 探测失败原因：keyring-unavailable / keyring-entry-missing / decrypt-failed / backup-failed / env-secret-missing。 */
   reason: string;
   /** 标记写入时刻（ISO）。 */
   markedAt: string;
