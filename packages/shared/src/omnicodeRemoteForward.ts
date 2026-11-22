@@ -15,6 +15,8 @@
 // - 不新增常驻轮询：转发结果走既有桥事件推送；pending 死线由 expire 在转发
 //   结果/断连对账事件时点调用收口（见 omnicodeRemoteAggregate.ts 路由表）。
 import { z } from "zod";
+import { WEB_REMOTE_CONTROL_RPC_TRANSPORT_LIMITS } from "./web-remote-control-rpc-transport.js";
+import { omnicodeRemoteWorkspaceEntrySchema } from "./omnicodeRemoteAggregate.js";
 
 /**
  * 转发载荷类别（spec §4 remoteForward.kind）：
@@ -94,3 +96,89 @@ export type OmnicodeRemoteForwardResultMessage = z.infer<
 export type OmnicodeRemoteHostAnnounceMessage = z.infer<
   typeof omnicodeRemoteHostAnnounceMessageSchema
 >;
+
+// ─── R3 workspace-list 跨实例目录查询（桥命令域：管理器 → 被聚合实例 → 管理器；非 relay 链）───
+// spec §5：聚合宿主的 workspace-list 扩展到其他实例——管理器向各在线实例桥发清单请求，
+// 被聚合实例执行器回自己的可用工作区快照（事件驱动：结果应答 + 快照变化上行报告，
+// 无常驻轮询，spec §7）。被聚合实例侧零 relay 零凭据：只应答桥命令（spec §3 角色边界）。
+
+/** 单实例 workspace-list 上限（防异常快照放大桥载荷；200 ≫ 单窗口真实工作区数量）。 */
+export const OMNICODE_REMOTE_WORKSPACE_LIST_MAX_ENTRIES = 200;
+
+const remoteDirectoryRequestIdSchema = z
+  .string()
+  .min(8)
+  .max(64)
+  .regex(/^[A-Za-z0-9._:-]+$/u, "requestId 形态非法");
+
+const remoteWorkspaceListEntriesSchema = z
+  .array(omnicodeRemoteWorkspaceEntrySchema)
+  .max(OMNICODE_REMOTE_WORKSPACE_LIST_MAX_ENTRIES);
+
+/** 管理器 → 实例的目录查询桥命令（requestId 关联应答；实例执行器按自身快照回 Result）。 */
+export const omnicodeRemoteWorkspaceListRequestCommandSchema = z
+  .object({
+    type: z.literal("remoteWorkspaceListRequest"),
+    requestId: remoteDirectoryRequestIdSchema,
+  })
+  .strict();
+
+/**
+ * 实例 → 管理器：目录查询应答（requestId 关联）。error 非空 = 实例侧结构化拒绝
+ * （如快照序列化超桥载荷上限——v1 不分片语义），entries 置空；error 缺省 = entries 即
+ * 该实例当前全部窗口的可用工作区快照。
+ */
+export const omnicodeRemoteWorkspaceListResultMessageSchema = z
+  .object({
+    type: z.literal("remoteWorkspaceListResult"),
+    requestId: remoteDirectoryRequestIdSchema,
+    entries: remoteWorkspaceListEntriesSchema,
+    error: z.string().max(120).optional(),
+  })
+  .strict();
+
+/**
+ * 实例 → 管理器：快照变化上行报告（事件驱动零轮询——实例自身 workspace 快照同步时
+ * 推送，管理器即时刷新聚合列表；spec §6 在途对账的目录侧形态）。桥断连时管理器按
+ * disconnected 钩子摘除该实例条目，重连后由 Result/Report 收敛，无需补偿查询。
+ */
+export const omnicodeRemoteWorkspaceListReportMessageSchema = z
+  .object({
+    type: z.literal("remoteWorkspaceListReport"),
+    entries: remoteWorkspaceListEntriesSchema,
+  })
+  .strict();
+
+/** 实例 → 管理器的 workspace-list 目录上行消息（应答/报告二型；桥服务侧按此校验转发）。 */
+export const omnicodeRemoteWorkspaceListUplinkSchema = z.discriminatedUnion("type", [
+  omnicodeRemoteWorkspaceListResultMessageSchema,
+  omnicodeRemoteWorkspaceListReportMessageSchema,
+]);
+
+export type OmnicodeRemoteWorkspaceListRequestCommand = z.infer<
+  typeof omnicodeRemoteWorkspaceListRequestCommandSchema
+>;
+export type OmnicodeRemoteWorkspaceListResultMessage = z.infer<
+  typeof omnicodeRemoteWorkspaceListResultMessageSchema
+>;
+export type OmnicodeRemoteWorkspaceListReportMessage = z.infer<
+  typeof omnicodeRemoteWorkspaceListReportMessageSchema
+>;
+export type OmnicodeRemoteWorkspaceListUplinkMessage = z.infer<
+  typeof omnicodeRemoteWorkspaceListUplinkSchema
+>;
+
+// ─── R3.5 预留：rpc-frame 跨实例透传上限守门（spec §4 v1 语义）───
+// 完整 rpc-frame 双向转发（phone → 宿主 relay → 桥上行 → 归属实例 workspace-bridge 语义
+// 执行 → 原路返回）为 R3.5；R3 只落 workspace-list 聚合 + bridge-open 转投。本守门是
+// R3.5 的载荷上限契约：透传上限 = 官方 relay 物理帧上限（PROTOCOL_V4 maxFrameBytes
+// = 1MiB），超限结构化拒绝、不做分片。R3 目录链已复用：实例回包超上限同样拒绝。
+
+/** rpc-frame（及一切经桥转发的载荷）单帧字节上限 = 官方 relay 物理帧上限（1MiB）。 */
+export const OMNICODE_REMOTE_FORWARD_RPC_FRAME_MAX_BYTES =
+  WEB_REMOTE_CONTROL_RPC_TRANSPORT_LIMITS.maxPhysicalFrameBytes;
+
+/** 载荷守门（纯函数）：超上限返回 false（调用方结构化拒绝，不分片——spec §4 v1 语义）。 */
+export function isOmnicodeRemoteForwardPayloadWithinLimit(payloadBytes: number): boolean {
+  return Number.isSafeInteger(payloadBytes) && payloadBytes > 0 && payloadBytes <= OMNICODE_REMOTE_FORWARD_RPC_FRAME_MAX_BYTES;
+}

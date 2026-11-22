@@ -15,12 +15,17 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { BrowserWindow } from "electron";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import {
+  omnicodeRemoteWorkspaceListUplinkSchema,
   omnicodeSharedAssetRequestSchema,
+  // [OmniCode] 模式二 R2：附加账号材料请求载荷 schema（桥服务侧校验后交管理器代理）。
+  omnicodeAccountMaterialRequestPayloadSchema,
   PlatformChannels,
   sanitizeOmnicodeGlobalPrefsPayload,
   ZCODE_PRODUCT_FLAVOR,
+  type OmnicodeAccountMaterialRequestPayload,
   type OmnicodeGlobalPrefsPayload,
   type OmnicodeInstanceEventPayload,
+  type OmnicodeRemoteWorkspaceListUplinkMessage,
   type OmnicodeSharedAssetRequest,
   type ZCodeProductFlavor,
 } from "@zcode/shared";
@@ -59,7 +64,15 @@ export interface OmnicodeInstanceBridgeCommand {
     // 转投持有者（载荷已经管理器归一：requesterProfileId=桥连接真身）；
     // takeoverResult=回执通知观察者（accepted 后观察者复用 P1-1 链路自动重开）。
     | "takeoverRequest"
-    | "takeoverResult";
+    | "takeoverResult"
+    // [OmniCode] 丙1 远程聚合 R3（spec: docs/omnicode/remote-aggregation.md §4/§5/§8-R3）：
+    // 跨实例 workspace-list 目录查询（管理器 → 被聚合实例；实例执行器回
+    // remoteWorkspaceListResult 上行应答 + 快照变化 remoteWorkspaceListReport 报告）。
+    | "remoteWorkspaceListRequest"
+    // [OmniCode] 模式二 R2（spec: docs/omnicode/multi-account-sessions.md §5）：
+    // accountMaterialResult = 附加账号材料取回的应答（管理器 → 实例；requestId 关联
+    // 实例侧 pending 请求；ok=false 时实例 Host 回落 local 文件来源提供者）。
+    | "accountMaterialResult";
   /** arrange 命令的目标矩形（父进程由 workArea 计算后下发）。 */
   bounds?: { x: number; y: number; width: number; height: number };
   /** openWorkspace 命令的工作区目录路径。 */
@@ -76,6 +89,10 @@ export interface OmnicodeInstanceBridgeCommand {
   assetRequestId?: string;
   /** assetFetchResult 命令的结果载荷（ok=false 时实例回退直连）。 */
   assetResult?: { ok: boolean; dataBase64?: string; error?: string };
+  // [OmniCode] 模式二 R2：accountMaterialResult 命令载荷（requestId 关联实例侧 pending 表）。
+  accountRequestId?: string;
+  /** accountMaterialResult 命令的结果载荷（ok=false 时实例回落 local 文件来源）。 */
+  accountResult?: { ok: boolean; dataBase64?: string; error?: string };
   // [OmniCode] D12 接管流：takeoverRequest/takeoverResult 命令载荷（shared schema 校验）。
   requestId?: string;
   requesterProfileId?: string;
@@ -97,6 +114,13 @@ export interface OmnicodeInstanceBridgeAssetFetchRequest {
   type: "assetFetch";
   requestId: string;
   request: OmnicodeSharedAssetRequest;
+}
+
+// [OmniCode] 模式二 R2：实例 → 管理器的附加账号材料取回请求（requestId 关联应答）。
+export interface OmnicodeInstanceBridgeAccountMaterialRequest {
+  type: "accountMaterial";
+  requestId: string;
+  request: OmnicodeAccountMaterialRequestPayload;
 }
 
 export interface OmnicodeInstanceBridgeListeners {
@@ -126,6 +150,17 @@ export interface OmnicodeInstanceBridgeManagerHooks {
     profileId: string,
     request: OmnicodeSharedAssetRequest,
   ) => Promise<{ ok: boolean; dataBase64?: string; error?: string }>;
+  /**
+   * [OmniCode] 模式二 R2（spec: docs/omnicode/multi-account-sessions.md §5）：实例附加账号
+   * 材料取回请求（载荷已在桥服务侧按 omnicodeAccountMaterialRequestPayloadSchema 校验）。
+   * 管理器是唯一解密权威：钩子内经附加账号目录解密代理现取应答（内存现取，不落盘不进
+   * 日志）。钩子缺席（官方 flavor / 未装配）时桥服务回结构化错误，实例 Host 回落 local。
+   * 首参 profileId = 桥握手已验的连接真身（管理器据此排除请求方自身的主账号材料）。
+   */
+  onAccountMaterialRequest?: (
+    profileId: string,
+    request: OmnicodeAccountMaterialRequestPayload,
+  ) => Promise<{ ok: boolean; dataBase64?: string; error?: string }>;
   // ─── [OmniCode] D12 接管流（spec: docs/omnicode/profile-runtime.md §批次3 D12）───
   // 三个钩子的首参都是桥握手已验的连接身份（senderProfileId）——请求方/回执方绑定认证
   // 在这里完成，协调器不信任任何载荷自报身份。
@@ -135,6 +170,15 @@ export interface OmnicodeInstanceBridgeManagerHooks {
   onTakeoverReplyFromInstance?: (profileId: string, message: unknown) => void;
   /** 观察者上行 takeoverCancel（取消在途请求）。 */
   onTakeoverCancelFromInstance?: (profileId: string, message: unknown) => void;
+  /**
+   * [OmniCode] 丙1 远程聚合 R3：实例 workspace-list 目录上行（Result 应答 / Report 报告，
+   * 载荷已按 omnicodeRemoteWorkspaceListUplinkSchema 校验，null=校验失败静默丢弃）。
+   * 钩子缺席（官方 flavor / 未装配）即目录链天然禁用。
+   */
+  onOmnicodeRemoteWorkspaceListUplink?: (
+    profileId: string,
+    message: OmnicodeRemoteWorkspaceListUplinkMessage | null,
+  ) => void;
 }
 
 let managerHooks: OmnicodeInstanceBridgeManagerHooks | null = null;
@@ -330,6 +374,51 @@ export function startOmnicodeInstanceBridgeServer(
             );
           return;
         }
+        // [OmniCode] 模式二 R2：实例附加账号材料取回请求。先按 shared 契约校验载荷形态
+        //（accountId 白名单），再交管理器附加账号目录解密代理（钩子缺席=官方 flavor/
+        // 未装配 → 结构化错误，实例 Host 回落 local 来源提供者）。应答只回请求实例；
+        // 首参 = 桥握手已验连接真身（管理器据此排除请求方自身的主账号材料）。
+        if (message.type === "accountMaterial") {
+          const parsedRequest = omnicodeAccountMaterialRequestPayloadSchema.safeParse(
+            (message as { request?: unknown }).request,
+          );
+          const requestId = (message as { requestId?: unknown }).requestId;
+          const reply = (result: { ok: boolean; dataBase64?: string; error?: string }) => {
+            const socket = connectionsByProfileId.get(profileIdParam);
+            if (socket && socket.readyState === 1) {
+              socket.send(
+                JSON.stringify({
+                  type: "accountMaterialResult",
+                  ...(typeof requestId === "string" && requestId
+                    ? { accountRequestId: requestId }
+                    : {}),
+                  accountResult: result,
+                }),
+              );
+            }
+          };
+          if (!parsedRequest.success || typeof requestId !== "string" || !requestId) {
+            reply({ ok: false, error: "account_material_request" });
+            return;
+          }
+          void Promise.resolve()
+            .then(() =>
+              managerHooks?.onAccountMaterialRequest?.(profileIdParam, parsedRequest.data),
+            )
+            .then((result) =>
+              reply(result ?? { ok: false, error: "account_material_unavailable" }),
+            )
+            .catch((error: unknown) =>
+              reply({
+                ok: false,
+                error:
+                  error instanceof Error && error.message
+                    ? error.message
+                    : "account_material_fetch",
+              }),
+            );
+          return;
+        }
         // [OmniCode] D12 接管流上行（观察者发起 / 持有者回执 / 观察者取消）。载荷校验与
         // 授权（连接身份绑定）在协调器内完成；钩子缺席（官方 flavor / 未装配）静默丢弃。
         if (
@@ -344,6 +433,20 @@ export function startOmnicodeInstanceBridgeServer(
           } else {
             managerHooks?.onTakeoverCancelFromInstance?.(profileIdParam, parsed);
           }
+          return;
+        }
+        // [OmniCode] 丙1 远程聚合 R3：workspace-list 目录上行（Result 应答 / Report 报告）。
+        // 桥服务侧先按 shared union 校验（条目逐条 schema + 200 上限——防异常快照放大桥
+        // 载荷），再交管理器目录（来源绑定桥握手真身，载荷自报值不参与授权）。
+        if (
+          message.type === "remoteWorkspaceListResult" ||
+          message.type === "remoteWorkspaceListReport"
+        ) {
+          const uplink = omnicodeRemoteWorkspaceListUplinkSchema.safeParse(parsed);
+          managerHooks?.onOmnicodeRemoteWorkspaceListUplink?.(
+            profileIdParam,
+            uplink.success ? uplink.data : null,
+          );
           return;
         }
       });

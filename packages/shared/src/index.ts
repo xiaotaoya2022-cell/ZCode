@@ -98,19 +98,31 @@ export type {
   OmnicodeInstanceSortMode,
 } from "./omnicodeInstanceSort.js";
 // [OmniCode] 丙1 远程聚合 R1 骨架：桥协议 schema（remoteForward 族，载荷不透明透传；
-// spec: docs/omnicode/remote-aggregation.md §4）
+// spec: docs/omnicode/remote-aggregation.md §4）。R3：workspace-list 跨实例目录查询
+//（桥命令域）+ rpc-frame 载荷上限守门（R3.5 预留，spec §4 v1 不分片语义）。
 export {
   OMNICODE_REMOTE_FORWARD_ID_MAX_LEN,
   OMNICODE_REMOTE_FORWARD_KINDS,
+  OMNICODE_REMOTE_FORWARD_RPC_FRAME_MAX_BYTES,
+  OMNICODE_REMOTE_WORKSPACE_LIST_MAX_ENTRIES,
+  isOmnicodeRemoteForwardPayloadWithinLimit,
   omnicodeRemoteForwardMessageSchema,
   omnicodeRemoteForwardResultMessageSchema,
   omnicodeRemoteHostAnnounceMessageSchema,
+  omnicodeRemoteWorkspaceListRequestCommandSchema,
+  omnicodeRemoteWorkspaceListResultMessageSchema,
+  omnicodeRemoteWorkspaceListReportMessageSchema,
+  omnicodeRemoteWorkspaceListUplinkSchema,
 } from "./omnicodeRemoteForward.js";
 export type {
   OmnicodeRemoteForwardKind,
   OmnicodeRemoteForwardMessage,
   OmnicodeRemoteForwardResultMessage,
   OmnicodeRemoteHostAnnounceMessage,
+  OmnicodeRemoteWorkspaceListRequestCommand,
+  OmnicodeRemoteWorkspaceListResultMessage,
+  OmnicodeRemoteWorkspaceListReportMessage,
+  OmnicodeRemoteWorkspaceListUplinkMessage,
 } from "./omnicodeRemoteForward.js";
 // [OmniCode] 丙1 远程聚合 R1 骨架：workspace-list 聚合纯函数 + forwardId 路由表
 //（纯内存零 IO，R2/R3 接线；spec: docs/omnicode/remote-aggregation.md §4–§5）
@@ -141,6 +153,19 @@ export {
   resolveOmnicodeAssetsCacheEviction,
 } from "./omnicodeSharedAssets.js";
 export type { OmnicodeSharedAssetKind, OmnicodeSharedAssetRequest } from "./omnicodeSharedAssets.js";
+// [OmniCode] 模式二 R2（spec: docs/omnicode/multi-account-sessions.md §5）：bridge-proxy
+// 附加账号材料的请求/应答载荷 + 材料快照形状（R1 services 侧 schema 下沉到同一契约文件，
+// 管理器解密代理与 Host 二次校验共用单一事实源）。
+export {
+  omnicodeAccountMaterialFileSchema,
+  omnicodeAccountMaterialRequestPayloadSchema,
+  omnicodeAccountMaterialResultPayloadSchema,
+} from "./omnicodeAccountMaterial.js";
+export type {
+  OmnicodeAccountMaterialFileData,
+  OmnicodeAccountMaterialRequestPayload,
+  OmnicodeAccountMaterialResultPayload,
+} from "./omnicodeAccountMaterial.js";
 // [OmniCode] D12 请求接管流：七态状态机 + 桥命令 schema（spec:
 // docs/omnicode/profile-runtime.md §批次3 D12）
 export {

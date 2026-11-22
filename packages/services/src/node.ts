@@ -501,6 +501,12 @@ import {
 // spec: docs/omnicode/multi-account-sessions.md §4/§5/§8）。
 import { createOmnicodeAccountOverride } from "./omnicode/accountOverride.js";
 import { createOmnicodeAccountFileMaterialProvider } from "./omnicode/accountMaterialFile.js";
+// [OmniCode] 模式二 R2：附加账号材料 bridge-proxy 来源提供者 + 组合装配（remote 优先 /
+// local 兜底；spec: docs/omnicode/multi-account-sessions.md §5）。
+import {
+  createOmnicodeAccountRemoteFirstMaterialProvider,
+  createOmnicodeAccountRemoteMaterialProvider,
+} from "./omnicode/accountMaterialRemote.js";
 // [OmniCode] 模式二 R1.5：会话作用域接线——会话→附加账号绑定注册表（sendPrompt 登记 /
 // providerRuntimeHeaders 解析消费；spec §4/§10-R1.5）。
 import { createOmnicodeSessionAccountRegistry } from "./omnicode/sessionAccountScope.js";
@@ -1607,7 +1613,17 @@ export function createLocalServices(options: {
   // 材料缺失/family 不匹配一律 null（fail-closed，绝不回落主账号材料防串号）。
   // 门控默认 = OMNICODE_PROFILE_ID env（仅 omnicode Profile 实例进程注入；管理器/官方恒 inert）。
   const omnicodeAccountOverride = createOmnicodeAccountOverride({
-    materialProvider: createOmnicodeAccountFileMaterialProvider(),
+    // [OmniCode] 模式二 R2：材料来源改组合提供者——remote（bridge-proxy，实例 Host 经
+    // main→桥→管理器解密代理现取，"零重登"目标）优先、local 文件账号库兜底；两级都缺
+    // → null（fail-closed，绝不回落主账号材料）。parentPort 缺席（CLI/远端 Host 无
+    // main 通道）时 remote 恒 null，组合退化为纯 local——官方语义不变。请求只在
+    // OMNICODE_PROFILE_ID 门控（覆盖边界 isActive）后发出，管理器/官方进程零桥流量。
+    materialProvider: createOmnicodeAccountRemoteFirstMaterialProvider({
+      remote: createOmnicodeAccountRemoteMaterialProvider({
+        transport: options?.parentPort ?? null,
+      }),
+      fallback: createOmnicodeAccountFileMaterialProvider(),
+    }),
   });
   // [OmniCode] 模式二 R1.5（spec: docs/omnicode/multi-account-sessions.md §4/§10-R1.5）：
   // 会话作用域接线——sendPrompt 参数 omnicodeAccountId 在 task adapter 登记会话绑定，

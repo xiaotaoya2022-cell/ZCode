@@ -68,6 +68,9 @@ import type { WebRemoteControlFeatureGate } from "./webRemoteControlFeatureGate.
 // [OmniCode] 丙1 远程聚合 R2（spec: docs/omnicode/remote-aggregation.md §3/§5/§8-R2）：
 // 聚合宿主接线契约；实现见 omnicode/remoteAggregateHost.ts（门控默认关=官方路径逐字不变）。
 import type { OmnicodeRemoteAggregateHost } from "./omnicode/remoteAggregateHost.js";
+// [OmniCode] 丙1 远程聚合 R3（spec: docs/omnicode/remote-aggregation.md §4/§5/§8-R3）：
+// 跨实例桥转发契约；实现见 omnicode/remoteForwardHost.ts（目录查询/转投，门控同 R2）。
+import type { OmnicodeRemoteForwardHost } from "./omnicode/remoteForwardHost.js";
 import {
   respondToWebRemoteControlActionRequest,
   type RunWebRemoteControlRendererAction,
@@ -243,8 +246,13 @@ interface WebRemoteControlManagerDependencies {
   // workspace 列表聚合全部窗口快照呈现；bridge-open/reconnect 按聚合条目反查目标窗口
   // （attachment 挂目标窗口，rpc-frame 仍经本窗口 transport 透传——bridge 状态统一在本
   // runtime.currentBridge）；路由失败回退官方路径回结构化 bridge-error，不瘫。
-  // 跨实例 remoteForward 桥转发（R1 schema 消费）属 R3，本依赖不涉及。
   omnicodeAggregateHost?: OmnicodeRemoteAggregateHost;
+  // [OmniCode] 丙1 远程聚合 R3（spec: docs/omnicode/remote-aggregation.md §4/§5/§8-R3）：
+  // 跨实例桥转发接线（omnicode 门控同 R2；缺省/门控关=官方路径逐字不变）。门控开时：
+  // workspace 列表并入跨实例目录快照（remoteAggregateHost 目录视图注入）；bridge-open
+  // 反查命中跨实例来源时走转投路径（既有 openWorkspace 桥命令投递归属实例本地打开，
+  // 手机侧 bridge 结构化收口——rpc-frame 跨实例双向转发为 R3.5）。
+  omnicodeRemoteForward?: OmnicodeRemoteForwardHost;
 }
 
 /** 可拉取手机日志的目标连接。 */
@@ -280,6 +288,10 @@ function mapWorkspaceBridgeFailureReason(error: unknown): WebRemoteControlFailur
       return "workspace-closed";
     case "REMOTE_WORKSPACE_IDENTITY_MISSING":
     case "REMOTE_WORKSPACE_IDENTITY_MISMATCH":
+      return "unsupported-action";
+    // [OmniCode] gated R3：跨实例 bridge-open 的 v1 结构化拒绝（转投路径——归属实例已
+    // 收到本地打开命令，手机侧 bridge 以 unsupported-action 收口；仅 R3 门控分支抛出）。
+    case "OMNICODE_REMOTE_INSTANCE_BRIDGE_UNSUPPORTED":
       return "unsupported-action";
     default:
       return "unexpected-error";
@@ -353,6 +365,8 @@ function toExternalBridge(
 export function createWebRemoteControlManager(dependencies: WebRemoteControlManagerDependencies) {
   // [OmniCode] gated：聚合宿主接线（丙1 R2；缺省/门控关=官方单窗口路径逐字不变）。
   const omnicodeAggregateHost = dependencies.omnicodeAggregateHost;
+  // [OmniCode] gated：跨实例桥转发接线（丙1 R3；缺省/门控关=官方路径逐字不变）。
+  const omnicodeRemoteForward = dependencies.omnicodeRemoteForward;
   const runtimes = new Map<number, WindowControlRuntime>();
   // 身份绑定与取消令牌覆盖首次启动到连接释放的整个生命周期，不缓存 JWT。
   const windowLifecycles = new Map<number, WindowControlLifecycle>();
@@ -1253,6 +1267,39 @@ export function createWebRemoteControlManager(dependencies: WebRemoteControlMana
           request.workspaceKey,
         )
       : undefined;
+    // [OmniCode] gated R3（丙1 跨实例桥转发）：反查命中跨实例来源（sourceKind=instance，
+    // 条目归属其他实例进程）时本窗口绝不挂载 attachment——v1 转投语义：既有 openWorkspace
+    // 桥命令投递归属实例本地打开（saveProject 锁守卫尊重工作区锁），手机侧 bridge 以
+    // 结构化 workspace-bridge-error（unsupported-action）收口；rpc-frame 跨实例双向转发
+    // 为 R3.5（接口预留见 shared OMNICODE_REMOTE_FORWARD_* 常量）。门控关时目录缺席、
+    // 聚合列表无跨实例条目，本分支不可达——保留为纵深防御（防错误本地挂载）。
+    if (omnicodeRoute?.sourceKind === "instance") {
+      const entry = omnicodeRoute.entry;
+      let forwardSummary = omnicodeRemoteForward?.isEnabled() ? "forward_failed" : "aggregate_disabled";
+      if (omnicodeRemoteForward?.isEnabled()) {
+        const forwardResult =
+          entry.kind === "local"
+            ? omnicodeRemoteForward.openWorkspaceOnInstance({
+                sourceProfileId: entry.sourceProfileId,
+                workspacePath: entry.workspacePath,
+                workspaceKey: request.workspaceKey,
+                bridgeSessionId: request.bridgeSessionId,
+              })
+            : { forwarded: false, error: "remote_kind_unsupported" };
+        forwardSummary = forwardResult.forwarded ? "forwarded" : (forwardResult.error ?? "forward_failed");
+      }
+      dependencies.logger.info(
+        `[web-remote-control] cross-instance workspace bridge refused (R3.5 pending) window=${runtime.windowId} session=${runtime.deviceSid} source=${entry.sourceProfileId} forward=${forwardSummary}`,
+      );
+      throw Object.assign(
+        new Error(
+          forwardSummary === "forwarded"
+            ? "跨实例工作区 bridge 为本版本未支持（R3.5 落地）；已转投归属实例本地打开该工作区。"
+            : "跨实例工作区 bridge 为本版本未支持（R3.5 落地）；转投未送达，请在归属实例上直接打开该工作区。",
+        ),
+        { code: "OMNICODE_REMOTE_INSTANCE_BRIDGE_UNSUPPORTED" },
+      );
+    }
     const omnicodeRouteWindowId = omnicodeRoute?.windowId;
     pending.omnicodeRouteWindowId = omnicodeRouteWindowId;
     let target: WebRemoteControlWorkspaceTarget | undefined;
@@ -1528,13 +1575,26 @@ export function createWebRemoteControlManager(dependencies: WebRemoteControlMana
     try {
       // [OmniCode] gated：聚合模式下 reconnect 按聚合条目反查目标窗口执行
       //（本窗口条目=self 前缀 → 本窗口；未命中回本窗口官方路径）
-      const omnicodeReconnectWindowId = omnicodeAggregateHost?.isEnabled()
+      const omnicodeReconnectRoute = omnicodeAggregateHost?.isEnabled()
         ? omnicodeAggregateHost.resolveRoute(
             availableWorkspacesByWindowId,
             runtime.windowId,
             request.workspaceKey,
-          )?.windowId
+          )
         : undefined;
+      // [OmniCode] gated R3：跨实例条目的 reconnect 不支持（SSH 会话归属实例进程，
+      // 本窗口 renderer 无对应会话可重连）——结构化拒绝不瘫（v1 最小闭环边界）。
+      if (omnicodeReconnectRoute?.sourceKind === "instance") {
+        sendAppPayload(runtime, {
+          zcode_type: "workspace-reconnect-response",
+          requestId: request.requestId,
+          workspaceKey: request.workspaceKey,
+          success: false,
+          error: "跨实例工作区重连为本版本未支持（会话归属其他实例）。",
+        });
+        return;
+      }
+      const omnicodeReconnectWindowId = omnicodeReconnectRoute?.windowId;
       await dependencies.reconnectWorkspace(
         omnicodeReconnectWindowId ?? runtime.windowId,
         request.workspaceKey,
@@ -2362,6 +2422,21 @@ export function createWebRemoteControlManager(dependencies: WebRemoteControlMana
       }
       if (syncRuntimeRemoteSession(runtime)) emitRuntimeStatus(runtime);
       pushWorkspaceListUpdated(runtime);
+    },
+
+    // [OmniCode] 丙1 R3：全部窗口 workspace 快照枚举（跨实例目录的被聚合实例侧只读
+    // 探针——实例执行器应答管理器目录查询时消费；官方调用面不触达，纯读取零副作用）。
+    listWindowWorkspaceSnapshots(): Array<[number, WebRemoteControlWorkspaceTarget[]]> {
+      return [...availableWorkspacesByWindowId];
+    },
+
+    // [OmniCode] gated 聚合（丙1 R3）：跨实例目录变化（实例 Result/Report 上行或离线
+    // 摘除）→ 聚合列表在全部活动 runtime 上重推（workspace-list-updated，签名去重；
+    // 由 remoteForwardHost 模块通知器触发，官方调用面不触达——门控关时零操作）。
+    omnicodeOnRemoteWorkspacesChanged(): void {
+      if (omnicodeAggregateHost?.isEnabled()) {
+        for (const runtime of runtimes.values()) pushWorkspaceListUpdated(runtime);
+      }
     },
 
     async replaceRemoteSession(event: {

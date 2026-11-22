@@ -7,6 +7,7 @@ import { installRequestSecurityDiagnostics } from "./request-security-edition/in
 import { createLocalTtftExporter } from "./localTtftExporter.js";
 // [OmniCode] Profile 实例桥接客户端（spec: docs/omnicode/profile-runtime.md）
 import {
+  requestOmnicodeAccountMaterialFromManager,
   requestOmnicodeSharedAssetFromManager,
   sendOmnicodeInstanceBridgeUplink,
   startOmnicodeInstanceBridgeClient,
@@ -132,6 +133,7 @@ import {
   ZCODE_PRODUCT_FLAVOR,
   isOmnicodeManagerProcess,
   isOmnicodeProfileInstanceEnv,
+  type OmnicodeAccountMaterialRequestPayload,
   type OmnicodeSharedAssetRequest,
   ZCODE_AUTO_UPDATE_ENABLED,
   DEFAULT_ZCODE_ENDPOINT_ORIGIN,
@@ -191,6 +193,17 @@ import { createWebRemoteControlManager } from "./webRemoteControlManager.js";
 // [OmniCode] 丙1 远程聚合 R2（spec: docs/omnicode/remote-aggregation.md §3/§5/§8-R2）：
 // 聚合宿主接线（omnicode 门控默认关——官方 flavor/未设开关时 manager 全走官方单窗口路径）。
 import { createOmnicodeRemoteAggregateHost } from "./omnicode/remoteAggregateHost.js";
+// [OmniCode] 丙1 远程聚合 R3（spec: docs/omnicode/remote-aggregation.md §4/§5/§8-R3）：
+// 跨实例桥转发接线——目录视图/转发面（稳定惰性单例透传）+ 被聚合实例侧快照探针。
+import {
+  getOmnicodeRemoteForwardHost,
+  getOmnicodeRemoteWorkspaceDirectoryView,
+  setOmnicodeRemoteForwardHostWorkspacesChangedNotifier,
+} from "./omnicode/remoteForwardHost.js";
+import {
+  notifyOmnicodeRemoteWorkspaceSnapshotChanged,
+  setOmnicodeRemoteWorkspaceSnapshotProvider,
+} from "./omnicode/remoteForwardInstance.js";
 import { readBootstrapApplicationLocale } from "./desktopApplicationLocaleBootstrap.js";
 import {
   createMobileLogSink,
@@ -1312,9 +1325,20 @@ const webRemoteControlManager = createWebRemoteControlManager({
     webRemoteControlSharedHostAttachments.disposeRemoteSession(remoteSessionId),
   // [OmniCode] 丙1 远程聚合 R2：聚合宿主接线（门控内聚在 remoteAggregateHost——
   // omnicode flavor ∧ ZCODE_OMNICODE_REMOTE_AGGREGATE=1，默认关=官方行为逐字不变）。
-  omnicodeAggregateHost: createOmnicodeRemoteAggregateHost(),
+  // R3：跨实例目录视图/转发面接线（稳定惰性透传 remoteForwardHost 单例——装配缺席时
+  // 恒空列表恒 disabled，与 R2 行为逐字不变）。
+  omnicodeAggregateHost: createOmnicodeRemoteAggregateHost({
+    directory: getOmnicodeRemoteWorkspaceDirectoryView(),
+  }),
+  omnicodeRemoteForward: getOmnicodeRemoteForwardHost(),
 });
 webRemoteControlManagerRef.current = webRemoteControlManager;
+// [OmniCode] 丙1 远程聚合 R3：目录变化通知器（实例 Result/Report 上行、离线摘除后经
+// remoteForwardHost 单例触发 → 聚合列表在全部活动 runtime 重推；官方 flavor 单例缺席
+// 永不触发，纯惰性绑定零影响）。
+setOmnicodeRemoteForwardHostWorkspacesChangedNotifier(() => {
+  webRemoteControlManager.omnicodeOnRemoteWorkspacesChanged();
+});
 webRemoteControlManager.startNotifications();
 broadcastHub.onMobilePushRun = (run) => webRemoteControlManager.observeNotificationRun(run);
 // owner 必须在事件到达时同步确认；开关与 locale 由 MobilePushConnection 在确认后再异步读取。
@@ -2389,6 +2413,12 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
             ? {
                 handleSharedAssetFetchRequest: (request: OmnicodeSharedAssetRequest) =>
                   requestOmnicodeSharedAssetFromManager(request),
+                // [OmniCode] 模式二 R2（spec: docs/omnicode/multi-account-sessions.md §5）：
+                // 实例 Host 附加账号材料请求经桥问管理器解密代理（管理器唯一解密权威，
+                // 实例不持有其他 profile 密钥）。官方/管理器 Host 不注入——路由缺省回
+                // 结构化错误（omnicode_account_material_unavailable），不瘫。
+                handleAccountMaterialRequest: (request: OmnicodeAccountMaterialRequestPayload) =>
+                  requestOmnicodeAccountMaterialFromManager(request),
               }
             : {}),
         },
@@ -2937,6 +2967,10 @@ app.whenReady().then(async () => {
     syncWebRemoteControlWorkspaces: (windowId, workspaces) => {
       webRemoteControlManager.syncAvailableWorkspaces(windowId, workspaces);
       void webRemoteControlManager.restorePreviouslyEnabled(windowId, workspaces);
+      // [OmniCode] 丙1 远程聚合 R3：被聚合实例 workspace 快照变化 → 桥上行目录报告
+      //（事件驱动零轮询，spec §6/§7——聚合宿主的跨实例列表即时刷新；探针缺席
+      // （非实例身份/官方 flavor）或桥未连时静默放弃，无重试无轮询）。
+      notifyOmnicodeRemoteWorkspaceSnapshotChanged(sendOmnicodeInstanceBridgeUplink);
     },
     syncAppSettings: syncImmediateAppSettings,
     // 设置页置灰查询：monitor 带 stale 缓存，装完 AppIndicator 扩展重开设置页即可刷新。
@@ -3111,6 +3145,14 @@ app.whenReady().then(async () => {
   // 装配——管理器/官方 flavor 的 renderer 桥面不含这些方法，消费面缺席即天然禁用）
   if (isOmnicodeProfileInstanceEnv()) {
     registerOmnicodeTakeoverInstanceIpcHandlers(sendOmnicodeInstanceBridgeUplink);
+    // [OmniCode] 丙1 远程聚合 R3：被聚合实例侧快照探针（目录查询应答 + 快照变化报告的
+    // 数据源 = manager listWindowWorkspaceSnapshots 只读视图；仅实例身份装配——探针缺席
+    // 时目录请求静默丢弃，spec §3 被聚合实例零 relay 零凭据边界不受影响）。
+    setOmnicodeRemoteWorkspaceSnapshotProvider(() => {
+      return (
+        webRemoteControlManagerRef.current?.listWindowWorkspaceSnapshots() ?? []
+      );
+    });
   }
   // [OmniCode] 批次2 B2-1（T2）：实例进程自带数据根的凭据备份调度（管理器关闭后实例
   // 独立存活的兜底；管理器的全量调度器不随 T3 门控丢实例侧覆盖）

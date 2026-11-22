@@ -15,10 +15,6 @@
 // - fail-closed：作用域激活但材料缺失/family 不匹配 → 返回 null/空视图（请求以
 //   AccountRequestCredentialUnavailableError 收口），绝不回落主账号材料（防串号）。
 import { AsyncLocalStorage } from "node:async_hooks";
-import { z } from "zod";
-import {
-  providerFamilyConnectionSelectionSettingsSchema,
-} from "@zcode/shared";
 import type {
   ProviderFamilyConnectionSelectionSettings,
   ProviderFamilyDomain,
@@ -39,34 +35,13 @@ export interface OmnicodeAccountOverrideMaterial {
   deviceMid: string | null;
 }
 
-const providerFamilyEnum = z.enum(["zai", "bigmodel"]);
-const oauthAccountMaterialBaseShape = {
-  family: providerFamilyEnum,
-  loginProvider: z.string().min(1),
-  zcodeUserId: z.string().min(1),
-  sessionRevision: z.string().nullable(),
-  accountIdentity: z.string().min(1),
-  zcodeJwtToken: z.string().nullable(),
-};
-
-/** omnicode-accounts/<accountId>.json 解密后（KV 各值 JSON.parse）的校验 schema。 */
-export const omnicodeAccountMaterialFileSchema = z
-  .object({
-    accountId: z.string().min(1).max(64).regex(/^[A-Za-z0-9._:-]+$/u, "accountId 形态非法"),
-    family: providerFamilyEnum,
-    selections: providerFamilyConnectionSelectionSettingsSchema,
-    accountIdentity: z.string().min(1),
-    startPlanMaterial: z.object(oauthAccountMaterialBaseShape).strict().nullable(),
-    familyMaterial: z
-      .object({ ...oauthAccountMaterialBaseShape, accessToken: z.string().min(1) })
-      .strict()
-      .nullable(),
-    deviceMid: z.string().min(1).nullable(),
-  })
-  .strict();
-
-/** 文件数据（schema 推断；字段形状与官方材料类型结构兼容，读取侧按官方类型收口）。 */
-export type OmnicodeAccountMaterialFileData = z.infer<typeof omnicodeAccountMaterialFileSchema>;
+// [OmniCode] 模式二 R2：材料快照形状下沉到 shared 契约文件（管理器解密代理与 Host 二次
+// 校验共用单一事实源）；此处原名再导出保持 R1 公共面不变（accountMaterialFile 等既有
+// 消费方零改动）。
+export {
+  omnicodeAccountMaterialFileSchema,
+  type OmnicodeAccountMaterialFileData,
+} from "@zcode/shared";
 
 // ─── 会话作用域（AsyncLocalStorage；Host/agent 运行期由编排层包裹） ───
 

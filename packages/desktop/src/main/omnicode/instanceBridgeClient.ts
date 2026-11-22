@@ -25,6 +25,12 @@ import {
 import { MIN_DESKTOP_WINDOW_WIDTH, MIN_DESKTOP_WINDOW_HEIGHT } from "../desktopWindowSize.js";
 import { handleOmnicodeGlobalPrefsApplyCommand } from "./globalPrefs.js";
 import { handleOmnicodeTakeoverDownlink, clearOmnicodeTakeoverInstanceState } from "./takeoverInstance.js";
+// [OmniCode] 丙1 远程聚合 R3（spec: docs/omnicode/remote-aggregation.md §4/§5/§8-R3）：
+// 被聚合实例侧执行器——目录查询应答 + 快照变化上行报告（事件驱动零轮询；实例零 relay）。
+import {
+  handleOmnicodeRemoteWorkspaceListRequest,
+  notifyOmnicodeRemoteWorkspaceSnapshotChanged,
+} from "./remoteForwardInstance.js";
 
 export const CAPTURE_INTERVAL_MS = 700; // ≈1.4fps；JPEG q55 单帧约 40-80KB，本地回环无压力
 /** [OmniCode] 后台降载·降帧档：可见但失焦（非活动）时的 capture 间隔（≈0.5fps）。 */
@@ -60,6 +66,21 @@ export type OmnicodeSharedAssetFetchReply = {
 };
 /** 共享资产取回总预算：管理器自身下载超时 30s + 回环两跳开销（spec §G3.3）。 */
 export const SHARED_ASSET_FETCH_TIMEOUT_MS = 40_000;
+// [OmniCode] 模式二 R2（spec: docs/omnicode/multi-account-sessions.md §5）：附加账号材料
+// 桥取回的在途请求表与总预算。管理器侧只做本地盘解密（无网络下载），预算远低于共享
+// 资产；ok=false 时实例 Host 按"目录未命中"回落 local 来源提供者。
+const pendingAccountMaterialRequests = new Map<
+  string,
+  { resolve: (result: OmnicodeAccountMaterialFetchReply) => void; timer: NodeJS.Timeout }
+>();
+/** 附加账号材料取回应答载荷（ok=false 时实例 Host 回落 local 文件提供者）。 */
+export type OmnicodeAccountMaterialFetchReply = {
+  ok: boolean;
+  dataBase64?: string;
+  error?: string;
+};
+/** 附加账号材料取回总预算：管理器本地解密链（bounded 读 + 逐字段解密）+ 回环两跳。 */
+export const OMNICODE_ACCOUNT_MATERIAL_FETCH_TIMEOUT_MS = 15_000;
 
 function getPrimaryInstanceWindow(): BrowserWindow | undefined {
   // 实例是单主窗口应用（primaryWindowCoordinator 单飞）
@@ -179,7 +200,7 @@ function releaseEmbed(win: BrowserWindow): void {
   restoreDesktopWindowConstraints(win);
 }
 
-function applyCommand(command: { type?: string; bounds?: unknown; path?: unknown; rects?: unknown; prefs?: unknown; sourceInstanceId?: unknown; title?: unknown; assetRequestId?: unknown; assetResult?: unknown }): void {
+function applyCommand(command: { type?: string; bounds?: unknown; path?: unknown; rects?: unknown; prefs?: unknown; sourceInstanceId?: unknown; title?: unknown; assetRequestId?: unknown; assetResult?: unknown; accountRequestId?: unknown; accountResult?: unknown }): void {
   // [OmniCode] D12 接管流：takeoverRequest（转投持有者）/ takeoverResult（回执通知
   // 观察者）不依赖窗口存在性判断的其余分支——转发前自行校验（shared schema）+ 惰性取
   // 主窗口（渲染层未就绪的确认请求由管理器死线按 timeout 收口）。
@@ -218,6 +239,34 @@ function applyCommand(command: { type?: string; bounds?: unknown; path?: unknown
           }
         : { ok: false, error: "asset_reply" },
     );
+    return;
+  }
+  // [OmniCode] 模式二 R2：accountMaterial 应答不依赖窗口存在性——按 requestId 关联
+  // pending 表（迟到/陌生 requestId 直接丢弃防串扰；ok=false 由调用方回落 local 来源）。
+  if (command.type === "accountMaterialResult") {
+    const requestId =
+      typeof command.accountRequestId === "string" ? command.accountRequestId : "";
+    const pending = pendingAccountMaterialRequests.get(requestId);
+    if (!pending) return;
+    pendingAccountMaterialRequests.delete(requestId);
+    clearTimeout(pending.timer);
+    const result = command.accountResult as OmnicodeAccountMaterialFetchReply | undefined;
+    pending.resolve(
+      result && typeof result === "object"
+        ? {
+            ok: result.ok === true,
+            ...(typeof result.dataBase64 === "string" ? { dataBase64: result.dataBase64 } : {}),
+            ...(typeof result.error === "string" ? { error: result.error } : {}),
+          }
+        : { ok: false, error: "account_material_reply" },
+    );
+    return;
+  }
+  // [OmniCode] 丙1 远程聚合 R3：remoteWorkspaceListRequest 不依赖窗口存在性——快照
+  // 读取与上行在执行器内完成（探针缺席/发送失败静默放弃，管理器死线惰性收口；
+  // 被聚合实例零 relay 零凭据——只应答目录查询，spec §3 角色边界）。
+  if (command.type === "remoteWorkspaceListRequest") {
+    handleOmnicodeRemoteWorkspaceListRequest(command, sendOmnicodeInstanceBridgeUplink);
     return;
   }
   // [OmniCode] 批次2 B2-1（T4）：openWorkspace 不依赖窗口存在性——冷启动早期的请求也
@@ -494,6 +543,10 @@ export function startOmnicodeInstanceBridgeClient(): void {
       activeReportSocket = ws;
       startCaptureLoop(ws);
       startHelloLoop(ws);
+      // [OmniCode] 丙1 远程聚合 R3：连桥即推当前 workspace 快照（fire-and-forget，与
+      // 管理器侧"连接即查询"双保险——覆盖实例桥先连、renderer 慢就绪的时序差；探针
+      // 缺席/未开工作区静默跳过，spec §5 目录来源收敛零轮询）。
+      notifyOmnicodeRemoteWorkspaceSnapshotChanged(sendOmnicodeInstanceBridgeUplink);
     });
     ws.on("message", (data) => {
       try {
@@ -513,6 +566,12 @@ export function startOmnicodeInstanceBridgeClient(): void {
         pending.resolve({ ok: false, error: "bridge_disconnected" });
       }
       pendingSharedAssetRequests.clear();
+      // [OmniCode] 模式二 R2：断连同样即失败全部在途附加账号材料请求（Host 回落 local）。
+      for (const pending of pendingAccountMaterialRequests.values()) {
+        clearTimeout(pending.timer);
+        pending.resolve({ ok: false, error: "bridge_disconnected" });
+      }
+      pendingAccountMaterialRequests.clear();
       // [OmniCode] D12 接管流：断连清持有者在途确认簿记（管理器死线按 timeout 收口）。
       clearOmnicodeTakeoverInstanceState();
       stopHelloLoop();
@@ -568,6 +627,44 @@ export function reportOmnicodeGlobalPrefsToManager(
   } catch {
     return false;
   }
+}
+
+/**
+ * [OmniCode] 模式二 R2（spec: docs/omnicode/multi-account-sessions.md §5）：实例 → 管理器
+ * 附加账号材料取回（requestId 关联，超时/断连即失败 → 实例 Host 回落 local 文件来源）。
+ * 管理器是唯一解密权威（实例不持有其他 profile 密钥）；应答 base64 只进内存（实例侧
+ * 短 TTL 缓存），不落盘不进日志。未回连立刻失败（不等待重连）。
+ */
+export function requestOmnicodeAccountMaterialFromManager(
+  request: { accountId: string },
+  timeoutMs: number = OMNICODE_ACCOUNT_MATERIAL_FETCH_TIMEOUT_MS,
+): Promise<OmnicodeAccountMaterialFetchReply> {
+  const ws = activeReportSocket;
+  if (!ws || ws.readyState !== 1) {
+    return Promise.resolve({ ok: false, error: "bridge_disconnected" });
+  }
+  const requestId = randomUUID();
+  return new Promise<OmnicodeAccountMaterialFetchReply>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingAccountMaterialRequests.delete(requestId);
+      resolve({ ok: false, error: "account_material_timeout" });
+    }, Math.max(1_000, timeoutMs));
+    timer.unref?.();
+    pendingAccountMaterialRequests.set(requestId, {
+      resolve: (result) => {
+        clearTimeout(timer);
+        resolve(result);
+      },
+      timer,
+    });
+    try {
+      ws.send(JSON.stringify({ type: "accountMaterial", requestId, request }));
+    } catch {
+      pendingAccountMaterialRequests.delete(requestId);
+      clearTimeout(timer);
+      resolve({ ok: false, error: "account_material_send" });
+    }
+  });
 }
 
 /**

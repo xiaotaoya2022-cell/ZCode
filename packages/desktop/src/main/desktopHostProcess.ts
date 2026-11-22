@@ -27,6 +27,7 @@ import {
   HostMessageTypes,
   hostResponseMessageSchema,
   HostResponseTypes,
+  type OmnicodeAccountMaterialRequestPayload,
   type OmnicodeSharedAssetRequest,
   InternalChannels,
   LAUNCH_MARKS_QUERY_KEY,
@@ -277,6 +278,12 @@ export function spawnHostProcess(
     // 缺省实现回结构化错误——Host 请求总有应答，Host 侧失败即回退直连（不瘫）。
     handleSharedAssetFetchRequest?: (
       request: OmnicodeSharedAssetRequest,
+    ) => Promise<{ ok: boolean; dataBase64?: string; error?: string }>;
+    // [OmniCode] 模式二 R2（spec: docs/omnicode/multi-account-sessions.md §5）：
+    // host → main：附加账号材料取回（实例 main 经桥问管理器解密代理；仅实例身份装配）。
+    // 缺省实现回结构化错误——Host 请求总有应答，Host 侧按目录未命中回落 local（不瘫）。
+    handleAccountMaterialRequest?: (
+      request: OmnicodeAccountMaterialRequestPayload,
     ) => Promise<{ ok: boolean; dataBase64?: string; error?: string }>;
   },
   options?: SpawnHostProcessOptions,
@@ -608,18 +615,33 @@ export function spawnHostProcess(
       return;
     }
 
-    // [OmniCode] 模式二 R2 预留（spec: docs/omnicode/multi-account-sessions.md §5）：
-    // host → main bridge-proxy 附加账号材料请求的**路由占位**。R1.5 只定义协议类型；
-    // 缺省处理依赖恒回 ok=false 结构化错误（R2 接管理器解密代理时再注入真实 handler），
-    // 官方实例 Host 侧不发起该请求，此路由为死代码。
+    // [OmniCode] 模式二 R2（spec: docs/omnicode/multi-account-sessions.md §5）：
+    // host → main bridge-proxy 附加账号材料请求路由（R1.5 占位实接）。实例身份装配
+    // handleAccountMaterialRequest（main/index.ts 注入：经桥问管理器解密代理——管理器
+    // 唯一解密权威）；处理依赖缺席（官方/管理器 Host）恒回 ok=false 结构化错误，
+    // Host 侧按"目录未命中"回落 local 文件来源提供者，不瘫。
     if (result.data.type === HostResponseTypes.OmnicodeAccountMaterialRequest) {
       const request = result.data;
-      child.postMessage({
-        type: HostMessageTypes.OmnicodeAccountMaterialResult,
-        requestId: request.requestId,
-        ok: false,
-        error: "omnicode_account_material_unavailable",
-      });
+      const handler = dependencies.handleAccountMaterialRequest;
+      const reply = (payload: { ok: boolean; dataBase64?: string; error?: string }) =>
+        child.postMessage({
+          type: HostMessageTypes.OmnicodeAccountMaterialResult,
+          requestId: request.requestId,
+          ok: payload.ok,
+          ...(payload.ok && payload.dataBase64 ? { dataBase64: payload.dataBase64 } : {}),
+          ...(!payload.ok && payload.error ? { error: payload.error } : {}),
+        });
+      void (
+        handler
+          ? handler(request.request).catch((error: unknown) => ({
+              ok: false as const,
+              error: error instanceof Error ? error.message : String(error),
+            }))
+          : Promise.resolve({
+              ok: false as const,
+              error: "omnicode_account_material_unavailable",
+            })
+      ).then(reply);
       return;
     }
 

@@ -70,6 +70,20 @@ export {
 export type { OmnicodeSharedAssetsCacheDeps } from "./sharedAssetsCache.js";
 export { requestOmnicodeSharedAssetFromManager } from "./instanceBridgeClient.js";
 export type { OmnicodeSharedAssetFetchReply } from "./instanceBridgeClient.js";
+// [OmniCode] 模式二 R2（spec: docs/omnicode/multi-account-sessions.md §5）：附加账号目录
+// 枚举 + 解密代理（管理器唯一解密权威；实例侧桥取请求入口）。
+export { requestOmnicodeAccountMaterialFromManager } from "./instanceBridgeClient.js";
+export type { OmnicodeAccountMaterialFetchReply } from "./instanceBridgeClient.js";
+export {
+  deriveOmnicodeBridgeAccountId,
+  listOmnicodeBridgeAccounts,
+  resolveOmnicodeBridgeAccountMaterial,
+  resolveOmnicodeBridgeAccountSourceProfileId,
+} from "./accountDirectory.js";
+export type {
+  OmnicodeBridgeAccountEntry,
+  OmnicodeBridgeAccountMaterialResult,
+} from "./accountDirectory.js";
 export {
   bindOmnicodeGlobalPrefsSourceInstanceId,
   getOmnicodeGlobalPrefsIdentity,
@@ -95,3 +109,12 @@ export type {
   OmnicodeInstanceAuthWindowLogger,
   OpenOmnicodeInstanceAuthWindowInput,
 } from "./instanceAuthWindow.js";
+// [OmniCode] 丙1 远程聚合 R3（spec: docs/omnicode/remote-aggregation.md §4/§5/§8-R3）：
+// 跨实例桥转发——管理器侧目录/转投装配面（仅 desktopProfileIpc 的 managerHooks 消费；
+// index.ts 的接线面与实例侧执行器直接模块导入，不经 contract 面）。
+export {
+  handleOmnicodeRemoteWorkspaceInstanceConnected,
+  handleOmnicodeRemoteWorkspaceInstanceDisconnected,
+  handleOmnicodeRemoteWorkspaceListUplink,
+  setupOmnicodeRemoteForwardHost,
+} from "./remoteForwardHost.js";

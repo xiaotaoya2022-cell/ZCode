@@ -58,6 +58,18 @@ import {
   writeOmnicodeConsoleUiState,
 } from "./omnicode/consoleEmbedding.js";
 import { mergeOmnicodeConsoleUiState } from "./omnicode/consoleUiState.js";
+// [OmniCode] 模式二 R2（spec: docs/omnicode/multi-account-sessions.md §5）：管理器侧
+// 附加账号解密代理（桥钩子消费；管理器唯一解密权威，材料内存现取不落盘不进日志）。
+import { resolveOmnicodeBridgeAccountMaterial } from "./omnicode/accountDirectory.js";
+// [OmniCode] 丙1 远程聚合 R3（spec: docs/omnicode/remote-aggregation.md §4/§5/§8-R3）：
+// 跨实例桥转发装配（目录查询/转投 + 上行钩子消费；经 contract 面与 takeover 同款约定）。
+import {
+  handleOmnicodeRemoteWorkspaceInstanceConnected,
+  handleOmnicodeRemoteWorkspaceInstanceDisconnected,
+  handleOmnicodeRemoteWorkspaceListUplink,
+  setupOmnicodeRemoteForwardHost,
+} from "./omnicode/contract.js";
+import type { OmnicodeRemoteForwardHostDeps } from "./omnicode/remoteForwardHost.js";
 // [OmniCode] 实例元数据批次：改名/排序态变化触发托盘名称缓存刷新 + 菜单重建（直接从
 // 实现文件导入，与 consoleUiState 同款约定——经 contract.ts 不含 trayMenu 导出）。
 import { refreshOmnicodeTrayNameCache } from "./omnicode/trayMenu.js";
@@ -217,12 +229,17 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
       // [OmniCode] 批次4 全局偏好层：连接即推当前全局层快照（theme 主交付面 +
       // 长断连实例的收敛兜底；fire-and-forget，spec: docs/omnicode/global-preferences.md）。
       void pushOmnicodeGlobalPrefsSnapshotToInstance(profileId);
+      // [OmniCode] 丙1 远程聚合 R3：连接即目录查询（门控内聚在 remoteForwardHost——
+      // 开关关闭零查询；实例上行 Report 为另一路收敛来源，spec §5 目录双保险）。
+      handleOmnicodeRemoteWorkspaceInstanceConnected(profileId);
     },
     onInstanceDisconnected: (profileId) => {
       notifyOmnicodeInstanceDisconnected(profileId);
       // [OmniCode] D12 接管流：断连对账——持有者断开 = holder-offline 即时回观察者；
       // 观察者断开 = 标记取消（持有者回执到达时静默丢弃）。
       handleOmnicodeTakeoverInstanceDisconnected(profileId);
+      // [OmniCode] 丙1 远程聚合 R3：断连摘除该实例的聚合条目并重推（spec §6 对账）。
+      handleOmnicodeRemoteWorkspaceInstanceDisconnected(profileId);
     },
     onInstanceHello: (profileId, hwndHex) => notifyOmnicodeInstanceHello(profileId, hwndHex),
     // [OmniCode] 批次4：实例上行全局偏好（载荷已在桥服务侧消毒；协调器内二次消毒 +
@@ -243,6 +260,21 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
             omnicodeSharedAssetsCache.resolve(request),
         }
       : {}),
+    // [OmniCode] 模式二 R2：实例附加账号材料取回 → 管理器解密代理（仅 omnicode flavor
+    // 装配；钩子缺席时桥服务回结构化错误，实例 Host 回落 local 文件来源提供者）。
+    // 首参 profileId = 桥握手已验连接真身，代理据此排除请求方自身的主账号材料。
+    ...(ZCODE_PRODUCT_FLAVOR === "omnicode"
+      ? {
+          onAccountMaterialRequest: (
+            profileId: string,
+            request: { accountId: string },
+          ) =>
+            resolveOmnicodeBridgeAccountMaterial({
+              accountId: request.accountId,
+              requesterProfileId: profileId,
+            }),
+        }
+      : {}),
     // [OmniCode] D12 接管流：观察者→持有者转投 + 回执路由（身份绑定认证在桥服务侧
     // 完成——钩子首参 profileId 是桥握手已验连接真身，协调器不信任载荷自报身份）。
     onTakeoverRequestFromInstance: (profileId, message) => {
@@ -252,7 +284,31 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
       handleOmnicodeTakeoverReplyFromInstance(profileId, message),
     onTakeoverCancelFromInstance: (profileId, message) =>
       handleOmnicodeTakeoverCancelFromInstance(profileId, message),
+    // [OmniCode] 丙1 远程聚合 R3：实例 workspace-list 目录上行（Result 应答 / Report
+    // 报告；载荷已在桥服务侧按 shared union 校验——null=校验失败静默丢弃。钩子面照常
+    // 挂载，remoteForwardHost 单例缺席（官方 flavor）时 handle* 全部 no-op）。
+    onOmnicodeRemoteWorkspaceListUplink: (profileId, message) => {
+      handleOmnicodeRemoteWorkspaceListUplink(profileId, message);
+    },
   });
+  // [OmniCode] 丙1 远程聚合 R3：跨实例转发核心装配（仅 omnicode flavor——官方 flavor
+  // 单例缺席，handle* 全 no-op。桥命令直发 + 显示名经 Profile 注册表解析防伪造，
+  // takeoverCoordinator 同款依赖形态）。
+  if (ZCODE_PRODUCT_FLAVOR === "omnicode") {
+    const forwardDeps: OmnicodeRemoteForwardHostDeps = {
+      sendCommand: (profileId, command) => sendOmnicodeInstanceCommand(profileId, command),
+      getConnectedProfileIds: () => getOmnicodeConnectedInstanceProfileIds(),
+      resolveProfileDisplayName: async (profileId) => {
+        try {
+          const profiles = await listOmnicodeProfiles();
+          return profiles.find((profile) => profile.id === profileId)?.name ?? null;
+        } catch {
+          return null;
+        }
+      },
+    };
+    setupOmnicodeRemoteForwardHost(forwardDeps);
+  }
   // [OmniCode] D12 接管流协调器装配（桥命令直发 + 锁直读 workspaceLocks 只读原语——
   // 锁核心语义零改动；显示名解析经 Profile 注册表 listOmnicodeProfiles，防伪造）。
   // 审计 R1 遗留 1 收口：协调器仅 omnicode flavor 装配（官方 flavor 无桥消息，死装配
