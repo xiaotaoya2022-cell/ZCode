@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import tsupConfig, {
+  buildOmnicodeTelemetryStubPlugins,
   resolveBuildPackagedAgentTelemetryEnv,
   resolveBuildRemoteCdnReleaseRoots,
   resolveDesktopTsupBundleSecurityOptions,
@@ -202,5 +203,86 @@ describe("desktop tsup chunk isolation", () => {
       target?.esbuildOptions?.(esbuildOptions);
       expect(esbuildOptions.legalComments).toBe("none");
     }
+  });
+});
+
+// [OmniCode] 去遥测构建桩重定向（构建打包审计 B 域 2026-11-22）：主进程启动不再
+// 解析 @arms/@opentelemetry 静态链；官方世界（常量 false）不挂插件。
+describe("desktop tsup omnicode telemetry stub redirect", () => {
+  it("main 构建挂去遥测桩插件并放行说明符，其余子构建不挂", () => {
+    const configs = Array.isArray(tsupConfig) ? tsupConfig : [tsupConfig];
+    const main = configs.find((config) => config.name === "main");
+    expect(
+      main?.esbuildPlugins?.some((plugin) => plugin.name === "zcode:omnicode-telemetry-stub"),
+      "main esbuildPlugins 应包含 telemetry stub 重定向",
+    ).toBe(true);
+    // tsup 的 externalPlugin 先于用户插件注册：说明符必须在 noExternal 里放行，
+    // 否则被直接外置、重定向永远轮不到。
+    for (const specifier of [
+      "@arms/rum-electron",
+      "@opentelemetry/api",
+      "@opentelemetry/resources",
+      "@opentelemetry/sdk-metrics",
+      "@opentelemetry/exporter-metrics-otlp-proto",
+      "@opentelemetry/exporter-trace-otlp-proto",
+    ]) {
+      expect(getNoExternal("main")).toContain(specifier);
+    }
+    for (const configName of ["host", "scheduler", "preload", "extension-host"]) {
+      const other = configs.find((config) => config.name === configName);
+      expect(other?.esbuildPlugins?.length ?? 0).toBe(0);
+      expect(getNoExternal(configName)).not.toContain("@arms/rum-electron");
+    }
+  });
+
+  it("官方世界（遥测启用）不挂重定向插件", () => {
+    expect(buildOmnicodeTelemetryStubPlugins(false)).toEqual([]);
+  });
+
+  it("重定向面只覆盖 @arms 与 OTel 主链说明符，桩内容内联为 TS", () => {
+    const plugin = buildOmnicodeTelemetryStubPlugins(true)[0] as unknown as {
+      setup(build: {
+        onResolve: (
+          options: { filter: RegExp },
+          handler: (args: { path: string }) => { path: string } | undefined,
+        ) => void;
+        onLoad: (
+          options: { filter: RegExp },
+          handler: () => { contents: string; loader: string },
+        ) => void;
+      }): void;
+    };
+
+    let resolveFilter: RegExp | undefined;
+    let loadResult: { contents: string; loader: string } | undefined;
+    plugin.setup({
+      onResolve: (options) => {
+        resolveFilter = options.filter;
+      },
+      onLoad: (_options, handler) => {
+        loadResult = handler();
+      },
+    });
+
+    expect(resolveFilter).toBeDefined();
+    for (const specifier of [
+      "@arms/rum-electron",
+      "@opentelemetry/api",
+      "@opentelemetry/resources",
+      "@opentelemetry/sdk-metrics",
+      "@opentelemetry/exporter-metrics-otlp-proto",
+      "@opentelemetry/exporter-trace-otlp-proto",
+    ]) {
+      expect(resolveFilter!.test(specifier), specifier).toBe(true);
+    }
+    // sdk-trace-base 只有 type 导入（编译期擦除），不重定向。
+    expect(resolveFilter!.test("@opentelemetry/sdk-trace-base")).toBe(false);
+    // @arms/rum-electron/browser 是 renderer 侧说明符，不在 main 图，不重定向。
+    expect(resolveFilter!.test("@arms/rum-electron/browser")).toBe(false);
+
+    expect(loadResult).toBeDefined();
+    expect(loadResult!.loader).toBe("ts");
+    expect(loadResult!.contents).toContain("armsRumStub");
+    expect(loadResult!.contents).toContain("export class MeterProvider");
   });
 });

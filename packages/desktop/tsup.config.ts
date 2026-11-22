@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { Plugin as EsbuildPlugin } from "esbuild";
 import { defineConfig } from "tsup";
 import { getBuildMetadata } from "./scripts/build-metadata.mjs";
 import { resolveDesktopProductFlavor } from "./scripts/desktop-product-identity.mjs";
@@ -236,6 +237,78 @@ const desktopNodeRuntimeExternals = [
   "yauzl",
 ];
 
+// —— [OmniCode] 去遥测构建桩重定向（构建打包审计 B 域 2026-11-22）——
+// OMNICODE_TELEMETRY_DISABLED 在 shared/env.ts 恒为 true 时，@arms/rum-electron 与
+// @opentelemetry 主链（sdk-metrics / OTLP exporters / resources + protobufjs/axios/
+// web-vitals，合计约 9.9MB 未压缩）仍是 main 启动期静态外部导入：init 虽然
+// enable=false 不上报，整链照样在 app ready 之前加载解析。这里在构建层把这些说明符
+// 重定向到 src/main/omnicode/telemetryStubs.ts 的 no-op 桩（API 面与枚举值逐项核对过），
+// 实测收益 = 主进程启动不再解析遥测链。语义边界（详见桩文件注释）：
+// - 常量为 false（上游/官方世界）时返回 []，构建产物与官方逐字一致；
+//   @arms 在 runtime-node-modules-allowlist 白名单不动（同一 files 机制）。
+// - vitest 不经过 tsup 重定向（vitest.config.ts 已把 @arms/rum-electron 别名到测试桩），
+//   单测继续走真实模块语义。
+const OMNICODE_TELEMETRY_STUB_SPECIFIERS = [
+  "@arms/rum-electron",
+  "@opentelemetry/api",
+  "@opentelemetry/resources",
+  "@opentelemetry/sdk-metrics",
+  "@opentelemetry/exporter-metrics-otlp-proto",
+  "@opentelemetry/exporter-trace-otlp-proto",
+] as const;
+
+const OMNICODE_TELEMETRY_STUB_SPECIFIER_RE =
+  /^@arms\/rum-electron$|^@opentelemetry\/(?:api|resources|sdk-metrics|exporter-metrics-otlp-proto|exporter-trace-otlp-proto)$/;
+
+const OMNICODE_TELEMETRY_DISABLED_FLAG_SOURCE_RE =
+  /export const OMNICODE_TELEMETRY_DISABLED = true;/;
+
+export function resolveOmnicodeTelemetryDisabledForBuild(): boolean {
+  // 单一事实源是 shared/env.ts 的构建期常量；读取失败按未启用处理（保守回退官方行为）。
+  try {
+    const source = readFileSync(
+      resolve(import.meta.dirname, "../shared/src/env.ts"),
+      "utf8",
+    );
+    return OMNICODE_TELEMETRY_DISABLED_FLAG_SOURCE_RE.test(source);
+  } catch {
+    return false;
+  }
+}
+
+export function buildOmnicodeTelemetryStubPlugins(
+  telemetryDisabled: boolean,
+): EsbuildPlugin[] {
+  if (!telemetryDisabled) {
+    return [];
+  }
+  const stubPath = resolve(import.meta.dirname, "src/main/omnicode/telemetryStubs.ts");
+  return [
+    {
+      name: "zcode:omnicode-telemetry-stub",
+      setup(build) {
+        build.onResolve({ filter: OMNICODE_TELEMETRY_STUB_SPECIFIER_RE }, () => ({
+          path: stubPath,
+        }));
+        build.onLoad({ filter: /omnicode[\\/]telemetryStubs\.ts$/ }, () => ({
+          contents: readFileSync(stubPath, "utf8"),
+          loader: "ts",
+        }));
+      },
+    },
+  ];
+}
+
+const omnicodeTelemetryStubPlugins = buildOmnicodeTelemetryStubPlugins(
+  resolveOmnicodeTelemetryDisabledForBuild(),
+);
+
+// tsup 的 externalPlugin 先于用户 esbuildPlugins 注册，对不在 noExternal 的裸说明符
+// 直接返回 { external: true }，会抢占重定向解析。桩启用时必须把说明符一并放进
+// noExternal，让 tsup 外置插件放行后由重定向插件接手（官方世界不追加，产物不变）。
+const omnicodeTelemetryStubNoExternal: string[] =
+  omnicodeTelemetryStubPlugins.length > 0 ? [...OMNICODE_TELEMETRY_STUB_SPECIFIERS] : [];
+
 function createDevReadyMarkerHook(
   target: "main" | "host" | "preload" | "scheduler" | "extension-host",
 ): string {
@@ -279,8 +352,14 @@ export default defineConfig([
       // electron-builder 又会排除 node_modules/@zcode，导致安装包启动即 ERR_MODULE_NOT_FOUND。
       // producer 的 JS broker 必须跟随 services 一起内联，原生 addon 仍只存在于独立 Helper。
       "@zcode/zcode-cua",
+      // 去遥测桩启用时放行 @arms/@opentelemetry 说明符（由 esbuildPlugins 重定向接手）。
+      ...omnicodeTelemetryStubNoExternal,
     ],
     define: createMainDefines(),
+    // 去遥测构建桩：OMNICODE_TELEMETRY_DISABLED 恒真时把 @arms/@opentelemetry 主链
+    // 重定向到 no-op 桩（见 buildOmnicodeTelemetryStubPlugins 注释）。只挂 main 图——
+    // 全仓扫描只有 main 产物静态携带遥测链。
+    esbuildPlugins: omnicodeTelemetryStubPlugins,
     // 修复原因：main/host 同时 watch 且共享 out 根目录时，默认 chunk 命名会互相覆盖，
     // 可能让 main 的 import 指向被 host 刚重写的 chunk，触发“缺少命名导出”的偶发启动报错。
     // 这里按目标分目录输出 chunk，确保并发构建下产物隔离。
