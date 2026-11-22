@@ -53,6 +53,8 @@ export interface OmnicodeSessionAccountScopeRegistry {
   resolve(params: { workspaceKey?: string | null; sessionId: string }): string | null;
   /** 显式解除会话绑定（会话删除等生产者可调用；未绑定为 no-op）。 */
   unbind(params: { workspaceKey?: string | null; sessionId: string }): void;
+  /** 按 sessionId 全局解绑（会话 id 全局唯一——免疫 workspaceKey 归一化漂移，终审 P2-3）。 */
+  unbindBySessionId(sessionId: string): void;
   /** 内存诊断计数器（只读 size）。 */
   size(): number;
   /** 门控判定（包裹决策复用同一事实；缺省 = OMNICODE_PROFILE_ID env）。 */
@@ -88,6 +90,13 @@ export function createOmnicodeSessionAccountRegistry(options?: {
       const key = sessionScopeRegistryKey(params);
       if (!key) return;
       entries.delete(key);
+    },
+    unbindBySessionId(sessionId) {
+      if (!sessionId.trim()) return;
+      const suffix = `${registryKeyJoiner}${sessionId.trim()}`;
+      for (const key of [...entries.keys()]) {
+        if (key === sessionId.trim() || key.endsWith(suffix)) entries.delete(key);
+      }
     },
     size() {
       return entries.size;

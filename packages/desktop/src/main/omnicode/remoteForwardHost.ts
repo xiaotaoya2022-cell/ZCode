@@ -242,11 +242,11 @@ function createOmnicodeRemoteForwardCore(deps: OmnicodeRemoteForwardHostDeps): O
     handleInstanceDisconnected(profileId) {
       // spec §6：被聚合实例退出 → 条目从聚合列表摘除（在途 bridge 关闭语义由 R3.5
       // 承接——v1 跨实例条目在宿主侧无在途 bridge，摘除即收口）。
-      const removed =
-        entriesByProfileId.delete(profileId) ||
-        displayNamesByProfileId.delete(profileId) ||
-        pendingQueries.delete(profileId);
-      if (removed) notifyChanged();
+      // 终审 P2-5：三个簿记全部执行（|| 短路曾漏清 displayName）。
+      const removedEntries = entriesByProfileId.delete(profileId);
+      const removedNames = displayNamesByProfileId.delete(profileId);
+      const removedPending = pendingQueries.delete(profileId);
+      if (removedEntries || removedNames || removedPending) notifyChanged();
     },
     getDirectoryView() {
       return {

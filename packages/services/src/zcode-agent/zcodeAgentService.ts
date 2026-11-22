@@ -2838,10 +2838,8 @@ export function createZCodeAgentService(
             } else if (parsed.data.kind === "session-closed") {
               releaseOmnicodeAccountSlot(workspace, parsed.data.sessionId);
               // 会话关闭同时解除凭据作用域绑定（register 表有界 FIFO 兜底之外的显式回收）。
-              omnicodeSessionAccountScopes?.unbind({
-                workspaceKey: resolveWorkspaceKey(workspace),
-                sessionId: parsed.data.sessionId,
-              });
+              // 终审 P2-3：改按 sessionId 全局解绑（免疫 workspaceKey 归一化漂移）。
+              omnicodeSessionAccountScopes?.unbindBySessionId(parsed.data.sessionId);
             }
           } else {
             logger.warn(undefined, "丢弃无效 ZCode Protocol Computer Use operation event", {

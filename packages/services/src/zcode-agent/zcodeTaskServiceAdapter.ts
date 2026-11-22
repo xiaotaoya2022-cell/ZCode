@@ -3080,10 +3080,9 @@ export function createZCodeTaskServiceAdapter(
       // [OmniCode] 模式二 R3/R4（spec §6）：会话删除即释放调度器并发计数并解除凭据作用域
       // 绑定（register 表有界 FIFO 兜底之外的显式回收；未登记 no-op，官方路径零影响）。
       options.omnicodeAccountScheduler?.releaseFinish(params.taskId);
-      options.omnicodeSessionAccounts?.unbind({
-        workspaceKey: params.workspacePath,
-        sessionId: params.taskId,
-      });
+      // 终审 P2-3：按 sessionId 全局解绑——bind 侧 workspaceKey 经 resolveWorkspaceKey
+      // 归一化（可含 identity），deleteTask params 无 identity 必致键漂移泄漏。
+      options.omnicodeSessionAccounts?.unbindBySessionId(params.taskId);
       await taskIndexSyncer.mutateSessionFacts(
         { ...params, sessionId: params.taskId },
         { type: "delete" },
