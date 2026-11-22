@@ -61,6 +61,11 @@ import { modelSelectionSchema } from "./model-selection.js";
 import { localeSchema } from "./validationAppSettings.js";
 // [OmniCode] 批次4 单点下沉：共享资产请求形状契约（bridge assetFetch / host↔main 同形）。
 import { omnicodeSharedAssetRequestSchema } from "./omnicodeSharedAssets.js";
+// [OmniCode] 模式二 R2 预留：bridge-proxy 附加账号材料的请求/应答载荷形状契约。
+import {
+  omnicodeAccountMaterialRequestPayloadSchema,
+  omnicodeAccountMaterialResultPayloadSchema,
+} from "./omnicodeAccountMaterial.js";
 import { zcodeProcessDiagnosticSchema } from "./process-diagnostic.js";
 import { PROCESS_RESOURCE_CLI_LANES } from "./processResourceTelemetry.js";
 import {
@@ -1123,6 +1128,22 @@ export const hostSharedAssetFetchResultMessageSchema = z
   .strict();
 export type HostSharedAssetFetchResultMessage = z.infer<typeof hostSharedAssetFetchResultMessageSchema>;
 
+// [OmniCode] 模式二 R2 预留（spec: docs/omnicode/multi-account-sessions.md §5）：
+// main → host：bridge-proxy 附加账号材料请求的应答。ok=false（桥未连/管理器不可用/
+// 账号不存在/解密失败）时只带结构化错误；ok=true 时 dataBase64 为解密后账号材料 JSON
+// 的 UTF-8 base64（omnicodeAccountMaterialFileSchema 同构，Host 侧二次校验）。
+// R1.5 只定义协议类型与 main 侧路由占位；实接属 R2。
+export const hostOmnicodeAccountMaterialResultMessageSchema = z
+  .object({
+    type: z.literal("omnicode-account-material-result"),
+    requestId: nonEmptyStringSchema,
+    ...omnicodeAccountMaterialResultPayloadSchema.shape,
+  })
+  .strict();
+export type HostOmnicodeAccountMaterialResultMessage = z.infer<
+  typeof hostOmnicodeAccountMaterialResultMessageSchema
+>;
+
 /** 手机只提交项目意图；实际目录和远端 scope 必须由窗口 Host 准备。 */
 export const hostPrepareProjectWorkspaceMessageSchema = z
   .object({
@@ -1228,6 +1249,8 @@ export const hostIncomingMessageSchema = z.discriminatedUnion("type", [
   hostProviderProvisioningExecuteMessageSchema,
   hostProviderProvisioningLaneResultMessageSchema,
   hostSharedAssetFetchResultMessageSchema,
+  // [OmniCode] 模式二 R2 预留：bridge-proxy 附加账号材料应答（main → host）。
+  hostOmnicodeAccountMaterialResultMessageSchema,
 ]);
 
 export const hostRemoteWorkspaceConnectedResponseSchema = z
@@ -1718,6 +1741,20 @@ export const hostSharedAssetFetchRequestResponseSchema = z
   .strict();
 export type HostSharedAssetFetchRequestMessage = z.infer<typeof hostSharedAssetFetchRequestResponseSchema>;
 
+// [OmniCode] 模式二 R2 预留（spec: docs/omnicode/multi-account-sessions.md §5）：
+// host → main：请求经管理器解密代理读取 bridge-proxy 附加账号材料（零重登迁移）。
+// R1.5 只定义协议类型与 main 侧路由占位（缺省处理者恒 ok=false）；实接属 R2。
+export const hostOmnicodeAccountMaterialRequestResponseSchema = z
+  .object({
+    type: z.literal("omnicode-account-material-request"),
+    requestId: nonEmptyStringSchema,
+    request: omnicodeAccountMaterialRequestPayloadSchema,
+  })
+  .strict();
+export type HostOmnicodeAccountMaterialRequestMessage = z.infer<
+  typeof hostOmnicodeAccountMaterialRequestResponseSchema
+>;
+
 /** host → main：登记已校验的插件 UI HTML。 */
 export const hostPluginSandboxRegisterRequestResponseSchema = z
   .object({
@@ -1913,6 +1950,8 @@ export const hostResponseMessageSchema = z.discriminatedUnion("type", [
   hostCronSchedulerWakeRequestResponseSchema,
   hostOffPeakSchedulerWakeRequestResponseSchema,
   hostSharedAssetFetchRequestResponseSchema,
+  // [OmniCode] 模式二 R2 预留：bridge-proxy 附加账号材料请求（host → main）。
+  hostOmnicodeAccountMaterialRequestResponseSchema,
 ]);
 
 export const zcodeTaskPersistStatusSchema = z.enum(["running", "completed", "error"]);

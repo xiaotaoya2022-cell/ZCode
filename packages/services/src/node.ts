@@ -501,6 +501,9 @@ import {
 // spec: docs/omnicode/multi-account-sessions.md §4/§5/§8）。
 import { createOmnicodeAccountOverride } from "./omnicode/accountOverride.js";
 import { createOmnicodeAccountFileMaterialProvider } from "./omnicode/accountMaterialFile.js";
+// [OmniCode] 模式二 R1.5：会话作用域接线——会话→附加账号绑定注册表（sendPrompt 登记 /
+// providerRuntimeHeaders 解析消费；spec §4/§10-R1.5）。
+import { createOmnicodeSessionAccountRegistry } from "./omnicode/sessionAccountScope.js";
 // [OmniCode] D12 接管流：管理器 main 侧锁占用方查询（桥上行 takeoverRequest 转投持有者
 // 前的锁事实读取；只读原语，锁语义零改动——spec §批次3 D12）。
 export { readWorkspaceLockOwner, listWorkspaceLocks } from "./omnicode/contract.js";
@@ -1606,6 +1609,12 @@ export function createLocalServices(options: {
   const omnicodeAccountOverride = createOmnicodeAccountOverride({
     materialProvider: createOmnicodeAccountFileMaterialProvider(),
   });
+  // [OmniCode] 模式二 R1.5（spec: docs/omnicode/multi-account-sessions.md §4/§10-R1.5）：
+  // 会话作用域接线——sendPrompt 参数 omnicodeAccountId 在 task adapter 登记会话绑定，
+  // zcodeAgentService.resolveAccountRequestAuth（CLI runtime 每条 providerRuntimeHeaders
+  // 请求）按 sessionId 命中后进入 runWithOmnicodeAccountScope 作用域。注册表内建
+  // omnicode 门控：门控关（管理器/官方实例）bind 恒 no-op、resolve 恒 null、包裹恒透传。
+  const omnicodeSessionAccounts = createOmnicodeSessionAccountRegistry();
   const loadOAuthAccountMaterial = (family: ProviderFamilyDomain) =>
     omnicodeAccountOverride.loadFamilyMaterial(family, (f) =>
       oauthCredentialRepo.loadFamilyMaterial(f),
@@ -2573,6 +2582,9 @@ export function createLocalServices(options: {
       ? { accountProviderConfigSource: agentAccountProviderConfigSource }
       : {}),
     accountRequestAuthService,
+    // [OmniCode] 模式二 R1.5：会话绑定注册表 → providerRuntimeHeaders 凭据解析包裹点
+    //（官方行为逐字不变，见 resolveAccountRequestAuth 决策注释）。
+    omnicodeSessionAccountScopes: omnicodeSessionAccounts,
     readRequestVerificationConfig: () =>
       codingPlanSubscriptionService.getRequestVerificationConfig(),
     ...(modelSelectionReadinessSource ? { modelSelectionReadinessSource } : {}),
@@ -2917,6 +2929,8 @@ export function createLocalServices(options: {
     taskIndexSyncer: zcodeTaskIndexSyncer,
     settingService,
     cuaProductMcpServerResolver,
+    // [OmniCode] 模式二 R1.5：sendPrompt omnicodeAccountId 的会话绑定登记（官方缺省 no-op）。
+    omnicodeSessionAccounts,
   });
   appControlService = createAppControlService({
     sourceServerId: options?.projectStorageHostId ?? "local",

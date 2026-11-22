@@ -848,6 +848,10 @@ export const HostMessageTypes = {
   // [OmniCode] 批次4 单点下沉：main → host：shared-asset-fetch-request 的应答
   //（ok=false 时 Host 回退直连既有下载路径，见 docs/omnicode/omnicode-shared-services.md §G3.3）。
   SharedAssetFetchResult: "shared-asset-fetch-result",
+  // [OmniCode] 模式二 R2 预留（spec: docs/omnicode/multi-account-sessions.md §5）：
+  // main → host：bridge-proxy 附加账号材料请求的应答。R1.5 只定义协议类型与 main 侧
+  // 路由占位（缺省处理者恒 ok=false 结构化错误）；实接（管理器解密代理）属 R2。
+  OmnicodeAccountMaterialResult: "omnicode-account-material-result",
 } as const;
 
 /** host process → main process 的反馈消息类型 */
@@ -966,6 +970,10 @@ export const HostResponseTypes = {
   // host → main：请求经管理器桥取共享营销资产（仅 omnicode 实例身份装配；官方/控制台
   // Host 不注入处理依赖，main 回结构化错误，Host 回退直连既有下载路径）。
   SharedAssetFetchRequest: "shared-asset-fetch-request",
+  // [OmniCode] 模式二 R2 预留（spec: docs/omnicode/multi-account-sessions.md §5）：
+  // host → main：请求经管理器解密代理读取 bridge-proxy 附加账号材料（零重登迁移）。
+  // R1.5 只定义协议类型与 main 侧路由占位；实接（Host 侧发起 + 管理器应答）属 R2。
+  OmnicodeAccountMaterialRequest: "omnicode-account-material-request",
 } as const;
 
 // ============================================================================

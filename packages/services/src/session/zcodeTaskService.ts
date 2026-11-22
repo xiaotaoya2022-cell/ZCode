@@ -317,6 +317,11 @@ export interface IZCodeTaskService {
       modelSelectionBasis?: CommandPayloadMap["sendText"]["modelSelectionBasis"];
       /** 单次执行约束与动态鉴权；仅 idle start-now 接受，不进入普通队列。 */
       modelExecution?: CommandPayloadMap["sendText"]["modelExecution"];
+      // [OmniCode] 模式二 R1.5（spec: docs/omnicode/multi-account-sessions.md §4/§10-R1.5）：
+      // 会话绑定的附加账号 id，与 modelSelection 同路透传（下一次请求生效，会话内可换）。
+      // 缺省/官方恒缺省 → 官方路径逐字不变；Host 内经 omnicode 门控注册表进入
+      // runWithOmnicodeAccountScope 作用域（见 omnicode/sessionAccountScope.ts）。
+      omnicodeAccountId?: string;
     } & ZCodeBackgroundTurnAttribution,
   ): Promise<CommandAck | void>;
 

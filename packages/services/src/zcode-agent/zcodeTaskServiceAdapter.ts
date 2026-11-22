@@ -1,4 +1,5 @@
 import { formatBotInputClientId, isAuxiliarySessionKind } from "@zcode/shared";
+import type { OmnicodeSessionAccountScopeRegistry } from "#src/omnicode/sessionAccountScope.js";
 import { createBotTopicAdmission } from "#src/zcode-agent/botTopicAdmission.js";
 import {
   readBotGroupRuntimeSnapshot,
@@ -192,6 +193,10 @@ interface CreateZCodeTaskServiceAdapterOptions {
   taskIndexSyncer: ZCodeTaskIndexSyncer;
   settingService?: Pick<ISettingService, "get">;
   cuaProductMcpServerResolver?: CuaProductMcpServerResolver;
+  // [OmniCode] 模式二 R1.5（spec: docs/omnicode/multi-account-sessions.md §4/§10-R1.5）：
+  // 会话→附加账号绑定注册表（内建 omnicode 门控）。缺省（官方实例）→ 绑定 no-op，
+  // 官方路径逐字不变。
+  omnicodeSessionAccounts?: OmnicodeSessionAccountScopeRegistry;
 }
 
 interface TaskTarget {
@@ -406,9 +411,23 @@ export function createZCodeTaskServiceAdapter(
       modelSelection?: CommandPayloadMap["sendText"]["modelSelection"];
       modelSelectionBasis?: CommandPayloadMap["sendText"]["modelSelectionBasis"];
       modelExecution?: CommandPayloadMap["sendText"]["modelExecution"];
+      // [OmniCode] 模式二 R1.5：会话绑定附加账号 id（sendPrompt 同路透传）。
+      omnicodeAccountId?: string;
     } & ZCodeBackgroundTurnAttribution,
   ): Promise<CommandAck | undefined> {
     const startedAt = Date.now();
+    // [OmniCode] 模式二 R1.5（spec: docs/omnicode/multi-account-sessions.md §4/§10-R1.5）：
+    // sendPrompt 参数携带的附加账号绑定到该会话。注册表内建 omnicode 门控——官方实例
+    // （未注入/门控关）为 no-op；绑定后该会话后续 providerRuntimeHeaders 凭据解析在
+    // zcodeAgentService 单一包裹点进入 runWithOmnicodeAccountScope 作用域。未携带参数
+    // 时零操作，官方行为逐字不变。
+    if (params.omnicodeAccountId) {
+      options.omnicodeSessionAccounts?.bind({
+        workspaceKey: resolveWorkspaceKey(target),
+        sessionId: target.taskId,
+        accountId: params.omnicodeAccountId,
+      });
+    }
     notifySyncerSession(target);
     // live tool projection 只用于当前运行的终态收口。
     // 新输入开始时必须清掉上一轮 live-only 子工具，避免后续 snapshot 把旧工具补到新回复尾部。
@@ -2112,6 +2131,8 @@ export function createZCodeTaskServiceAdapter(
         clientMode: params.clientMode,
         modelSelection: params.modelSelection,
         modelExecution: params.modelExecution,
+        // [OmniCode] 模式二 R1.5：附加账号绑定随 sendPrompt 透传（缺省 undefined = 官方路径）。
+        ...(params.omnicodeAccountId ? { omnicodeAccountId: params.omnicodeAccountId } : {}),
       });
     },
 

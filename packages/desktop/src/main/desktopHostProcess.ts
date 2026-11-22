@@ -608,6 +608,21 @@ export function spawnHostProcess(
       return;
     }
 
+    // [OmniCode] 模式二 R2 预留（spec: docs/omnicode/multi-account-sessions.md §5）：
+    // host → main bridge-proxy 附加账号材料请求的**路由占位**。R1.5 只定义协议类型；
+    // 缺省处理依赖恒回 ok=false 结构化错误（R2 接管理器解密代理时再注入真实 handler），
+    // 官方实例 Host 侧不发起该请求，此路由为死代码。
+    if (result.data.type === HostResponseTypes.OmnicodeAccountMaterialRequest) {
+      const request = result.data;
+      child.postMessage({
+        type: HostMessageTypes.OmnicodeAccountMaterialResult,
+        requestId: request.requestId,
+        ok: false,
+        error: "omnicode_account_material_unavailable",
+      });
+      return;
+    }
+
     if (result.data.type === HostResponseTypes.BrowserExecuteRequest) {
       // browser-use：main 用 WebContentsView+CDP 执行命令（handleBrowserExecuteRequest）。
       // 缺省实现时返回 backend_unavailable，保证通道打通但不阻塞。

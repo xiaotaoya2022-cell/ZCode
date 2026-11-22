@@ -23,6 +23,12 @@ import {
 } from "@zcode/shared/conversation-telemetry";
 import { resolveWorkspaceTelemetryDetail } from "@zcode/shared";
 import { isAuxiliarySessionKind } from "@zcode/shared";
+// [OmniCode] 模式二 R1.5：会话→附加账号绑定注册表 + 作用域包裹执行器（spec:
+// docs/omnicode/multi-account-sessions.md §4/§10-R1.5）。
+import {
+  runWithOmnicodeSessionAccountScope,
+  type OmnicodeSessionAccountScopeRegistry,
+} from "#src/omnicode/sessionAccountScope.js";
 import { createAppControlReverseRpc } from "#src/app-control/index.js";
 import type { AppControlService } from "#src/app-control/contract.js";
 import { SessionControlError } from "@zcode/session-control/contracts";
@@ -1225,6 +1231,10 @@ interface CreateZCodeAgentServiceBaseOptions extends Omit<
    * 本地桥存在时本字段绝不参与（本地 workspace 行为零变化）。
    */
   browserRelayExecutor?: BrowserRelayAgentExecutor;
+  // [OmniCode] 模式二 R1.5（spec: docs/omnicode/multi-account-sessions.md §4/§10-R1.5）：
+  // 会话→附加账号绑定注册表（node.ts 装配注入）。缺省（官方/远端装配）→ undefined，
+  // resolveAccountRequestAuth 走官方路径逐字不变。
+  omnicodeSessionAccountScopes?: OmnicodeSessionAccountScopeRegistry;
   channelReplyExecutor?: (request: ChannelReplyHostRequest) => Promise<ChannelReplyResult>;
   topicResourceExecutor?: (
     request: ZCodeTopicResourceReadParams &
@@ -1754,6 +1764,9 @@ export function createZCodeAgentService(
   const accountConfigReceivedRevisionByClient = new WeakMap<ZCodeProtocolClient, string>();
   const sessionTraceIdBySessionKey = new Map<string, TraceId>();
   const accountRequestAuthService = options?.accountRequestAuthService;
+  // [OmniCode] 模式二 R1.5：会话→附加账号绑定注册表（node.ts 装配注入；官方装配缺省
+  // undefined → 下方包裹决策恒 false，官方路径逐字不变）。
+  const omnicodeSessionAccountScopes = options?.omnicodeSessionAccountScopes;
   const accountProviderConfigSource = options?.accountProviderConfigSource;
   const modelSelectionReadinessSource = options?.modelSelectionReadinessSource;
   const sessionRuntimePreferencesAuthority = options?.sessionRuntimePreferencesAuthority ?? "local";
@@ -1816,13 +1829,34 @@ export function createZCodeAgentService(
     if (!request.accountAccess || !accountRequestAuthService) {
       return undefined;
     }
-    return accountRequestAuthService.resolveCurrent({
-      providerId: request.providerId,
-      modelId: request.modelSelection.modelId,
-      accountAccess: request.accountAccess,
-      expectedAccountScope: request.expectedAccountScope,
-      rejectedProjectTokenFingerprint: request.rejectedProjectTokenFingerprint,
-      reason: request.reason,
+    // [OmniCode] 模式二 R1.5（spec: docs/omnicode/multi-account-sessions.md §4/§10-R1.5）：
+    // CLI runtime 的每条 providerRuntimeHeaders 请求带 sessionId——本函数是 Host 内
+    // "该会话所有请求凭据物化"的唯一祖先（非交互/交互两条应答路径都汇入），在此按
+    // 会话绑定进入 runWithOmnicodeAccountScope 作用域，accountOverride 的三个 loader
+    // 覆盖边界即按附加账号材料作答。未绑定/门控关/官方装配（无注入）→ 决策恒 false，
+    // 官方路径逐字不变。
+    const omnicodeAccountId = omnicodeSessionAccountScopes
+      ? omnicodeSessionAccountScopes.resolve({
+          workspaceKey: resolveWorkspaceKey(request.workspace),
+          sessionId: request.sessionId,
+        })
+      : null;
+    // 官方守卫已收窄 accountAccess；闭包内不再保留属性收窄，提为 const 局部（语义不变）。
+    const requestAccountAccess = request.accountAccess;
+    return runWithOmnicodeSessionAccountScope({
+      accountId: omnicodeAccountId,
+      gateActive: omnicodeSessionAccountScopes
+        ? omnicodeSessionAccountScopes.isActive()
+        : undefined,
+      fn: () =>
+        accountRequestAuthService.resolveCurrent({
+          providerId: request.providerId,
+          modelId: request.modelSelection.modelId,
+          accountAccess: requestAccountAccess,
+          expectedAccountScope: request.expectedAccountScope,
+          rejectedProjectTokenFingerprint: request.rejectedProjectTokenFingerprint,
+          reason: request.reason,
+        }),
     });
   }
 
