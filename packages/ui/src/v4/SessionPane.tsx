@@ -940,7 +940,7 @@ export function SessionPane({
             sessionId,
           )
         : [],
-    [sessionId, shareDraft],
+    [sessionId],
   );
   const preflightShareProductTurnIds = useMemo(
     // 选择器预检读取待确认草稿；取消后自动回到已确认范围，不提前提交选择。

@@ -684,7 +684,7 @@ function V4ComposerModelControlsImpl({
   const authSessionSeq = useZCodeStoreWithDefault((state) => state.authSessionSeq, 0);
   const teamUsageScope = useMemo(
     () => ({}),
-    [baseServices, connectionFamily, user?.id, authSessionSeq],
+    [connectionFamily, user?.id, authSessionSeq],
   );
   const contextTeamUsageSourceCacheRef = useRef<{
     scope: object;

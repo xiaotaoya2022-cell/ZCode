@@ -854,7 +854,7 @@ function ConversationComposerImpl({
     (event: DragEvent<HTMLElement>) => {
       attachmentsApi.handleDragOverComposer(event);
     },
-    [attachmentsApi.handleDragOverComposer],
+    [attachmentsApi],
   );
   const handleConversationDragLeave = useCallback(
     (event: DragEvent<HTMLElement>) => {

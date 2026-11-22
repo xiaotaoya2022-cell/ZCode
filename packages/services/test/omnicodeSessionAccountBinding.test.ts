@@ -13,7 +13,6 @@ import {
 } from "../src/omnicode/accountScheduler.js";
 import { shouldBindOmnicodeSessionAccount } from "../src/omnicode/sessionAccountBinding.js";
 
-const synthetic = (part: string) => `omnicode-r3-test-fixture:${part}`;
 const validEntry = {
   accountId: "acct-p0r3test01",
   sourceProfileId: "p0r3test01",
@@ -114,9 +113,6 @@ describe("模式二 R3/R4 会话绑定决策 shouldBindOmnicodeSessionAccount", 
 });
 
 describe("模式二 R3 目录元数据 Host→main 提供者", () => {
-  interface StubTransportOptions {
-    reply?: (request: unknown) => unknown;
-  }
   function stubTransport(options: StubOptions = {}): {
     transport: OmnicodeAccountDirectoryTransport;
     sent: unknown[];
