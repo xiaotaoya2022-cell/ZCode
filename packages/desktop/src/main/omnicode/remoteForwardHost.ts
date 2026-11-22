@@ -78,6 +78,10 @@ export interface OmnicodeRemoteForwardHost {
 }
 
 export interface OmnicodeRemoteForwardHostDeps {
+  /** R3.5（终审 P2-6）：epoch 持久化读（缺省 = 内存态 0 起算，测试免注入）。 */
+  readAggregateEpoch?: () => number;
+  /** epoch 持久化写（缺省 = 不持久化；实现方自带 try/catch 语义）。 */
+  writeAggregateEpoch?: (epoch: number) => void;
   /**
    * 桥命令发送（管理器进程装配 sendOmnicodeInstanceCommand；单测注入 fake）。
    * false = 实例未回连。命令域 = 目录查询 + openWorkspace 转投（既有桥命令复用）+
@@ -152,7 +156,11 @@ function createOmnicodeRemoteForwardCore(deps: OmnicodeRemoteForwardHostDeps): O
   // 单测覆盖，避免无选举事实时的误报 toast）。epoch 单调递增（remoteHostAnnounce
   // 广播序，实例按 epoch 判新旧广播——R1 schema 注释语义）。
   let designatedHostProfileId: string | null = null;
-  let announceEpoch = 0;
+  // R3.5（终审 P2-6）：epoch 跨重启持久化——重启后若从 0 起算，实例侧"epoch 单调去重"
+  // 会把新广播误判为旧广播丢弃（视图失效失效）。持久化小文件（共享根 atomic JSON，
+  // atomicJson 先例）load-max/save-max；写失败静默（epoch 回归仅致实例多刷一次视图，
+  // 无正确性损害——不为此阻塞广播面）。
+  let announceEpoch = deps.readAggregateEpoch?.() ?? 0;
 
   const notifyChanged = (): void => {
     // 双通道：deps.onWorkspacesChanged（单测注入）+ 模块通知器（index.ts 装配的管理器
@@ -317,6 +325,11 @@ function createOmnicodeRemoteForwardCore(deps: OmnicodeRemoteForwardHostDeps): O
       // 不重试（实例断连场景由断连摘除对账收敛）。门控关零递增零投递（零行为）。
       if (!isEnabled()) return announceEpoch;
       announceEpoch += 1;
+      try {
+        deps.writeAggregateEpoch?.(announceEpoch);
+      } catch {
+        // 持久化旁路失败不阻断广播（见上：回归仅致实例多刷一次视图）。
+      }
       const parsed = omnicodeRemoteHostAnnounceMessageSchema.safeParse({
         type: "remoteHostAnnounce",
         hostProfileId,

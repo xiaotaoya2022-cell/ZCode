@@ -7376,7 +7376,9 @@ export function createZCodeAgentService(
       const slots: { accountId: string; running: number; limit: number }[] = [];
       for (const accountId of candidates) {
         const key = accountId.trim();
-        if (!key || scheduler.runningCountOf(key) === 0) continue;
+        if (!key) continue;
+        // R3.5（终审 P2-7）：零占用账号也入快照（0/limit）——槽位可视化空态
+        //（"全部空闲"）的判定与展示不再依赖"至少有一个账号在跑"。
         slots.push({
           accountId: key,
           running: scheduler.runningCountOf(key),

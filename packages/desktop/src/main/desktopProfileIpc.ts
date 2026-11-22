@@ -5,6 +5,10 @@
 // Root 收紧移除，这里的守卫封死"实例内再 spawn 实例"的最后一层）。官方 flavor
 // （production/preview）行为保持既有不变（继续注册）。
 import { ipcMain, shell, BrowserWindow } from "electron";
+import { homedir } from "node:os";
+import { join } from "node:path";
+// [OmniCode] 丙1 R3.5：announce epoch 跨重启持久化（共享根 atomicJson）。
+import { readJsonWithRecovery, writeJsonAtomic } from "./omnicode/atomicJson.js";
 import {
   isOmnicodeProfileInstanceEnv,
   PlatformChannels,
@@ -339,7 +343,35 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
   // 单例缺席，handle* 全 no-op。桥命令直发 + 显示名经 Profile 注册表解析防伪造，
   // takeoverCoordinator 同款依赖形态）。
   if (ZCODE_PRODUCT_FLAVOR === "omnicode") {
-    const forwardDeps: OmnicodeRemoteForwardHostDeps = {
+    // [OmniCode] 丙1 R3.5（终审 P2-6）：announce epoch 跨重启持久化（共享根小文件；
+// 读取即异步刷新缓存——广播面同步取缓存值，写盘异步旁路失败静默）。
+const OMNICODE_REMOTE_AGGREGATE_STATE_PATH = join(
+  homedir(),
+  ".omnicode",
+  "shared",
+  "remote-aggregate-state.json",
+);
+function resolveOmnicodeRemoteAggregateStatePath(): string {
+  return OMNICODE_REMOTE_AGGREGATE_STATE_PATH;
+}
+let epochStateCache = 0;
+let aggregateEpochStateLoaded = false;
+async function refreshAggregateEpochState(): Promise<void> {
+  if (aggregateEpochStateLoaded) return;
+  aggregateEpochStateLoaded = true;
+  try {
+    const state = await readJsonWithRecovery<{ epoch?: number }>(
+      OMNICODE_REMOTE_AGGREGATE_STATE_PATH,
+    );
+    if (typeof state?.epoch === "number" && Number.isInteger(state.epoch) && state.epoch >= 0) {
+      epochStateCache = state.epoch;
+    }
+  } catch {
+    // 读失败保持 0（回归仅致实例多刷一次视图）。
+  }
+}
+
+const forwardDeps: OmnicodeRemoteForwardHostDeps = {
       sendCommand: (profileId, command) => sendOmnicodeInstanceCommand(profileId, command),
       getConnectedProfileIds: () => getOmnicodeConnectedInstanceProfileIds(),
       resolveProfileDisplayName: async (profileId) => {
@@ -362,6 +394,20 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
       // 管理器 renderer toast，i18n 五语）。仅管理器进程窗口可收到（广播源 = 本桥服务）。
       onAggregateHostExit: (profileId) => {
         broadcastOmnicodeInstanceEvent({ profileId, type: "remoteHostExited" });
+      },
+      // [OmniCode] 丙1 R3.5（终审 P2-6）：epoch 跨重启持久化——共享根小文件 atomicJson
+      //（load-max/save-max；写失败静默，回归仅致实例多刷一次视图无正确性损害）。
+      readAggregateEpoch: () => {
+        try {
+          const state = epochStateCache;
+          return state;
+        } finally {
+          void refreshAggregateEpochState();
+        }
+      },
+      writeAggregateEpoch: (epoch) => {
+        epochStateCache = epoch;
+        void writeJsonAtomic(resolveOmnicodeRemoteAggregateStatePath(), { epoch }).catch(() => {});
       },
     };
     setupOmnicodeRemoteForwardHost(forwardDeps);
