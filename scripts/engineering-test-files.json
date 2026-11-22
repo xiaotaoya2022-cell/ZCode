@@ -201,6 +201,8 @@
   "packages/services/test/omnicodeSharedAssetKernel.test.ts",
   "packages/desktop/test/omnicodeOmni5Bugfix.test.ts",
   "packages/ui/test/omnicodeOmni5BrandLogo.test.tsx",
+  "packages/ui/test/omnicodeI18nLazyLocale.test.tsx",
+  "packages/ui/test/omnicodeI18nProviderGate.test.tsx",
   "packages/ui/test/omnicodeConsoleMaintenanceUi.test.ts",
   "packages/ui/test/omnicodeTakeoverUi.test.ts",
   "packages/shared/test/omnicodeAccountDirectoryContract.test.ts",

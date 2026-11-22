@@ -9,7 +9,12 @@ import {
 } from "@zcode/shared";
 import type { BroadcastMessage, IBroadcastService, ISettingService } from "@zcode/services";
 import { readNavigatorLanguage, readSafeLocalStorage, writeSafeLocalStorage } from "@/lib/browserEnvironment.js";
-import { LOCALE_MESSAGES as MESSAGES } from "./localeMessages.js";
+import {
+  ensureLocaleMessages,
+  getSyncLocaleMessages,
+  LOCALE_MESSAGES as MESSAGES,
+  OMNICODE_FLAVOR_COMPILED,
+} from "./localeMessages.js";
 
 /** 简易 intl 工具：根据 id 查找翻译，支持 {key} 占位符替换 */
 export interface IntlInstance {
@@ -93,7 +98,9 @@ export function shouldApplyLocaleBroadcastMessage(
 
 function createIntl(locale: Locale): IntlInstance {
   // noUncheckedIndexedAccess：用 ?? 回退到默认语言的翻译
-  const messages = MESSAGES[locale] ?? MESSAGES[DEFAULT_LOCALE]!;
+  // getSyncLocaleMessages：官方 flavor 等价于 MESSAGES[locale]（全量同步表）；
+  // omnicode flavor 返回注册表实况（见 useLocaleMessagesGate）。
+  const messages = getSyncLocaleMessages(locale) ?? MESSAGES[DEFAULT_LOCALE]!;
   return {
     formatMessage({ id }, values) {
       let msg = messages[id] ?? id;
@@ -105,6 +112,85 @@ function createIntl(locale: Locale): IntlInstance {
       return msg;
     },
   };
+}
+
+interface LocaleMessagesGate {
+  /**
+   * 实际渲染所用的 locale：官方 flavor 恒等于目标 locale；omnicode flavor 在目标表
+   * 就绪后才推进到目标（切换未加载语言期间沿用上一个已就绪语言渲染）。
+   */
+  appliedLocale: Locale;
+  /** applied locale 的同步表；undefined 表示首帧内容还不能渲染（停留在启动壳）。 */
+  appliedMessages: Record<string, string> | undefined;
+  /** 注册表写入版本号：装载完成后递增，驱动 appliedMessages / intl 重算。 */
+  messagesRevision: number;
+}
+
+/**
+ * [OmniCode perf] i18n 惰性装载就绪闸（渲染器性能审计 batch4 #2）。
+ *
+ * 官方 flavor：OMNICODE_FLAVOR_COMPILED 为编译期 false——applied 恒等于目标 locale、
+ * appliedMessages 恒为全量表、effect 直通返回，可观察行为与历史逐字一致。
+ *
+ * omnicode flavor（en-US 同步急载 + 其余四语言动态 import 注册表）：
+ * - 启动闸：目标 locale 的表未就绪时 appliedMessages 为 undefined，Provider 不渲染
+ *   children——桌面主窗口停留在 index.html 启动壳（#loading：React 首帧未 commit、
+ *   启动壳退场事件未发出），不闪英文、不新增 UI。
+ * - 切换语言：目标未就绪时 applied 保持上一个已就绪 locale 继续渲染（组件树不卸载、
+ *   无半翻译 UI），ensureLocaleMessages 完成后单次 commit 切换到新语言。
+ * - 失败回落：ensureLocaleMessages 永不 reject（注册表回落 en-US 同步表），闸总能推进，
+ *   不会因 chunk 加载失败把启动永久卡死。
+ */
+function useLocaleMessagesGate(targetLocale: Locale): LocaleMessagesGate {
+  // omnicode：注册表装载完成后递增；注册表是模块级可变状态，React 感知不到写入，
+  // 以它作为 appliedMessages/intl 的重算信号。
+  const [messagesRevision, setMessagesRevision] = useState(0);
+  // omnicode：目标未就绪时保持渲染的「上一个已就绪 locale」。
+  const [appliedLocaleState, setAppliedLocaleState] = useState<Locale>(targetLocale);
+
+  const targetReady = useMemo(() => {
+    // messagesRevision 仅作重算信号（读取注册表实况）。
+    void messagesRevision;
+    return getSyncLocaleMessages(targetLocale) !== undefined;
+  }, [targetLocale, messagesRevision]);
+
+  useEffect(() => {
+    if (!OMNICODE_FLAVOR_COMPILED) {
+      // 官方 flavor：五 locale 全量同步急载，没有异步装载。
+      return;
+    }
+    if (targetReady) {
+      // 目标表已就绪：无需装载；仅收敛 applied 状态，保证后续「目标未就绪」场景
+      // 沿用的是真正渲染中的语言（而非更早的旧语言）。
+      if (appliedLocaleState !== targetLocale) {
+        setAppliedLocaleState(targetLocale);
+      }
+      return;
+    }
+    let disposed = false;
+    void ensureLocaleMessages(targetLocale).then(() => {
+      if (disposed) {
+        return;
+      }
+      setMessagesRevision((previous) => previous + 1);
+      setAppliedLocaleState(targetLocale);
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [appliedLocaleState, targetLocale, targetReady]);
+
+  // 目标表已就绪 → 同一渲染立即应用（已加载语言之间切换零延迟）；
+  // 未就绪 → 沿用上一个已就绪 locale，等待装载完成后再切换。
+  const appliedLocale =
+    OMNICODE_FLAVOR_COMPILED && !targetReady ? appliedLocaleState : targetLocale;
+
+  const appliedMessages = useMemo(() => {
+    void messagesRevision;
+    return getSyncLocaleMessages(appliedLocale);
+  }, [appliedLocale, messagesRevision]);
+
+  return { appliedLocale, appliedMessages, messagesRevision };
 }
 
 interface IntlContextValue {
@@ -272,14 +358,20 @@ export function ZCodeIntlProvider({
     return localePreference === "system" ? systemLocale : localePreference;
   }, [localePreference, systemLocale]);
 
+  // [OmniCode perf] 渲染就绪闸：appliedLocale 才是真正渲染/对外暴露的语言。
+  // 官方 flavor 下 appliedLocale ≡ locale（编译期直通）；omnicode flavor 下在目标
+  // locale 的翻译表装载完成前沿用上一个已就绪语言（见 useLocaleMessagesGate）。
+  const { appliedLocale, appliedMessages, messagesRevision } = useLocaleMessagesGate(locale);
+
   // 把界面语言同步到 <html lang>：CJK 字形回退（:lang(ja)/:lang(ko) 字体栈）、读屏发音、
   // 以及只拿得到 document 的平台方法（如 Web openCommunity）都依赖它；index.html 里只是占位的 "en"。
+  // 用 appliedLocale（实际渲染语言）而非目标 locale，保证 html lang 与可见文案一致。
   useEffect(() => {
     if (typeof document === "undefined") {
       return;
     }
-    document.documentElement.lang = locale;
-  }, [locale]);
+    document.documentElement.lang = appliedLocale;
+  }, [appliedLocale]);
 
   const setLocalePreference = useCallback(
     (newPreference: LocalePreference) => {
@@ -383,12 +475,25 @@ export function ZCodeIntlProvider({
     [setLocalePreference],
   );
 
-  const intl = useMemo(() => createIntl(locale), [locale]);
+  const intl = useMemo(() => {
+    // messagesRevision 是注册表装载完成的重算信号：createIntl 经 getSyncLocaleMessages
+    // 读取模块级可变注册表，React 感知不到写入；官方 flavor 下恒为 0，无额外重算。
+    void messagesRevision;
+    return createIntl(appliedLocale);
+  }, [appliedLocale, messagesRevision]);
 
   const value = useMemo<IntlContextValue>(
-    () => ({ intl, locale, localePreference, localeResolved, setLocale, setLocalePreference }),
-    [intl, locale, localePreference, localeResolved, setLocale, setLocalePreference],
+    () => ({ intl, locale: appliedLocale, localePreference, localeResolved, setLocale, setLocalePreference }),
+    [intl, appliedLocale, localePreference, localeResolved, setLocale, setLocalePreference],
   );
+
+  // [OmniCode perf] 渲染就绪闸（仅 omnicode flavor 会触发）：目标 locale 的翻译表尚未装载
+  // 且没有已就绪语言可沿用时（启动首帧），不渲染 children——桌面主窗口停留在 index.html
+  // 启动壳、HTML 启动壳退场事件随就绪后的首帧统一发出；加载失败由注册表回落 en-US 表，
+  // 闸总能推进。官方 flavor 的表恒就绪，此分支编译期不可达，行为与历史逐字一致。
+  if (!appliedMessages) {
+    return null;
+  }
 
   return <IntlContext value={value}>{children}</IntlContext>;
 }
