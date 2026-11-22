@@ -47,14 +47,50 @@ function resolveInstalledPackageRoot(packageName: string): string {
   return dirname(desktopRequire.resolve(`${packageName}/package.json`));
 }
 
-export const desktopRendererDependencyAliases = {
+// 构建打包审计 F1（2026-11-22）：renderer 同时打包 packages/ui 的 shiki@4（含
+// @shikijs/langs 语法图）与 node_modules/@pierre/diffs 传递的根 shiki@3（另一套同图
+// 不同 hash 的 @shikijs/langs），两套语法 JSON 全量重复入包（近同尺寸重复 8.86MB/296 组，
+// 约 17% renderer）。@pierre/diffs@1.1.22 消费的 shiki API 面已逐项核对在 shiki@4.0.2
+// 存在且签名一致：bundledLanguages/bundledThemes/normalizeTheme/codeToHtml/
+// createCssVariablesTheme/createHighlighter/createJavaScriptRegexEngine/
+// createOnigurumaEngine/getTokenStyleObject/stringifyTokenStyle + 子路径
+// shiki/core（createHighlighterCore）、shiki/engine/{javascript,oniguruma}、shiki/wasm。
+// 这里把整个 shiki 面单例到 @zcode/ui 的 shiki@4 安装根：经 packages/ui 的
+// package.json 上下文 Node 解析（与 react 单例同一策略，不硬编码 node_modules 子路径），
+// 解析不到 4.x 主版本时返回 null —— 不加别名，保持现有双实例行为。
+const shikiSingletonPackageRoot = (() => {
+  try {
+    const uiRequire = createRequire(resolve(__dirname, "../ui/package.json"));
+    const shikiPackageJsonPath = uiRequire.resolve("shiki/package.json");
+    const shikiPackageJson = desktopRequire(shikiPackageJsonPath) as { version?: string };
+    return shikiPackageJson.version?.startsWith("4.") ? dirname(shikiPackageJsonPath) : null;
+  } catch {
+    return null;
+  }
+})();
+
+// shiki 不像 react-dom 在包根提供 client.js 之类的入口文件，其入口全部经 package.json
+// exports 映射到 dist/*.mjs；别名必须逐个子路径指到真实 dist 文件。Vite/Rolldown 的
+// 字符串别名键做前缀匹配（key + "/"），子路径条目必须排在根键之前。
+const shikiSingletonAliases: Record<string, string> = shikiSingletonPackageRoot
+  ? {
+      "shiki/wasm": resolve(shikiSingletonPackageRoot, "dist/wasm.mjs"),
+      "shiki/engine/javascript": resolve(shikiSingletonPackageRoot, "dist/engine-javascript.mjs"),
+      "shiki/engine/oniguruma": resolve(shikiSingletonPackageRoot, "dist/engine-oniguruma.mjs"),
+      "shiki/core": resolve(shikiSingletonPackageRoot, "dist/core.mjs"),
+      shiki: resolve(shikiSingletonPackageRoot, "dist/index.mjs"),
+    }
+  : {};
+
+export const desktopRendererDependencyAliases: Record<string, string> = {
   // pnpm hoisted/package-local 布局会随安装配置变化；硬编码 node_modules 子路径
   // 会让 Rolldown 依赖优化把 react/jsx-runtime 等入口解析到不存在的位置。
   // 通过 Node 解析真实安装根目录，既保留单 React runtime，又兼容不同 node-linker。
   react: resolveInstalledPackageRoot("react"),
   "react-dom": resolveInstalledPackageRoot("react-dom"),
   "lucide-react": resolveInstalledPackageRoot("lucide-react"),
-} as const;
+  ...shikiSingletonAliases,
+};
 
 function resolveZCodeEnv(value: string | undefined): "test" | "production" {
   return value?.trim().toLowerCase() === "production" ? "production" : "test";

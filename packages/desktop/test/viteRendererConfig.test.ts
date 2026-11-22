@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createServer, loadConfigFromFile } from "vite";
 import { desktopRendererDependencyAliases } from "../vite.config";
@@ -27,6 +27,36 @@ describe("desktop renderer Vite dependency aliases", () => {
       existsSync(resolve(desktopRendererDependencyAliases["react-dom"], "client.js")),
       "react-dom/client should resolve from the React DOM package root",
     ).toBe(true);
+  });
+
+  // 构建打包审计 F1（2026-11-22）：shiki 双实例去重 —— renderer 只允许解析到
+  // @zcode/ui 的 shiki@4 单实例；@pierre/diffs 消费的每个子路径入口都必须指向
+  // 真实存在的 dist 文件（shiki 无包根入口文件，别名逐子路径映射）。
+  it("dedupes shiki to the @zcode/ui shiki@4 instance with loadable subpath entries", () => {
+    const shikiRoot = resolve(dirname(desktopRendererDependencyAliases.shiki), "..");
+    expect(shikiRoot, "shiki alias should live inside the @zcode/ui dependency tree").toContain(
+      join("packages", "ui", "node_modules", "shiki"),
+    );
+    expect(
+      JSON.parse(readFileSync(resolve(shikiRoot, "package.json"), "utf8")).version,
+      "deduped shiki must be the 4.x instance",
+    ).toMatch(/^4\./);
+    for (const [specifier, entry] of [
+      ["shiki", "dist/index.mjs"],
+      ["shiki/core", "dist/core.mjs"],
+      ["shiki/wasm", "dist/wasm.mjs"],
+      ["shiki/engine/javascript", "dist/engine-javascript.mjs"],
+      ["shiki/engine/oniguruma", "dist/engine-oniguruma.mjs"],
+    ] as const) {
+      expect(
+        resolve(desktopRendererDependencyAliases[specifier]),
+        `${specifier} alias should point at ${entry}`,
+      ).toBe(resolve(shikiRoot, entry));
+      expect(
+        existsSync(resolve(shikiRoot, entry)),
+        `${specifier} alias target should exist`,
+      ).toBe(true);
+    }
   });
 
   // Windows 跳过：环境配置差异导致断言失败，需要 CI 环境统一配置
