@@ -13,6 +13,7 @@ import { usePlatform } from "@/hooks/usePlatform.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
 import { cn } from "@/components/lib/utils.js";
+import { OmnicodeSmartSchedulingSetting } from "@/settings/OmnicodeSmartSchedulingSetting.js";
 
 /**
  * [OmniCode] 批次2 B2-1（T5）：旧控制台收养状态与处理（可复用导出——B2-3 控制台
@@ -160,6 +161,10 @@ export function ProfileMultiInstanceSection() {
       <p className="text-ui-base text-foreground-subtle">
         {intl.formatMessage({ id: "settings.omnicodeProfiles.description" })}
       </p>
+
+      {/* [OmniCode] 模式二 R4：智能调度开关（spec: docs/omnicode/multi-account-sessions.md
+          §6——开关式默认开；走全局偏好键体系跨实例同步）。 */}
+      <OmnicodeSmartSchedulingSetting />
 
       {/* [OmniCode] M2 v1 平铺编排/还原（仅运行中实例可用；控制台主窗口不参与编排） */}
       <div className="flex items-center gap-2">

@@ -58,8 +58,8 @@ export interface OmnicodeGlobalPrefsLogger {
 export interface OmnicodeGlobalPrefsCoordinatorDeps {
   identity: OmnicodeGlobalPrefsIdentity;
   getOwnProfileId: () => string;
-  getSettings: () => Promise<{ locale?: Locale; localePreference?: LocalePreference; shortcutBindings?: Record<string, string[]> }>;
-  updateSettings: (patch: { locale?: Locale; localePreference?: LocalePreference; shortcutBindings?: Record<string, string[]> }) => Promise<void>;
+  getSettings: () => Promise<{ locale?: Locale; localePreference?: LocalePreference; shortcutBindings?: Record<string, string[]>; omnicodeSmartScheduling?: boolean }>;
+  updateSettings: (patch: { locale?: Locale; localePreference?: LocalePreference; shortcutBindings?: Record<string, string[]>; omnicodeSmartScheduling?: boolean }) => Promise<void>;
   /** main 侧注入 state:* 广播到本进程全部 host（BroadcastHub.relayFromOmnicodeMain）。 */
   injectStateBroadcast: (channel: string, payload: unknown) => boolean;
   /** 管理器：向单个已回连实例投递桥命令；返回是否投出（未连接=false，不重试）。 */
@@ -115,6 +115,10 @@ export async function readOmnicodeManagerGlobalPrefsSnapshot(): Promise<Omnicode
     }
     if (settings.shortcutBindings !== undefined) {
       prefs.shortcutBindings = settings.shortcutBindings;
+    }
+    // [OmniCode] 模式二 R4：智能调度开关进快照（缺席=开；显式 false 才下发 false）。
+    if (settings.omnicodeSmartScheduling !== undefined) {
+      prefs.omnicodeSmartScheduling = settings.omnicodeSmartScheduling;
     }
   } catch (error) {
     coordinator.deps.logger.warn("[omnicode] 全局层 setting.json 读取失败（快照降级）:", error);
@@ -458,6 +462,17 @@ export async function handleOmnicodeGlobalPrefsReportFromInstance(
       coordinator.deps.logger.warn("[omnicode] 全局层 shortcutBindings 写入失败（不阻断同步）:", error);
     }
   }
+  // [OmniCode] 模式二 R4：智能调度开关上行落地（布尔值域已由 sanitize 校验）。
+  if (prefs.omnicodeSmartScheduling !== undefined) {
+    try {
+      await coordinator.deps.updateSettings({
+        omnicodeSmartScheduling: prefs.omnicodeSmartScheduling,
+      });
+      appliedKeys.push("omnicodeSmartScheduling");
+    } catch (error) {
+      coordinator.deps.logger.warn("[omnicode] 全局层 omnicodeSmartScheduling 写入失败（不阻断同步）:", error);
+    }
+  }
   if (prefs.theme !== undefined) {
     try {
       await writeOmnicodeGlobalPrefsSidecarTheme(prefs.theme);
@@ -542,6 +557,17 @@ export async function handleOmnicodeGlobalPrefsApplyCommand(
     } catch (error) {
       deferredKeys.push("shortcutBindings");
       deps.logger.warn("[omnicode] 实例 shortcutBindings 写入失败（待下次同步收敛）:", error);
+    }
+  }
+  // [OmniCode] 模式二 R4：智能调度开关下行落盘（Host 每次发送时经 settingService.get
+  // 现读——无文件缓存，实例 main 写盘后下一轮发送即生效，无需额外热应用动作）。
+  if (prefs.omnicodeSmartScheduling !== undefined) {
+    try {
+      await deps.updateSettings({ omnicodeSmartScheduling: prefs.omnicodeSmartScheduling });
+      appliedKeys.push("omnicodeSmartScheduling");
+    } catch (error) {
+      deferredKeys.push("omnicodeSmartScheduling");
+      deps.logger.warn("[omnicode] 实例 omnicodeSmartScheduling 写入失败（待下次同步收敛）:", error);
     }
   }
   applyOmnicodeGlobalPrefsLocally(prefs);
@@ -664,6 +690,12 @@ export async function mergeOmnicodeGlobalPrefsIntoSettingsFile(
   if (snapshot.shortcutBindings !== undefined) {
     next.shortcutBindings = snapshot.shortcutBindings;
     written.push("shortcutBindings");
+  }
+  // [OmniCode] 模式二 R4：智能调度开关 spawn 注入（首帧即正确——实例 Host 首次发送前
+  // setting.json 已就位；连接即推快照保留为收敛兜底）。
+  if (snapshot.omnicodeSmartScheduling !== undefined) {
+    next.omnicodeSmartScheduling = snapshot.omnicodeSmartScheduling;
+    written.push("omnicodeSmartScheduling");
   }
   // [OmniCode] 丙1 远程聚合 R4：omnicodeRemoteCrossAccount 不进 setting.json（appSettings
   // schema strip 会在下次写盘丢弃未知键——与 theme 同款裁定）；实例侧经连接即推快照

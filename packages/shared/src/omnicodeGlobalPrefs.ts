@@ -28,9 +28,21 @@ export const OMNICODE_GLOBAL_PREF_KEYS = [
   "locale",
   "localePreference",
   "shortcutBindings",
+  // [OmniCode] 模式二 R4（spec: docs/omnicode/multi-account-sessions.md §6）：智能调度
+  // 开关（默认开）。走既有键体系（白名单过滤 + 值域校验 + 环形抑制/下发链）跨实例共享；
+  // 缺席（旧档）= 开（spec §6 "开关式默认开"）。
+  "omnicodeSmartScheduling",
 ] as const;
 
 export type OmnicodeGlobalPrefKey = (typeof OMNICODE_GLOBAL_PREF_KEYS)[number];
+
+/** 智能调度开关值域（布尔；非法值一律丢弃，缺席=开）。 */
+export function isOmnicodeSmartSchedulingValue(value: unknown): value is boolean {
+  return typeof value === "boolean";
+}
+
+/** 智能调度缺省值（spec §6：开关式默认开）。 */
+export const OMNICODE_SMART_SCHEDULING_DEFAULT = true;
 
 /**
  * 外观主题键（批次4 实测：theme 官方存储是各进程 localStorage 的 "zcode-theme"，
@@ -82,6 +94,8 @@ export interface OmnicodeGlobalPrefsPayload {
   localePreference?: LocalePreference;
   shortcutBindings?: Record<string, string[]>;
   theme?: OmnicodeThemePreference;
+  // [OmniCode] 模式二 R4：智能调度开关（默认开；值域布尔）。
+  omnicodeSmartScheduling?: boolean;
   // [OmniCode] 丙1 远程聚合 R4：跨账号聚合开关（默认关 = 仅同账号聚合，spec §7）。
   omnicodeRemoteCrossAccount?: boolean;
 }
@@ -111,6 +125,13 @@ export function filterOmnicodeGlobalPrefsFromPatch(
   }
   if (hasOwnObject(patch, OMNICODE_THEME_PREF_KEY) && isOmnicodeThemePreference(patch.theme)) {
     filtered.theme = patch.theme;
+  }
+  // [OmniCode] 模式二 R4：智能调度开关（布尔值域；非法值丢弃，缺席=开）。
+  if (
+    hasOwnObject(patch, "omnicodeSmartScheduling") &&
+    isOmnicodeSmartSchedulingValue(patch.omnicodeSmartScheduling)
+  ) {
+    filtered.omnicodeSmartScheduling = patch.omnicodeSmartScheduling;
   }
   // [OmniCode] 丙1 远程聚合 R4：跨账号聚合开关（布尔值域；非法值丢弃，缺席=关 = 仅同
   // 账号聚合，spec §7 红线：默认关闭）。

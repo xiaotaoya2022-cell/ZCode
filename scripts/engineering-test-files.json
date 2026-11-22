@@ -203,5 +203,9 @@
   "packages/ui/test/omnicodeOmni5BrandLogo.test.tsx",
   "packages/ui/test/omnicodeConsoleMaintenanceUi.test.ts",
   "packages/ui/test/omnicodeTakeoverUi.test.ts",
+  "packages/shared/test/omnicodeAccountDirectoryContract.test.ts",
+  "packages/services/test/omnicodeSessionAccountBinding.test.ts",
+  "packages/ui/test/omnicodeAccountSelectorUi.test.ts",
+  "packages/desktop/test/omnicodeAccountDirectoryR3.test.ts",
   "packages/desktop/test/omnicodeRemoteForwardR4.test.ts"
 ]

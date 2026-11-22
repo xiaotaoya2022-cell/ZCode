@@ -510,6 +510,12 @@ import {
 // [OmniCode] 模式二 R1.5：会话作用域接线——会话→附加账号绑定注册表（sendPrompt 登记 /
 // providerRuntimeHeaders 解析消费；spec §4/§10-R1.5）。
 import { createOmnicodeSessionAccountRegistry } from "./omnicode/sessionAccountScope.js";
+// [OmniCode] 模式二 R3/R4：调度器 + 目录候选提供者 + 绑定决策（spec §6/§7/§10-R3/R4）。
+import {
+  createOmnicodeAccountScheduler,
+  type OmnicodeAccountScheduler,
+} from "./omnicode/accountScheduler.js";
+import { createOmnicodeAccountDirectoryRemoteProvider } from "./omnicode/accountDirectoryRemote.js";
 // [OmniCode] D12 接管流：管理器 main 侧锁占用方查询（桥上行 takeoverRequest 转投持有者
 // 前的锁事实读取；只读原语，锁语义零改动——spec §批次3 D12）。
 export { readWorkspaceLockOwner, listWorkspaceLocks } from "./omnicode/contract.js";
@@ -1631,6 +1637,22 @@ export function createLocalServices(options: {
   // 请求）按 sessionId 命中后进入 runWithOmnicodeAccountScope 作用域。注册表内建
   // omnicode 门控：门控关（管理器/官方实例）bind 恒 no-op、resolve 恒 null、包裹恒透传。
   const omnicodeSessionAccounts = createOmnicodeSessionAccountRegistry();
+  // [OmniCode] 模式二 R3/R4（spec §6/§7）：智能调度器（纯逻辑，无 IO 无定时器——官方
+  // 进程同样构造，但绑定决策全在 omnicode 门控内，官方路径零消费）+ 目录候选提供者
+  //（Host→main 元数据查询，实例 main TTL 缓存应答；官方/远端 parentPort 缺席恒空）。
+  const omnicodeAccountScheduler: OmnicodeAccountScheduler = createOmnicodeAccountScheduler();
+  const omnicodeAccountDirectory = createOmnicodeAccountDirectoryRemoteProvider({
+    transport: options?.parentPort ?? null,
+  });
+  // 智能调度开关读取点（R4：omnicodeSmartScheduling setting.json 键，缺席=开；
+  // 读取失败按关处理——宁可回到手动也不误选）。
+  const isOmnicodeSmartSchedulingEnabled = async (): Promise<boolean> => {
+    try {
+      return (await settingService.get()).omnicodeSmartScheduling !== false;
+    } catch {
+      return false;
+    }
+  };
   const loadOAuthAccountMaterial = (family: ProviderFamilyDomain) =>
     omnicodeAccountOverride.loadFamilyMaterial(family, (f) =>
       oauthCredentialRepo.loadFamilyMaterial(f),
@@ -2601,6 +2623,11 @@ export function createLocalServices(options: {
     // [OmniCode] 模式二 R1.5：会话绑定注册表 → providerRuntimeHeaders 凭据解析包裹点
     //（官方行为逐字不变，见 resolveAccountRequestAuth 决策注释）。
     omnicodeSessionAccountScopes: omnicodeSessionAccounts,
+    // [OmniCode] 模式二 R3/R4：调度器 + 目录候选 + 智能调度开关读取点（桌面 v4 sendText
+    // 的会话绑定/自动挑选在这三个注入点上裁决；官方/远端装配行为逐字不变）。
+    omnicodeAccountScheduler,
+    omnicodeAccountDirectoryCandidates: () => omnicodeAccountDirectory.list().then((entries) => entries.map((entry) => entry.accountId)),
+    isOmnicodeSmartSchedulingEnabled,
     readRequestVerificationConfig: () =>
       codingPlanSubscriptionService.getRequestVerificationConfig(),
     ...(modelSelectionReadinessSource ? { modelSelectionReadinessSource } : {}),
@@ -2947,6 +2974,14 @@ export function createLocalServices(options: {
     cuaProductMcpServerResolver,
     // [OmniCode] 模式二 R1.5：sendPrompt omnicodeAccountId 的会话绑定登记（官方缺省 no-op）。
     omnicodeSessionAccounts,
+    // [OmniCode] 模式二 R3/R4：调度器 + 目录候选 + 智能调度开关（sendPrompt 缺省路径的
+    // 自动挑选在这三个注入点上裁决；官方/远端装配行为逐字不变）。
+    omnicodeAccountScheduler,
+    omnicodeAccountDirectoryCandidates: () =>
+      omnicodeAccountDirectory
+        .list()
+        .then((entries) => entries.map((entry) => entry.accountId)),
+    isOmnicodeSmartSchedulingEnabled,
   });
   appControlService = createAppControlService({
     sourceServerId: options?.projectStorageHostId ?? "local",

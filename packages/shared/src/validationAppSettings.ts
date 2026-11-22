@@ -574,6 +574,10 @@ const appSettingsObjectSchema = z.object({
   ]),
   startPlanRecommendationDismissed: z.boolean().default(false),
   providerFamilyConnectionSelections: providerFamilyConnectionSelectionSettingsSchema.default({}),
+  // [OmniCode] 模式二 R4（spec: docs/omnicode/multi-account-sessions.md §6）：智能调度
+  // 开关（默认开）。必须声明在完整 schema——zod strip 会在下次写盘时丢弃未知键；
+  // 缺席键经 default(true) 补齐，显式 false 保持持久化。
+  omnicodeSmartScheduling: z.boolean().default(true),
   providerFamilyDomain: providerFamilyDomainSchema.optional(),
   providerFamilyDomainUpdatedAt: z.number().int().nonnegative().optional(),
   providerFamilyDomainMigrated: z.boolean().default(false),
@@ -674,6 +678,8 @@ export const appSettingsPatchSchema = z.object({
   enabledBuiltinAgentCliProviders: enabledBuiltinAgentCliProvidersSchema.optional(),
   startPlanRecommendationDismissed: z.boolean().optional(),
   providerFamilyConnectionSelections: providerFamilyConnectionSelectionSettingsSchema.optional(),
+  // [OmniCode] 模式二 R4：智能调度开关 patch 面（与完整 schema 同键；缺席=开）。
+  omnicodeSmartScheduling: z.boolean().optional(),
   providerFamilyDomain: z.union([providerFamilyDomainSchema, z.literal("")]).optional(),
   providerFamilyDomainUpdatedAt: z.number().int().nonnegative().optional(),
   providerFamilyDomainMigrated: z.boolean().optional(),

@@ -354,6 +354,11 @@ export interface AppSettings {
   enabledBuiltinAgentCliProviders?: ZCodeProvider[];
   /** 设置页中每个 Provider Family 当前唯一的结构化连接选择。 */
   providerFamilyConnectionSelections?: ProviderFamilyConnectionSelectionSettings;
+  /**
+   * [OmniCode] 模式二 R4（spec: docs/omnicode/multi-account-sessions.md §6）：智能调度开关
+   * （默认开，spec §6"开关式默认开"）。走全局偏好键体系跨实例同步；Host 发送时现读。
+   */
+  omnicodeSmartScheduling?: boolean;
   /** 用户通过 WelcomeScreen 成功连接后确认的 ZAI / BigModel provider family 运行域。 */
   providerFamilyDomain?: ProviderFamilyDomain;
   /** 最近一次设置或清空 providerFamilyDomain 的时间。 */

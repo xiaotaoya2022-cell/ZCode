@@ -1063,6 +1063,15 @@ export interface IZCodeAgentService {
   ): Promise<V4ConversationFileRewindPreviewResult>;
   sendConversationCommandV4(params: ZCodeAgentConversationCommandParams): Promise<CommandAck>;
   queryConversationCommandsV4(params: ZCodeAgentCommandsQueryParams): Promise<CommandsQueryResult>;
+  /**
+   * [OmniCode] 模式二 R3（spec: docs/omnicode/multi-account-sessions.md §6/§7）：调度器
+   * 槽位用量快照（running/上限，元数据 only）。仅 omnicode 实例装配调度器后非空；缺席
+   * （官方/远端装配）返回空数组——消费方据此隐藏槽位可视化。上限取调度器默认（spec §6
+   * 默认 3；per-账号 limits 配置面属后续任务）。
+   */
+  getOmnicodeAccountSlots?(): Promise<
+    { accountId: string; running: number; limit: number }[]
+  >;
   attachmentBeginV4(params: ZCodeAgentAttachmentBeginParams): Promise<V4AttachmentBeginResult>;
   attachmentChunkV4(params: ZCodeAgentAttachmentChunkParams): Promise<V4AttachmentChunkResult>;
   attachmentCommitV4(params: ZCodeAgentAttachmentTerminalParams): Promise<V4AttachmentCommitResult>;

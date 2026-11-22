@@ -294,6 +294,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     description: "settings.browser.htmlClickOpensBrowserDescription",
     visibility: "desktop",
   },
+  // [OmniCode] 模式二 R4：智能调度开关（管理器设置 omnicode 分区；spec:
+  // docs/omnicode/multi-account-sessions.md §6）。
+  {
+    id: "settings.omnicodeProfiles.smartScheduling",
+    section: "omnicodeProfiles",
+    description: "settings.omnicodeProfiles.smartSchedulingDescription",
+    visibility: "desktop",
+  },
 ] as const satisfies readonly {
   id: string;
   section: SettingsSectionId;
