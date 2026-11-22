@@ -97,6 +97,39 @@ export type {
   OmnicodeInstanceSortItem,
   OmnicodeInstanceSortMode,
 } from "./omnicodeInstanceSort.js";
+// [OmniCode] 丙1 远程聚合 R1 骨架：桥协议 schema（remoteForward 族，载荷不透明透传；
+// spec: docs/omnicode/remote-aggregation.md §4）
+export {
+  OMNICODE_REMOTE_FORWARD_ID_MAX_LEN,
+  OMNICODE_REMOTE_FORWARD_KINDS,
+  omnicodeRemoteForwardMessageSchema,
+  omnicodeRemoteForwardResultMessageSchema,
+  omnicodeRemoteHostAnnounceMessageSchema,
+} from "./omnicodeRemoteForward.js";
+export type {
+  OmnicodeRemoteForwardKind,
+  OmnicodeRemoteForwardMessage,
+  OmnicodeRemoteForwardResultMessage,
+  OmnicodeRemoteHostAnnounceMessage,
+} from "./omnicodeRemoteForward.js";
+// [OmniCode] 丙1 远程聚合 R1 骨架：workspace-list 聚合纯函数 + forwardId 路由表
+//（纯内存零 IO，R2/R3 接线；spec: docs/omnicode/remote-aggregation.md §4–§5）
+export {
+  OMNICODE_REMOTE_FORWARD_PENDING_TTL_MS,
+  OMNICODE_REMOTE_SELF_PROFILE_ID,
+  aggregateOmnicodeWorkspaceLists,
+  createOmnicodeForwardRouteTable,
+  omnicodeRemoteWorkspaceEntrySchema,
+  resolveOmnicodeRemoteWorkspaceKey,
+} from "./omnicodeRemoteAggregate.js";
+export type {
+  AggregateOmnicodeWorkspaceListsInput,
+  OmnicodeAggregatedWorkspaceEntry,
+  OmnicodeForwardRouteTable,
+  OmnicodeRemoteForwardPending,
+  OmnicodeRemoteWorkspaceEntry,
+  OmnicodeRemoteWorkspaceListSource,
+} from "./omnicodeRemoteAggregate.js";
 // [OmniCode] 批次4 单点下沉：共享营销资产请求契约 + 缓存淘汰/去重纯函数
 //（spec: docs/omnicode/omnicode-shared-services.md §G3）
 export {
