@@ -91,6 +91,7 @@
   "packages/desktop/test/runtimeNodeModulesAllowlist.test.ts",
   "packages/desktop/test/omnicodeTakeover.test.ts",
   "packages/desktop/test/omnicodeRemoteAggregate.test.ts",
+  "packages/desktop/test/omnicodeRemoteAggregateHost.test.ts",
   "packages/desktop/test/omnicodeConsoleMaintenance.test.ts",
   "packages/desktop/test/omnicodeAboutBrand.test.ts",
   "packages/desktop/test/electronBuilderSecurity.test.ts",

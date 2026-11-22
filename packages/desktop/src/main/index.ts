@@ -188,6 +188,9 @@ import {
   resolveExplicitStartupWorkspaceBootstrap,
 } from "./startupWorkspaceDeepLinkGate.js";
 import { createWebRemoteControlManager } from "./webRemoteControlManager.js";
+// [OmniCode] 丙1 远程聚合 R2（spec: docs/omnicode/remote-aggregation.md §3/§5/§8-R2）：
+// 聚合宿主接线（omnicode 门控默认关——官方 flavor/未设开关时 manager 全走官方单窗口路径）。
+import { createOmnicodeRemoteAggregateHost } from "./omnicode/remoteAggregateHost.js";
 import { readBootstrapApplicationLocale } from "./desktopApplicationLocaleBootstrap.js";
 import {
   createMobileLogSink,
@@ -1307,6 +1310,9 @@ const webRemoteControlManager = createWebRemoteControlManager({
     webRemoteControlSharedHostAttachments.disposeWindow(windowId),
   disposeWorkspaceHostAttachmentsForRemoteSession: (remoteSessionId) =>
     webRemoteControlSharedHostAttachments.disposeRemoteSession(remoteSessionId),
+  // [OmniCode] 丙1 远程聚合 R2：聚合宿主接线（门控内聚在 remoteAggregateHost——
+  // omnicode flavor ∧ ZCODE_OMNICODE_REMOTE_AGGREGATE=1，默认关=官方行为逐字不变）。
+  omnicodeAggregateHost: createOmnicodeRemoteAggregateHost(),
 });
 webRemoteControlManagerRef.current = webRemoteControlManager;
 webRemoteControlManager.startNotifications();

@@ -65,6 +65,9 @@ import {
 import type { WebRemoteControlDeviceStorage } from "#src/main/web-remote-relay/index.js";
 
 import type { WebRemoteControlFeatureGate } from "./webRemoteControlFeatureGate.js";
+// [OmniCode] 丙1 远程聚合 R2（spec: docs/omnicode/remote-aggregation.md §3/§5/§8-R2）：
+// 聚合宿主接线契约；实现见 omnicode/remoteAggregateHost.ts（门控默认关=官方路径逐字不变）。
+import type { OmnicodeRemoteAggregateHost } from "./omnicode/remoteAggregateHost.js";
 import {
   respondToWebRemoteControlActionRequest,
   type RunWebRemoteControlRendererAction,
@@ -92,6 +95,8 @@ interface WorkspaceBridgeRuntime {
   workspaceIdentity?: string;
   remoteSessionId?: string;
   initialTaskId?: string;
+  // [OmniCode] gated：聚合路由窗口（bridge attachment 实际挂载窗口；官方路径恒 undefined）
+  omnicodeRouteWindowId?: number;
   hostProtocol?: MessagePortProtocol;
   relayProtocol?: AcknowledgedWebRemoteControlRelayProtocolAdapter;
   disposeBridge?: () => void;
@@ -160,6 +165,8 @@ interface WindowControlRuntime {
     intentKey: string;
     hostRequestId: string;
     preparingProject: boolean;
+    // [OmniCode] gated：聚合路由窗口（项目导航取消按路由窗口回收；官方路径恒 undefined）
+    omnicodeRouteWindowId?: number;
     promise: Promise<WebRemoteControlExternalWorkspaceBridge>;
   };
   pendingBridgeInvalidation?: Extract<
@@ -231,6 +238,13 @@ interface WebRemoteControlManagerDependencies {
   mobileLogSink?: Pick<MobileLogSink, "append">;
   /** 手机日志拉取单片超时（单测注入）。 */
   mobileLogPullShardTimeoutMs?: number;
+  // [OmniCode] 丙1 远程聚合 R2（spec: docs/omnicode/remote-aggregation.md §3/§5/§8-R2）：
+  // 聚合宿主接线（omnicode 门控；缺省/门控关=官方单窗口路径逐字不变）。门控开时：
+  // workspace 列表聚合全部窗口快照呈现；bridge-open/reconnect 按聚合条目反查目标窗口
+  // （attachment 挂目标窗口，rpc-frame 仍经本窗口 transport 透传——bridge 状态统一在本
+  // runtime.currentBridge）；路由失败回退官方路径回结构化 bridge-error，不瘫。
+  // 跨实例 remoteForward 桥转发（R1 schema 消费）属 R3，本依赖不涉及。
+  omnicodeAggregateHost?: OmnicodeRemoteAggregateHost;
 }
 
 /** 可拉取手机日志的目标连接。 */
@@ -337,6 +351,8 @@ function toExternalBridge(
 }
 
 export function createWebRemoteControlManager(dependencies: WebRemoteControlManagerDependencies) {
+  // [OmniCode] gated：聚合宿主接线（丙1 R2；缺省/门控关=官方单窗口路径逐字不变）。
+  const omnicodeAggregateHost = dependencies.omnicodeAggregateHost;
   const runtimes = new Map<number, WindowControlRuntime>();
   // 身份绑定与取消令牌覆盖首次启动到连接释放的整个生命周期，不缓存 JWT。
   const windowLifecycles = new Map<number, WindowControlLifecycle>();
@@ -1003,6 +1019,28 @@ export function createWebRemoteControlManager(dependencies: WebRemoteControlMana
   function getAvailableWorkspaces(
     runtime: WindowControlRuntime,
   ): WebRemoteControlWorkspaceTarget[] {
+    // [OmniCode] gated 聚合（丙1 R2）：呈现窗口聚合全部窗口快照（self=本窗口 → 其余窗口
+    // id 升序，spec §5 合并语义），官方字段原样 + 聚合附加区（手机页忽略未知字段）。
+    // 官方"当前 bridge 目标兜底"语义保留：聚合列表缺失当前目标时按官方口径追加。
+    if (omnicodeAggregateHost?.isEnabled()) {
+      const aggregated: WebRemoteControlWorkspaceTarget[] =
+        omnicodeAggregateHost.listAggregatedWorkspaces(
+          availableWorkspacesByWindowId,
+          runtime.windowId,
+        );
+      const currentTarget = getRuntimeWorkspaceTarget(runtime);
+      if (isBridgeableRemoteTarget(currentTarget)) {
+        const currentKey = resolveWebRemoteControlWorkspaceKey(currentTarget);
+        if (
+          !aggregated.some(
+            (workspace) => resolveWebRemoteControlWorkspaceKey(workspace) === currentKey,
+          )
+        ) {
+          aggregated.push(currentTarget);
+        }
+      }
+      return aggregated;
+    }
     const workspaceByKey = new Map<string, WebRemoteControlWorkspaceTarget>();
 
     for (const workspace of availableWorkspacesByWindowId.get(runtime.windowId) ?? []) {
@@ -1140,7 +1178,12 @@ export function createWebRemoteControlManager(dependencies: WebRemoteControlMana
     const pending = runtime.bridgeOpen;
     runtime.bridgeOpen = undefined;
     if (pending?.preparingProject)
-      dependencies.cancelProjectPreparation?.(runtime.windowId, pending.hostRequestId);
+      // [OmniCode] gated：聚合路由窗口的项目导航取消（omnicodeRouteWindowId 仅门控开时
+      // 赋值；官方路径恒 undefined → 与原 runtime.windowId 等价）
+      dependencies.cancelProjectPreparation?.(
+        pending.omnicodeRouteWindowId ?? runtime.windowId,
+        pending.hostRequestId,
+      );
   }
 
   function createWorkspaceBridge(
@@ -1199,6 +1242,19 @@ export function createWebRemoteControlManager(dependencies: WebRemoteControlMana
     request: WebRemoteControlWorkspaceBridgeOpenPayload,
     pending: NonNullable<WindowControlRuntime["bridgeOpen"]>,
   ): Promise<WebRemoteControlExternalWorkspaceBridge> {
+    // [OmniCode] gated 聚合路由（丙1 R2）：workspaceKey 反查目标窗口（aggregatedKey 精确
+    // 优先，其次官方原始 key；self 前缀=本窗口）。未命中保持官方路径——官方查找失败回
+    // 结构化 workspace-bridge-error，不瘫。跨窗口路由下 attachment/项目导航挂目标窗口，
+    // rpc-frame 仍经本窗口 transport 透传（bridge 状态统一在 runtime.currentBridge）。
+    const omnicodeRoute = omnicodeAggregateHost?.isEnabled()
+      ? omnicodeAggregateHost.resolveRoute(
+          availableWorkspacesByWindowId,
+          runtime.windowId,
+          request.workspaceKey,
+        )
+      : undefined;
+    const omnicodeRouteWindowId = omnicodeRoute?.windowId;
+    pending.omnicodeRouteWindowId = omnicodeRouteWindowId;
     let target: WebRemoteControlWorkspaceTarget | undefined;
     const intent: HostProjectWorkspaceNavigationInput | undefined =
       request.project ??
@@ -1216,7 +1272,8 @@ export function createWebRemoteControlManager(dependencies: WebRemoteControlMana
         throw new Error("Project navigation is unavailable.");
       try {
         const prepared = await dependencies.prepareProjectWorkspace(
-          runtime.windowId,
+          // [OmniCode] gated：聚合路由窗口（官方=本窗口）
+          omnicodeRouteWindowId ?? runtime.windowId,
           intent,
           pending.hostRequestId,
         );
@@ -1232,9 +1289,12 @@ export function createWebRemoteControlManager(dependencies: WebRemoteControlMana
         pending.preparingProject = false;
       }
     } else {
-      target = getAvailableWorkspaces(runtime).find(
-        (workspace) => resolveWebRemoteControlWorkspaceKey(workspace) === request.workspaceKey,
-      );
+      // [OmniCode] gated：官方原始 key 命中优先（含当前 bridge 目标兜底条目）；
+      // aggregatedKey 直通键（手机页未升级场景）回退聚合条目命中。
+      target =
+        getAvailableWorkspaces(runtime).find(
+          (workspace) => resolveWebRemoteControlWorkspaceKey(workspace) === request.workspaceKey,
+        ) ?? omnicodeRoute?.entry;
     }
     if (runtimes.get(runtime.windowId) !== runtime || runtime.bridgeOpen !== pending)
       throw new Error("Workspace bridge request was superseded.");
@@ -1245,6 +1305,24 @@ export function createWebRemoteControlManager(dependencies: WebRemoteControlMana
       throw new Error("目标远程工作区尚未连接，无法创建 bridge，请先重连。");
     }
     const targetWorkspaceKey = resolveWebRemoteControlWorkspaceKey(target);
+
+    // [OmniCode] gated：跨窗口路由窗口——路由命中优先；未命中按目标反查聚合列表归属；
+    // 聚合快照缺失（如导航新建项目尚未同步）时沿用当前 bridge 的路由窗口兜底；
+    // 全部未命中回本窗口官方路径。rpc-frame 仍经本窗口 transport 透传。
+    // （在 disposeRuntimeBridgeResources 之前取值——currentBridge 随后会被清理）
+    const omnicodeAttachWindowId =
+      omnicodeRouteWindowId ??
+      (omnicodeAggregateHost?.isEnabled()
+        ? omnicodeAggregateHost.resolveTargetWindowId(
+            availableWorkspacesByWindowId,
+            runtime.windowId,
+            target,
+          ) ??
+          (runtime.currentBridge &&
+          resolveWebRemoteControlWorkspaceKey(runtime.currentBridge) === targetWorkspaceKey
+            ? runtime.currentBridge.omnicodeRouteWindowId
+            : undefined)
+        : undefined);
 
     const invalidation = runtime.pendingBridgeInvalidation;
     if (
@@ -1276,6 +1354,10 @@ export function createWebRemoteControlManager(dependencies: WebRemoteControlMana
       workspaceIdentity: target.workspaceIdentity,
       remoteSessionId: target.remoteSessionId,
       initialTaskId: request.taskId,
+      // [OmniCode] gated：跨窗口路由窗口（stop/回收对账使用；官方路径恒 undefined）
+      ...(omnicodeAttachWindowId !== undefined
+        ? { omnicodeRouteWindowId: omnicodeAttachWindowId }
+        : {}),
       readyAnnounced: false,
       degraded: false,
     };
@@ -1287,16 +1369,19 @@ export function createWebRemoteControlManager(dependencies: WebRemoteControlMana
 
     let acquired: WebRemoteControlHostAttachmentHandle | undefined;
     try {
-      acquired = await dependencies.attachWorkspaceHost(runtime.windowId, {
-        workspacePath: target.workspacePath,
-        workspaceIdentity: target.workspaceIdentity,
-        remoteSessionId: target.remoteSessionId,
-        initialTaskId: request.taskId,
-        kind: target.kind,
-        ...(bridgeRuntime.terminalOwnerId
-          ? { terminalOwnerId: bridgeRuntime.terminalOwnerId }
-          : {}),
-      });
+      acquired = await dependencies.attachWorkspaceHost(
+        omnicodeAttachWindowId ?? runtime.windowId,
+        {
+          workspacePath: target.workspacePath,
+          workspaceIdentity: target.workspaceIdentity,
+          remoteSessionId: target.remoteSessionId,
+          initialTaskId: request.taskId,
+          kind: target.kind,
+          ...(bridgeRuntime.terminalOwnerId
+            ? { terminalOwnerId: bridgeRuntime.terminalOwnerId }
+            : {}),
+        },
+      );
       if (!isCurrentBridgeRuntime(runtime, bridgeRuntime) || runtime.bridgeOpen !== pending) {
         dependencies.releaseWorkspaceHostAttachment(acquired.attachmentId);
         acquired = undefined;
@@ -1441,7 +1526,19 @@ export function createWebRemoteControlManager(dependencies: WebRemoteControlMana
     request: Extract<WebRemoteControlAppPayload, { zcode_type: "workspace-reconnect-request" }>,
   ): Promise<void> {
     try {
-      await dependencies.reconnectWorkspace(runtime.windowId, request.workspaceKey);
+      // [OmniCode] gated：聚合模式下 reconnect 按聚合条目反查目标窗口执行
+      //（本窗口条目=self 前缀 → 本窗口；未命中回本窗口官方路径）
+      const omnicodeReconnectWindowId = omnicodeAggregateHost?.isEnabled()
+        ? omnicodeAggregateHost.resolveRoute(
+            availableWorkspacesByWindowId,
+            runtime.windowId,
+            request.workspaceKey,
+          )?.windowId
+        : undefined;
+      await dependencies.reconnectWorkspace(
+        omnicodeReconnectWindowId ?? runtime.windowId,
+        request.workspaceKey,
+      );
       sendAppPayload(runtime, {
         zcode_type: "workspace-reconnect-response",
         requestId: request.requestId,
@@ -2253,6 +2350,12 @@ export function createWebRemoteControlManager(dependencies: WebRemoteControlMana
 
     syncAvailableWorkspaces(windowId: number, workspaces: WebRemoteControlWorkspaceTarget[]): void {
       availableWorkspacesByWindowId.set(windowId, workspaces);
+      // [OmniCode] gated 聚合（丙1 R2）：窗口快照同步后，聚合列表在全部活动 runtime 上
+      // 广播（workspace-list-updated 聚合推送，spec §5/§6——任一窗口工作区变化手机端
+      // 即时可见；签名去重防重复推送）。官方单窗口推送在门控关路径保持原样。
+      if (omnicodeAggregateHost?.isEnabled()) {
+        for (const runtime of runtimes.values()) pushWorkspaceListUpdated(runtime);
+      }
       const runtime = runtimes.get(windowId);
       if (!runtime) {
         return;
@@ -2318,6 +2421,11 @@ export function createWebRemoteControlManager(dependencies: WebRemoteControlMana
       clearStartAuthorizationsForWindow(windowId);
       await stopWindowRuntime(windowId, "window-disposed");
       availableWorkspacesByWindowId.delete(windowId);
+      // [OmniCode] gated 聚合（丙1 R2）：被聚合窗口退出，其条目从聚合列表摘除并推送
+      //（spec §6 在途对账语义的 M2 形态；bridge 生命周期统一在宿主 runtime，无需额外路由面）
+      if (omnicodeAggregateHost?.isEnabled()) {
+        for (const runtime of runtimes.values()) pushWorkspaceListUpdated(runtime);
+      }
       pushedWorkspaceListSignaturesByWindowId.delete(windowId);
     },
 
