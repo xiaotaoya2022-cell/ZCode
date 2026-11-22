@@ -12,8 +12,13 @@
 //   而非在 sendPrompt 处直接 runWithOmnicodeAccountScope。
 // - 门控默认 = OMNICODE_PROFILE_ID env（与 accountOverride 同源语义）：门控关 → bind 恒
 //   no-op、resolve 恒 null、包裹恒透传——官方 flavor 行为逐字不变。
-// - 注册表有界（FIFO 淘汰最旧绑定），事件驱动无轮询；会话删除后的残留绑定由有界容量自然
-//   淘汰（R2 调度接入时可叠加显式 unbind）。
+// - 注册表有界（LRU-by-resolve 淘汰最久未命中的绑定），事件驱动无轮询；会话删除后的
+//   残留绑定由有界容量自然淘汰（显式 unbind 生产者：turn 终态/会话删除/runtime 断连批量解绑）。
+// - R3.5（终审 P2-1）：淘汰序 FIFO→LRU-by-resolve——resolve 命中即 touch（移到队尾），
+//   淘汰只删最久未 resolve 的条目。活跃会话每条 providerRuntimeHeaders 请求都命中 resolve
+//   → 运行期永不淘汰，杜绝"turn 存续期被新绑定挤掉 → 静默回落主账号 → 计费归属漂移"；
+//   仅长期空闲绑定被淘汰（该场景回落主账号 = 既有语义）。上限 512→2048（LRU 保护下
+//   每条目均为活跃或近期会话，内存代价线性且可控）。
 import { runWithOmnicodeAccountScope } from "./accountOverride.js";
 
 /** omnicode Profile 实例门控（与 accountOverride 同源判定；测试可注入覆盖）。 */
@@ -33,7 +38,8 @@ export function shouldWrapOmnicodeAccountScope(params: {
   return Boolean(params.accountId?.trim());
 }
 
-const REGISTRY_MAX_ENTRIES = 512;
+// LRU 容量上限（R3.5：512→2048；LRU-by-resolve 下活跃会话不占淘汰名额）。
+const REGISTRY_MAX_ENTRIES = 2048;
 const registryKeyJoiner = "\u0000";
 
 function sessionScopeRegistryKey(params: {
@@ -55,6 +61,8 @@ export interface OmnicodeSessionAccountScopeRegistry {
   unbind(params: { workspaceKey?: string | null; sessionId: string }): void;
   /** 按 sessionId 全局解绑（会话 id 全局唯一——免疫 workspaceKey 归一化漂移，终审 P2-3）。 */
   unbindBySessionId(sessionId: string): void;
+  /** 按 sessionId 集合批量全局解绑（R3.5 runtime 断连批量回收；单次遍历，幂等）。 */
+  unbindBySessionIds(sessionIds: readonly string[]): void;
   /** 内存诊断计数器（只读 size）。 */
   size(): number;
   /** 门控判定（包裹决策复用同一事实；缺省 = OMNICODE_PROFILE_ID env）。 */
@@ -65,26 +73,35 @@ export function createOmnicodeSessionAccountRegistry(options?: {
   isActive?: () => boolean;
 }): OmnicodeSessionAccountScopeRegistry {
   const isActive = options?.isActive ?? isOmnicodeSessionScopeGateActive;
+  // LRU-by-resolve（Map 保插入序）：resolve/bind 命中先删再插移到队尾 = 最近使用；
+  // 淘汰弹出队首 = 最久未 resolve 的绑定（R3.5 终审 P2-1：活跃会话每请求都 resolve →
+  // 永不落到队首，运行期永不淘汰）。
   const entries = new Map<string, string>();
+  const touch = (key: string, accountId: string): void => {
+    entries.delete(key);
+    entries.set(key, accountId);
+  };
   return {
     bind(params) {
       if (!isActive()) return;
       const key = sessionScopeRegistryKey(params);
       const accountId = params.accountId.trim();
       if (!key || !accountId) return;
-      // Map 保插入序：先删再插把重复绑定刷新为最新，FIFO 淘汰弹出的即最旧绑定。
-      entries.delete(key);
       while (entries.size >= REGISTRY_MAX_ENTRIES) {
-        const oldest = entries.keys().next().value;
-        if (oldest === undefined) break;
-        entries.delete(oldest);
+        const lru = entries.keys().next().value;
+        if (lru === undefined) break;
+        entries.delete(lru);
       }
-      entries.set(key, accountId);
+      touch(key, accountId);
     },
     resolve(params) {
       const key = sessionScopeRegistryKey(params);
       if (!key) return null;
-      return entries.get(key) ?? null;
+      const accountId = entries.get(key);
+      if (accountId === undefined) return null;
+      // 命中即 touch（LRU 记账；每次凭据解析一次 O(1) Map 重插，无轮询无定时器）。
+      touch(key, accountId);
+      return accountId;
     },
     unbind(params) {
       const key = sessionScopeRegistryKey(params);
@@ -97,6 +114,24 @@ export function createOmnicodeSessionAccountRegistry(options?: {
       // Map 迭代器对遍历中删除安全（被删键跳过继续），无需快照拷贝。
       for (const key of entries.keys()) {
         if (key === sessionId.trim() || key.endsWith(suffix)) entries.delete(key);
+      }
+    },
+    unbindBySessionIds(sessionIds) {
+      const ids = new Set<string>();
+      for (const id of sessionIds) {
+        if (id.trim()) ids.add(id.trim());
+      }
+      if (ids.size === 0) return;
+      // 键形 = `${workspaceKey}\0${sessionId}`（workspaceKey 空时退化为裸 sessionId）。
+      // lastIndexOf 对齐 endsWith 语义（workspaceKey 理论上不含 \0，防御性取末段）。
+      for (const key of entries.keys()) {
+        if (ids.has(key)) {
+          entries.delete(key);
+          continue;
+        }
+        const separatorIndex = key.lastIndexOf(registryKeyJoiner);
+        if (separatorIndex < 0) continue;
+        if (ids.has(key.slice(separatorIndex + registryKeyJoiner.length))) entries.delete(key);
       }
     },
     size() {

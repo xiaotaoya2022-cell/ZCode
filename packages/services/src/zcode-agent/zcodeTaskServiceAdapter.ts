@@ -206,6 +206,12 @@ interface CreateZCodeTaskServiceAdapterOptions {
   omnicodeAccountScheduler?: OmnicodeAccountScheduler;
   omnicodeAccountDirectoryCandidates?: () => Promise<readonly string[]>;
   isOmnicodeSmartSchedulingEnabled?: () => Promise<boolean>;
+  /**
+   * [OmniCode] 模式二 R3.5（终审 P2-4）：并发上限读取点（omnicodeAccountConcurrencyLimit
+   * setting.json 键，node.ts 装配端 clamp 1..10 归一；缺席/读取失败 → undefined → 调度器
+   * 默认 3）。sendPrompt 缺省路径的 pickAccount 与桌面 v4 sendText 共用同一事实源。
+   */
+  readOmnicodeAccountConcurrencyLimit?: () => Promise<number>;
 }
 
 interface TaskTarget {
@@ -444,6 +450,10 @@ export function createZCodeTaskServiceAdapter(
       // [OmniCode] 模式二 R4（spec §6）：sendPrompt 缺省路径——未显式选账号且智能调度
       // 开时自动挑剩余槽最多的附加账号（含退避降权跳过）。注入任一缺席（官方/远端装配）
       // 或门控关或开关关 → 决策恒 no-bind，官方行为逐字不变。绑定后并入上方同一登记链。
+      // R3.5（终审 P2-4）：并发上限可配——读取点缺席/失败回落调度器默认 3。
+      const omnicodeConcurrencyLimit = options.readOmnicodeAccountConcurrencyLimit
+        ? await options.readOmnicodeAccountConcurrencyLimit().catch(() => undefined)
+        : undefined;
       const decision = shouldBindOmnicodeSessionAccount({
         gateActive: options.omnicodeSessionAccounts?.isActive() ?? false,
         explicitAccountId: null,
@@ -454,7 +464,13 @@ export function createZCodeTaskServiceAdapter(
           ? await options.omnicodeAccountDirectoryCandidates().catch(() => [])
           : [],
         pickAccount: options.omnicodeAccountScheduler
-          ? (candidates) => options.omnicodeAccountScheduler!.pickAccount(candidates)
+          ? (candidates) =>
+              options.omnicodeAccountScheduler!.pickAccount(
+                candidates,
+                omnicodeConcurrencyLimit === undefined
+                  ? undefined
+                  : { defaultLimit: omnicodeConcurrencyLimit },
+              )
           : null,
       });
       if (decision.accountId) {

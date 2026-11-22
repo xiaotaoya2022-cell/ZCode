@@ -58,8 +58,8 @@ export interface OmnicodeGlobalPrefsLogger {
 export interface OmnicodeGlobalPrefsCoordinatorDeps {
   identity: OmnicodeGlobalPrefsIdentity;
   getOwnProfileId: () => string;
-  getSettings: () => Promise<{ locale?: Locale; localePreference?: LocalePreference; shortcutBindings?: Record<string, string[]>; omnicodeSmartScheduling?: boolean }>;
-  updateSettings: (patch: { locale?: Locale; localePreference?: LocalePreference; shortcutBindings?: Record<string, string[]>; omnicodeSmartScheduling?: boolean }) => Promise<void>;
+  getSettings: () => Promise<{ locale?: Locale; localePreference?: LocalePreference; shortcutBindings?: Record<string, string[]>; omnicodeSmartScheduling?: boolean; omnicodeAccountConcurrencyLimit?: number }>;
+  updateSettings: (patch: { locale?: Locale; localePreference?: LocalePreference; shortcutBindings?: Record<string, string[]>; omnicodeSmartScheduling?: boolean; omnicodeAccountConcurrencyLimit?: number }) => Promise<void>;
   /** main 侧注入 state:* 广播到本进程全部 host（BroadcastHub.relayFromOmnicodeMain）。 */
   injectStateBroadcast: (channel: string, payload: unknown) => boolean;
   /** 管理器：向单个已回连实例投递桥命令；返回是否投出（未连接=false，不重试）。 */
@@ -119,6 +119,10 @@ export async function readOmnicodeManagerGlobalPrefsSnapshot(): Promise<Omnicode
     // [OmniCode] 模式二 R4：智能调度开关进快照（缺席=开；显式 false 才下发 false）。
     if (settings.omnicodeSmartScheduling !== undefined) {
       prefs.omnicodeSmartScheduling = settings.omnicodeSmartScheduling;
+    }
+    // [OmniCode] 模式二 R3.5：并发上限进快照（缺席=缺省 3；值域在 filter 点已 clamp）。
+    if (settings.omnicodeAccountConcurrencyLimit !== undefined) {
+      prefs.omnicodeAccountConcurrencyLimit = settings.omnicodeAccountConcurrencyLimit;
     }
   } catch (error) {
     coordinator.deps.logger.warn("[omnicode] 全局层 setting.json 读取失败（快照降级）:", error);
@@ -473,6 +477,17 @@ export async function handleOmnicodeGlobalPrefsReportFromInstance(
       coordinator.deps.logger.warn("[omnicode] 全局层 omnicodeSmartScheduling 写入失败（不阻断同步）:", error);
     }
   }
+  // [OmniCode] 模式二 R3.5：并发上限上行落地（数值域已由 sanitize 校验并 clamp 1..10）。
+  if (prefs.omnicodeAccountConcurrencyLimit !== undefined) {
+    try {
+      await coordinator.deps.updateSettings({
+        omnicodeAccountConcurrencyLimit: prefs.omnicodeAccountConcurrencyLimit,
+      });
+      appliedKeys.push("omnicodeAccountConcurrencyLimit");
+    } catch (error) {
+      coordinator.deps.logger.warn("[omnicode] 全局层 omnicodeAccountConcurrencyLimit 写入失败（不阻断同步）:", error);
+    }
+  }
   if (prefs.theme !== undefined) {
     try {
       await writeOmnicodeGlobalPrefsSidecarTheme(prefs.theme);
@@ -568,6 +583,17 @@ export async function handleOmnicodeGlobalPrefsApplyCommand(
     } catch (error) {
       deferredKeys.push("omnicodeSmartScheduling");
       deps.logger.warn("[omnicode] 实例 omnicodeSmartScheduling 写入失败（待下次同步收敛）:", error);
+    }
+  }
+  // [OmniCode] 模式二 R3.5：并发上限下行落盘（Host 每次挑选/槽位查询时经 settingService
+  // 现读——写盘后下一轮 pickAccount 即生效）。
+  if (prefs.omnicodeAccountConcurrencyLimit !== undefined) {
+    try {
+      await deps.updateSettings({ omnicodeAccountConcurrencyLimit: prefs.omnicodeAccountConcurrencyLimit });
+      appliedKeys.push("omnicodeAccountConcurrencyLimit");
+    } catch (error) {
+      deferredKeys.push("omnicodeAccountConcurrencyLimit");
+      deps.logger.warn("[omnicode] 实例 omnicodeAccountConcurrencyLimit 写入失败（待下次同步收敛）:", error);
     }
   }
   applyOmnicodeGlobalPrefsLocally(prefs);
@@ -696,6 +722,12 @@ export async function mergeOmnicodeGlobalPrefsIntoSettingsFile(
   if (snapshot.omnicodeSmartScheduling !== undefined) {
     next.omnicodeSmartScheduling = snapshot.omnicodeSmartScheduling;
     written.push("omnicodeSmartScheduling");
+  }
+  // [OmniCode] 模式二 R3.5：并发上限 spawn 注入（首帧即正确——实例 Host 首次 pickAccount
+  // 前已就位；连接即推快照保留为收敛兜底）。
+  if (snapshot.omnicodeAccountConcurrencyLimit !== undefined) {
+    next.omnicodeAccountConcurrencyLimit = snapshot.omnicodeAccountConcurrencyLimit;
+    written.push("omnicodeAccountConcurrencyLimit");
   }
   // [OmniCode] 丙1 远程聚合 R4：omnicodeRemoteCrossAccount 不进 setting.json（appSettings
   // schema strip 会在下次写盘丢弃未知键——与 theme 同款裁定）；实例侧经连接即推快照

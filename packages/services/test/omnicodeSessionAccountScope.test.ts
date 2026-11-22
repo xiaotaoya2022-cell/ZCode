@@ -120,16 +120,54 @@ describe("模式二 R1.5：会话→附加账号绑定注册表", () => {
     expect(registry.isActive()).toBe(false);
   });
 
-  it("有界 FIFO：最旧绑定淘汰、最新绑定存活", () => {
+  it("有界 LRU-by-resolve：超容量淘汰最久未 resolve 的绑定、最新绑定存活（R3.5 容量 512→2048）", () => {
     const registry = createOmnicodeSessionAccountRegistry({ isActive: gateOn });
-    for (let index = 0; index < 520; index += 1) {
+    for (let index = 0; index < 2056; index += 1) {
       registry.bind({ sessionId: `task-${index}`, accountId: `acct-${index}` });
     }
-    expect(registry.size()).toBe(512);
+    expect(registry.size()).toBe(2048);
+    // task-0..task-7 为最久未 resolve 的 8 条 → 被新绑定挤出。
     expect(registry.resolve({ sessionId: "task-0" })).toBeNull();
     expect(registry.resolve({ sessionId: "task-7" })).toBeNull();
     expect(registry.resolve({ sessionId: "task-8" })).toBe("acct-8");
-    expect(registry.resolve({ sessionId: "task-519" })).toBe("acct-519");
+    expect(registry.resolve({ sessionId: "task-2055" })).toBe("acct-2055");
+  });
+
+  it("LRU-by-resolve：resolve 命中即 touch——活跃绑定不被后续新绑定淘汰（终审 P2-1）", () => {
+    const registry = createOmnicodeSessionAccountRegistry({ isActive: gateOn });
+    registry.bind({ sessionId: "task-active", accountId: "acct-active" });
+    // 活跃会话每请求凭据解析都 resolve 命中（touch 移队尾）。
+    for (let round = 0; round < 2100; round += 1) {
+      registry.bind({ sessionId: `task-${round}`, accountId: `acct-${round}` });
+      registry.resolve({ sessionId: "task-active" });
+    }
+    // 2048 上限满，但活跃绑定每轮都被 touch → 永不淘汰（计费归属不漂移）。
+    expect(registry.size()).toBe(2048);
+    expect(registry.resolve({ sessionId: "task-active" })).toBe("acct-active");
+    // 从未 resolve 的最早绑定早已按 LRU 序被淘汰。
+    expect(registry.resolve({ sessionId: "task-0" })).toBeNull();
+    // 最老的未活跃绑定（task-0..task-52，共 53 条=首条 active 占位+每轮挤出 1 条）
+    // 已被挤出；窗口内最老存活 = task-53；2100 轮最后一轮 task-2099 重 bind 覆盖自身。
+    expect(registry.resolve({ sessionId: "task-2099" })).toBe("acct-2099");
+    expect(registry.resolve({ sessionId: "task-53" })).toBe("acct-53");
+    expect(registry.resolve({ sessionId: "task-52" })).toBeNull();
+  });
+
+  it("LRU 淘汰序以最近 resolve 为准而非 bind 序：老绑定后 resolve 反超新绑定", () => {
+    const registry = createOmnicodeSessionAccountRegistry({ isActive: gateOn });
+    registry.bind({ sessionId: "task-old", accountId: "acct-old" });
+    for (let index = 0; index < 2048; index += 1) {
+      registry.bind({ sessionId: `task-${index}`, accountId: `acct-${index}` });
+    }
+    // task-old 早已被挤出（2048 条新绑定后）。
+    expect(registry.resolve({ sessionId: "task-old" })).toBeNull();
+    // 重新绑定后立刻 resolve touch，再灌满新绑定 → 仍存活。
+    registry.bind({ sessionId: "task-old", accountId: "acct-old" });
+    registry.resolve({ sessionId: "task-old" });
+    registry.bind({ sessionId: "task-extra", accountId: "acct-extra" });
+    expect(registry.resolve({ sessionId: "task-old" })).toBe("acct-old");
+    // 队首（最久未 resolve）= task-0（此后无 touch）被挤出。
+    expect(registry.resolve({ sessionId: "task-0" })).toBeNull();
   });
 });
 

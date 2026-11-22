@@ -13,15 +13,27 @@
 // 本任务只做纯逻辑 + API + 单测；接线到 sendPrompt 缺省选择与开关面属 R3/R4（spec
 // §10-R2 范围注记）。登记表有界（FIFO 淘汰最旧会话绑定，淘汰时同步回收其并发计数——
 // 防"只登记不释放"的泄漏面）。
+// R3.5（终审 P2-2）：CLI/turn 异常崩溃可能不发 turn 终态事件 → 槽位泄漏（running 虚高
+// 饿死该账号）。兜底双保险（均事件/调用点驱动，无常驻轮询）：
+// - 运行时断连批量释放（zcodeAgentService runtime unavailable / client onClose 调
+//   releaseSessions——本模块提供批量 API 与会话集合过滤纯函数）；
+// - pickAccount 时点超龄兜底：登记时刻超过 STALE 上限（默认 24h）的条目按超龄释放
+//   （registerStart 刷新时间戳，活跃会话每次发送都续期；无 turn 状态事件的僵尸会话
+//   在下一次挑选时点被回收）。
 
 /** 会话绑定登记表容量上限（FIFO 淘汰；与 sessionAccountScope 注册表同款有界哲学）。 */
 const SESSION_REGISTRY_MAX_ENTRIES = 1024;
+
+/** 超龄兜底上限（终审 P2-2：登记超 24h 的会话槽位在 pickAccount 时点回收）。 */
+export const OMNICODE_SESSION_STALE_FALLBACK_MS = 24 * 60 * 60 * 1000;
 
 export const OMNICODE_ACCOUNT_DEFAULT_CONCURRENCY_LIMIT = 3;
 
 export interface OmnicodeAccountSchedulerOptions {
   /** 未配置账号的默认并发上限（spec §6 默认 3）。 */
   defaultLimit?: number;
+  /** 超龄兜底上限（ms；缺省 OMNICODE_SESSION_STALE_FALLBACK_MS=24h；单测注入缩短）。 */
+  staleSessionMs?: number;
   now?: () => number;
 }
 
@@ -40,6 +52,12 @@ export interface OmnicodeAccountScheduler {
   registerStart(params: { sessionId: string; accountId: string }): void;
   /** 会话结束释放（并发计数 -1）；未登记的 sessionId no-op。 */
   releaseFinish(sessionId: string): void;
+  /**
+   * 批量释放（R3.5 终审 P2-2：CLI runtime 断连/进程崩溃时按会话集合一次性回收槽位）。
+   * 逐条 releaseFinish 语义（未登记 no-op），幂等可重入——zcodeAgentService 的
+   * runtime unavailable 与 client onClose 两个断连边界都可调用。
+   */
+  releaseSessions(sessionIds: readonly string[]): void;
   /** 429/bizCode 3101/3103 退避降权：TTL（ms）内该账号被 pickAccount 跳过。 */
   recordBackoff(accountId: string, ttlMs: number): void;
   /**
@@ -76,8 +94,10 @@ export function createOmnicodeAccountScheduler(
 ): OmnicodeAccountScheduler {
   const now = options.now ?? (() => Date.now());
   const defaultLimit = options.defaultLimit ?? OMNICODE_ACCOUNT_DEFAULT_CONCURRENCY_LIMIT;
-  // sessionId → accountId（Map 保插入序：重复登记先删再插刷新为最新，FIFO 淘汰弹最旧）。
-  const sessions = new Map<string, string>();
+  const staleSessionMs = options.staleSessionMs ?? OMNICODE_SESSION_STALE_FALLBACK_MS;
+  // sessionId → { accountId, startedAt }（Map 保插入序：重复登记先删再插刷新为最新，
+  // FIFO 淘汰弹最旧；startedAt 供超龄兜底，活跃会话每次 registerStart 续期）。
+  const sessions = new Map<string, { accountId: string; startedAt: number }>();
   const runningCounts = new Map<string, number>();
   // accountId → 退避截止时刻（epoch ms）；过期惰性清理，无后台定时器。
   const backoffUntil = new Map<string, number>();
@@ -88,13 +108,30 @@ export function createOmnicodeAccountScheduler(
     else runningCounts.set(accountId, current - 1);
   };
 
+  const releaseInternal = (sessionId: string): void => {
+    const entry = sessions.get(sessionId);
+    if (entry === undefined) return;
+    sessions.delete(sessionId);
+    decrementCount(entry.accountId);
+  };
+
   const evictOldestIfNeeded = (): void => {
     while (sessions.size >= SESSION_REGISTRY_MAX_ENTRIES) {
       const oldest = sessions.keys().next().value;
       if (oldest === undefined) break;
-      const oldestAccountId = sessions.get(oldest);
-      sessions.delete(oldest);
-      if (oldestAccountId) decrementCount(oldestAccountId);
+      releaseInternal(oldest);
+    }
+  };
+
+  /**
+   * 超龄兜底（R3.5 终审 P2-2）：登记时刻距今超 staleSessionMs 的条目回收。只在
+   * pickAccount 调用时点清扫（事件/调用点驱动，无常驻轮询）；同 sessionId 再登记
+   * （新发送）刷新 startedAt——活跃长会话不误伤。
+   */
+  const releaseStaleSessions = (): void => {
+    const current = now();
+    for (const [sessionId, entry] of sessions) {
+      if (current - entry.startedAt > staleSessionMs) releaseInternal(sessionId);
     }
   };
 
@@ -107,19 +144,22 @@ export function createOmnicodeAccountScheduler(
       const previous = sessions.get(sessionKey);
       if (previous) {
         sessions.delete(sessionKey);
-        decrementCount(previous);
+        decrementCount(previous.accountId);
       }
       evictOldestIfNeeded();
-      sessions.set(sessionKey, accountKey);
+      sessions.set(sessionKey, { accountId: accountKey, startedAt: now() });
       runningCounts.set(accountKey, (runningCounts.get(accountKey) ?? 0) + 1);
     },
     releaseFinish(sessionId) {
       const sessionKey = sessionId.trim();
       if (!sessionKey) return;
-      const accountId = sessions.get(sessionKey);
-      if (accountId === undefined) return;
-      sessions.delete(sessionKey);
-      decrementCount(accountId);
+      releaseInternal(sessionKey);
+    },
+    releaseSessions(sessionIds) {
+      // R3.5 终审 P2-2：批量释放（CLI runtime 断连/崩溃边界一次性回收，未登记 no-op）。
+      for (const sessionId of sessionIds) {
+        releaseInternal(sessionId.trim());
+      }
     },
     recordBackoff(accountId, ttlMs) {
       const accountKey = accountId.trim();
@@ -128,6 +168,8 @@ export function createOmnicodeAccountScheduler(
       backoffUntil.set(accountKey, now() + ttlMs);
     },
     pickAccount(candidates, pickOptions) {
+      // 超龄兜底先行（无终态事件的僵尸会话在挑选时点回收槽位——事件驱动非轮询）。
+      releaseStaleSessions();
       const current = now();
       const limits = pickOptions?.limits;
       const pickDefault = pickOptions?.defaultLimit;
@@ -166,4 +208,25 @@ export function createOmnicodeAccountScheduler(
       return sessions.size;
     },
   };
+}
+
+/**
+ * 运行时会话集合过滤（R3.5 断连批量释放的选择面，纯函数单测锁定）。输入 =
+ * CLI runtime client 的会话归属表（sessionId → workspaceKey，zcodeAgentService
+ * clientSessions 同形）；workspaceKey=null = 该 client 全部会话（client onClose），
+ * 指定 workspaceKey = 仅该 workspace 的会话（runtime unavailable 按代际回收）。
+ * 空白 sessionId 跳过（与登记入口同口径）。
+ */
+export function filterOmnicodeRuntimeSessionIds(
+  sessions: ReadonlyMap<string, string>,
+  workspaceKey: string | null,
+): string[] {
+  const result: string[] = [];
+  for (const [sessionId, key] of sessions) {
+    const trimmed = sessionId.trim();
+    if (!trimmed) continue;
+    if (workspaceKey !== null && key !== workspaceKey) continue;
+    result.push(trimmed);
+  }
+  return result;
 }

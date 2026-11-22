@@ -32,6 +32,7 @@ import {
 // [OmniCode] 模式二 R3/R4：调度器（并发计数 + pickAccount）与绑定决策纯函数。
 import {
   OMNICODE_ACCOUNT_DEFAULT_CONCURRENCY_LIMIT,
+  filterOmnicodeRuntimeSessionIds,
   type OmnicodeAccountScheduler,
 } from "#src/omnicode/accountScheduler.js";
 import {
@@ -1251,6 +1252,12 @@ interface CreateZCodeAgentServiceBaseOptions extends Omit<
   omnicodeAccountDirectoryCandidates?: () => Promise<readonly string[]>;
   /** 智能调度开关读取点（omnicodeSmartScheduling setting.json 键；缺席/读取失败 → 关）。 */
   isOmnicodeSmartSchedulingEnabled?: () => Promise<boolean>;
+  /**
+   * [OmniCode] 模式二 R3.5（终审 P2-4）：并发上限读取点（omnicodeAccountConcurrencyLimit
+   * setting.json 键，clamp 1..10 缺省 3——node.ts 装配端已归一，此处缺席/读取失败回落
+   * 调度器默认 3）。pickAccount defaultLimit 与槽位可视化共用同一事实。
+   */
+  readOmnicodeAccountConcurrencyLimit?: () => Promise<number>;
   channelReplyExecutor?: (request: ChannelReplyHostRequest) => Promise<ChannelReplyResult>;
   topicResourceExecutor?: (
     request: ZCodeTopicResourceReadParams &
@@ -1788,6 +1795,31 @@ export function createZCodeAgentService(
     options?.omnicodeAccountScheduler?.releaseFinish(sessionId);
     void workspace;
   };
+  // [OmniCode] 模式二 R3.5（终审 P2-2）：CLI runtime 断连/崩溃兜底——协议关闭、进程崩溃
+  // 或请求超时都可能不产生 turn 终态事件，槽位永不释放会让 running 虚高饿死该账号。两个
+  // 权威断连边界（runtime unavailable / client onClose）都汇入本批量回收：槽位批量释放 +
+  // 会话绑定批量解绑。调度器/注册表缺席（官方装配）恒 no-op；逐条幂等（重复释放 no-op），
+  // unavailable 与 late onClose 双路径互不误伤。
+  const releaseOmnicodeRuntimeSessions = (sessionIds: readonly string[]): void => {
+    if (sessionIds.length === 0) return;
+    options?.omnicodeAccountScheduler?.releaseSessions(sessionIds);
+    omnicodeSessionAccountScopes?.unbindBySessionIds(sessionIds);
+  };
+  // 断连回收选择（identity guard）：仅回收"workspace 未换代"的会话——workspace 的
+  // active client 已是新一代 client 时，旧 client 迟到的 close 绝不释放新登记（与
+  // invalidateWorkspaceClient 的换代保护同一不变量）。unavailable 路径先行回收并
+  // dispose 本 client 的 onClose 挂载，两路径天然互斥；即便交错也逐条幂等。
+  const collectOmnicodeReleasableSessionIds = (client: ZCodeProtocolClient): string[] => {
+    const sessions = clientSessions.get(client);
+    if (!sessions || sessions.size === 0) return [];
+    const releasable: string[] = [];
+    for (const [sessionId, workspaceKey] of sessions) {
+      const active = activeClientsByWorkspaceKey.get(workspaceKey);
+      if (active && active.client !== client) continue;
+      releasable.push(sessionId);
+    }
+    return releasable;
+  };
   const accountProviderConfigSource = options?.accountProviderConfigSource;
   const modelSelectionReadinessSource = options?.modelSelectionReadinessSource;
   const sessionRuntimePreferencesAuthority = options?.sessionRuntimePreferencesAuthority ?? "local";
@@ -1839,6 +1871,16 @@ export function createZCodeAgentService(
     cuaOperationTurnTracker?.clearWorkspaceKey(event.workspaceKey);
     const active = activeClientsByWorkspaceKey.get(event.workspaceKey);
     if (!active) return;
+    // [OmniCode] 模式二 R3.5（终审 P2-2）：runtime unavailable = CLI 进程崩溃/协议关闭/
+    // 请求超时的权威边界（此后可能不再有 turn-failed/session-closed）——该 runtime 名下
+    // 会话的调度槽位与账号绑定在此批量回收（identity guard：只回收当前 active client 的
+    // 登记，换代后的新 runtime 登记不受影响）。
+    releaseOmnicodeRuntimeSessions(
+      filterOmnicodeRuntimeSessionIds(
+        clientSessions.get(active.client) ?? new Map<string, string>(),
+        event.workspaceKey,
+      ),
+    );
     // Process manager 只会为当前 available runtime 发布 unavailable；这里再绑定当前
     // active client 做第二层 identity guard，避免旧 runtime 的迟到回收误伤换代结果。
     invalidateWorkspaceClient(event.workspaceKey, active.client);
@@ -3939,6 +3981,10 @@ export function createZCodeAgentService(
         });
       }),
       client.onClose(() => {
+        // [OmniCode] 模式二 R3.5（终审 P2-2）：stdio/协议关闭兜底——unavailable 之外的
+        // 断连路径（CLI 正常退出、workspace 分离等）同样可能无 turn 终态事件。该 client
+        // 全部会话按 identity guard 选择后批量回收（换代 workspace 的登记归新 client）。
+        releaseOmnicodeRuntimeSessions(collectOmnicodeReleasableSessionIds(client));
         for (const key of clientWorkspaces.get(client)?.keys() ?? [])
           invalidateWorkspaceClient(key, client);
         clientWorkspaces.delete(client);
@@ -7147,6 +7193,11 @@ export function createZCodeAgentService(
           typeof sendPayload?.omnicodeAccountId === "string" && typeof envelope.sessionId === "string"
             ? sendPayload.omnicodeAccountId
             : null;
+        // [OmniCode] R3.5（终审 P2-4）：并发上限读取（omnicodeAccountConcurrencyLimit，
+        // node.ts 装配端 clamp 归一；缺席/读取失败 → undefined → 调度器默认 3）。
+        const omnicodeConcurrencyLimit = options?.readOmnicodeAccountConcurrencyLimit
+          ? await options.readOmnicodeAccountConcurrencyLimit().catch(() => undefined)
+          : undefined;
         const decision = shouldBindOmnicodeSessionAccount({
           gateActive: omnicodeSessionAccountScopes.isActive(),
           explicitAccountId,
@@ -7157,7 +7208,13 @@ export function createZCodeAgentService(
             ? await options.omnicodeAccountDirectoryCandidates().catch(() => [])
             : [],
           pickAccount: options?.omnicodeAccountScheduler
-            ? (candidates) => options.omnicodeAccountScheduler!.pickAccount(candidates)
+            ? (candidates) =>
+                options.omnicodeAccountScheduler!.pickAccount(
+                  candidates,
+                  omnicodeConcurrencyLimit === undefined
+                    ? undefined
+                    : { defaultLimit: omnicodeConcurrencyLimit },
+                )
             : null,
         });
         if (decision.accountId && typeof envelope.sessionId === "string") {
@@ -7309,6 +7366,13 @@ export function createZCodeAgentService(
       const candidates = options?.omnicodeAccountDirectoryCandidates
         ? await options.omnicodeAccountDirectoryCandidates().catch(() => [])
         : [];
+      // [OmniCode] R3.5（终审 P2-4）：上限可配——可视化与 pickAccount 同一读取点
+      //（缺席/读取失败回落调度器默认 3，保持"可视化=实际"自洽）。
+      const limit = options?.readOmnicodeAccountConcurrencyLimit
+        ? await options.readOmnicodeAccountConcurrencyLimit().catch(
+            () => OMNICODE_ACCOUNT_DEFAULT_CONCURRENCY_LIMIT,
+          )
+        : OMNICODE_ACCOUNT_DEFAULT_CONCURRENCY_LIMIT;
       const slots: { accountId: string; running: number; limit: number }[] = [];
       for (const accountId of candidates) {
         const key = accountId.trim();
@@ -7316,7 +7380,7 @@ export function createZCodeAgentService(
         slots.push({
           accountId: key,
           running: scheduler.runningCountOf(key),
-          limit: OMNICODE_ACCOUNT_DEFAULT_CONCURRENCY_LIMIT,
+          limit,
         });
       }
       return slots;

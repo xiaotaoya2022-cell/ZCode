@@ -578,6 +578,10 @@ const appSettingsObjectSchema = z.object({
   // 开关（默认开）。必须声明在完整 schema——zod strip 会在下次写盘时丢弃未知键；
   // 缺席键经 default(true) 补齐，显式 false 保持持久化。
   omnicodeSmartScheduling: z.boolean().default(true),
+  // [OmniCode] 模式二 R3.5（spec §6 "上限可配"）：附加账号并发上限。同必须声明——否则
+  // zod strip 丢键。schema 层只收数值不设值域（出界值不拒整档），clamp 1..10 收口在
+  // 消费端 resolveOmnicodeAccountConcurrencyLimit（缺席 = 缺省 3）。
+  omnicodeAccountConcurrencyLimit: z.number().optional(),
   providerFamilyDomain: providerFamilyDomainSchema.optional(),
   providerFamilyDomainUpdatedAt: z.number().int().nonnegative().optional(),
   providerFamilyDomainMigrated: z.boolean().default(false),
@@ -680,6 +684,8 @@ export const appSettingsPatchSchema = z.object({
   providerFamilyConnectionSelections: providerFamilyConnectionSelectionSettingsSchema.optional(),
   // [OmniCode] 模式二 R4：智能调度开关 patch 面（与完整 schema 同键；缺席=开）。
   omnicodeSmartScheduling: z.boolean().optional(),
+  // [OmniCode] 模式二 R3.5：并发上限 patch 面（与完整 schema 同键；缺席=缺省 3）。
+  omnicodeAccountConcurrencyLimit: z.number().optional(),
   providerFamilyDomain: z.union([providerFamilyDomainSchema, z.literal("")]).optional(),
   providerFamilyDomainUpdatedAt: z.number().int().nonnegative().optional(),
   providerFamilyDomainMigrated: z.boolean().optional(),

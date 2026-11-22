@@ -32,6 +32,9 @@ export const OMNICODE_GLOBAL_PREF_KEYS = [
   // 开关（默认开）。走既有键体系（白名单过滤 + 值域校验 + 环形抑制/下发链）跨实例共享；
   // 缺席（旧档）= 开（spec §6 "开关式默认开"）。
   "omnicodeSmartScheduling",
+  // [OmniCode] 模式二 R3.5（终审 P2-4，spec §6 "上限可配"）：附加账号并发上限（数值，
+  // clamp 1..10，缺省 3）。同键体系跨实例共享；缺席 = 缺省 3（spec §6 默认值）。
+  "omnicodeAccountConcurrencyLimit",
 ] as const;
 
 export type OmnicodeGlobalPrefKey = (typeof OMNICODE_GLOBAL_PREF_KEYS)[number];
@@ -43,6 +46,42 @@ export function isOmnicodeSmartSchedulingValue(value: unknown): value is boolean
 
 /** 智能调度缺省值（spec §6：开关式默认开）。 */
 export const OMNICODE_SMART_SCHEDULING_DEFAULT = true;
+
+/**
+ * [OmniCode] 模式二 R3.5（终审 P2-4，spec §6 "上限可配，默认 3"）：附加账号并发上限键。
+ * setting.json 层键（appSettings schema 有声明——zod strip 否则丢键）；消费端经
+ * resolveOmnicodeAccountConcurrencyLimit 归一（clamp 1..10，非法/缺席回落缺省 3）。
+ */
+export const OMNICODE_ACCOUNT_CONCURRENCY_LIMIT_PREF_KEY = "omnicodeAccountConcurrencyLimit";
+
+/** 并发上限值域下界（spec §6：至少 1 个并发槽）。 */
+export const OMNICODE_ACCOUNT_CONCURRENCY_LIMIT_MIN = 1;
+
+/** 并发上限值域上界（免费账号 3 并发的配置放大护栏）。 */
+export const OMNICODE_ACCOUNT_CONCURRENCY_LIMIT_MAX = 10;
+
+/** 并发上限缺省值（spec §6：默认 3）。 */
+export const OMNICODE_ACCOUNT_CONCURRENCY_LIMIT_DEFAULT = 3;
+
+/** 上限原始值域（数值即可入同步载荷；clamp 在归一函数收口——schema 不拒绝整档）。 */
+export function isOmnicodeAccountConcurrencyLimitValue(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+/**
+ * 并发上限归一（消费端唯一入口，单测锁定 clamp/缺省）：有限数值 clamp 到 1..10；
+ * 非法/缺席回落缺省 3。出界值不拒绝整档（setting.json 手改 999 不应炸掉全部设置），
+ * 只收口到上界。
+ */
+export function resolveOmnicodeAccountConcurrencyLimit(value: unknown): number {
+  if (!isOmnicodeAccountConcurrencyLimitValue(value)) {
+    return OMNICODE_ACCOUNT_CONCURRENCY_LIMIT_DEFAULT;
+  }
+  return Math.min(
+    OMNICODE_ACCOUNT_CONCURRENCY_LIMIT_MAX,
+    Math.max(OMNICODE_ACCOUNT_CONCURRENCY_LIMIT_MIN, Math.floor(value)),
+  );
+}
 
 /**
  * 外观主题键（批次4 实测：theme 官方存储是各进程 localStorage 的 "zcode-theme"，
@@ -96,6 +135,8 @@ export interface OmnicodeGlobalPrefsPayload {
   theme?: OmnicodeThemePreference;
   // [OmniCode] 模式二 R4：智能调度开关（默认开；值域布尔）。
   omnicodeSmartScheduling?: boolean;
+  // [OmniCode] 模式二 R3.5：附加账号并发上限（clamp 后的数值，1..10；缺席=缺省 3）。
+  omnicodeAccountConcurrencyLimit?: number;
   // [OmniCode] 丙1 远程聚合 R4：跨账号聚合开关（默认关 = 仅同账号聚合，spec §7）。
   omnicodeRemoteCrossAccount?: boolean;
 }
@@ -132,6 +173,16 @@ export function filterOmnicodeGlobalPrefsFromPatch(
     isOmnicodeSmartSchedulingValue(patch.omnicodeSmartScheduling)
   ) {
     filtered.omnicodeSmartScheduling = patch.omnicodeSmartScheduling;
+  }
+  // [OmniCode] 模式二 R3.5：并发上限（有限数值入载荷并在过滤点即 clamp——同步链路上
+  // 流转的值恒在 1..10 值域内；非法值丢弃，缺席=缺省 3）。
+  if (
+    hasOwnObject(patch, OMNICODE_ACCOUNT_CONCURRENCY_LIMIT_PREF_KEY) &&
+    isOmnicodeAccountConcurrencyLimitValue(patch[OMNICODE_ACCOUNT_CONCURRENCY_LIMIT_PREF_KEY])
+  ) {
+    filtered.omnicodeAccountConcurrencyLimit = resolveOmnicodeAccountConcurrencyLimit(
+      patch[OMNICODE_ACCOUNT_CONCURRENCY_LIMIT_PREF_KEY],
+    );
   }
   // [OmniCode] 丙1 远程聚合 R4：跨账号聚合开关（布尔值域；非法值丢弃，缺席=关 = 仅同
   // 账号聚合，spec §7 红线：默认关闭）。
