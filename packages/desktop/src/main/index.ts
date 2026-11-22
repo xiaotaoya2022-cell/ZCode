@@ -12,6 +12,10 @@ import {
   sendOmnicodeInstanceBridgeUplink,
   startOmnicodeInstanceBridgeClient,
 } from "./omnicode/instanceBridgeClient.js";
+// [OmniCode] 模式二 R3：附加账号目录客户端（renderer IPC + Host 候选共用 TTL 缓存）与
+// 调度器槽位查询（main → Host parentPort；spec: docs/omnicode/multi-account-sessions.md §6/§7）。
+import { getOmnicodeAccountDirectoryList } from "./omnicode/accountDirectoryClient.js";
+import { registerOmnicodeAccountDirectoryIpcHandlers } from "./omnicode/accountDirectoryIpc.js";
 // [OmniCode] D12 接管流：实例侧 IPC（观察者发起/取消 + 持有者决定；仅实例身份装配）
 import { registerOmnicodeTakeoverInstanceIpcHandlers } from "./omnicode/takeoverInstance.js";
 /* eslint-disable max-lines */
@@ -2419,6 +2423,14 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
                 // 结构化错误（omnicode_account_material_unavailable），不瘫。
                 handleAccountMaterialRequest: (request: OmnicodeAccountMaterialRequestPayload) =>
                   requestOmnicodeAccountMaterialFromManager(request),
+                // [OmniCode] 模式二 R3/R4（spec §6/§7）：实例 Host 附加账号目录元数据查询
+                //（智能调度候选来源；实例 main TTL 缓存应答——命中即毫秒级，不重发桥请求）。
+                handleOmnicodeAccountDirectoryListRequest: async () => {
+                  const entries = await getOmnicodeAccountDirectoryList();
+                  return entries.length > 0
+                    ? { ok: true, accounts: entries }
+                    : { ok: false, error: "omnicode_account_directory_unavailable" };
+                },
               }
             : {}),
         },
@@ -3145,6 +3157,9 @@ app.whenReady().then(async () => {
   // 装配——管理器/官方 flavor 的 renderer 桥面不含这些方法，消费面缺席即天然禁用）
   if (isOmnicodeProfileInstanceEnv()) {
     registerOmnicodeTakeoverInstanceIpcHandlers(sendOmnicodeInstanceBridgeUplink);
+    // [OmniCode] 模式二 R3：附加账号目录 / 调度器槽位 IPC（选择器账号层 + 任务徽标 +
+    // 槽位可视化数据源；仅实例身份装配——管理器/官方 renderer 桥面缺席即天然禁用）。
+    registerOmnicodeAccountDirectoryIpcHandlers();
     // [OmniCode] 丙1 远程聚合 R3：被聚合实例侧快照探针（目录查询应答 + 快照变化报告的
     // 数据源 = manager listWindowWorkspaceSnapshots 只读视图；仅实例身份装配——探针缺席
     // 时目录请求静默丢弃，spec §3 被聚合实例零 relay 零凭据边界不受影响）。

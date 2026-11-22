@@ -6244,6 +6244,10 @@ const koKR: Record<string, string> = {
   "chat.toolbar.combined.effort": "강도",
   "chat.toolbar.combined.selectModel": "모델 선택",
   "chat.toolbar.model.label": "모델 선택",
+  "chat.omnicode.accountLayer": "계정",
+  "chat.omnicode.accountPrimary": "기본 계정",
+  "chat.omnicode.accountAuto": "자동",
+  "chat.omnicode.accountSlotsTooltip": "실행 중 {running} / 상한 {limit}",
   "chat.toolbar.draftConfigWriteFailed": "구성을 업데이트하지 못했습니다. 다시 시도하세요.",
   "chat.toolbar.model.description":
     "이 작업에 사용할 모델을 선택합니다. 단축키로 모델 메뉴를 열 수 있습니다.",
@@ -8648,6 +8652,10 @@ const koKR: Record<string, string> = {
   "console.maintenance.actionFailed": "작업에 실패했습니다. 다시 시도하세요.",
   "console.instanceFilterPlaceholder": "인스턴스 필터(이름/번호)",
   // [OmniCode] D12 인수 흐름: 관찰자 배너 버튼 + 결과 토스트 + 보유자 확인 대화상자（五語慣例）
+  "settings.omnicodeProfiles.smartScheduling": "스마트 스케줄링",
+  "settings.omnicodeProfiles.smartSchedulingDescription":
+    "켜면 남은 동시 실행 슬롯이 가장 많은 계정에 새 작업을 자동 배분합니다. 끄면 완전 수동입니다.",
+  "settings.omnicodeProfiles.smartSchedulingSaveError": "스마트 스케줄링 설정 저장에 실패했습니다. 다시 시도하세요",
   "omnicode.takeover.bannerButton": "인수 요청",
   "omnicode.takeover.bannerPending": "응답 대기 중…",
   "omnicode.takeover.requestFailed": "인수 요청 전송 실패(인스턴스가 관리자에 연결되지 않음). 나중에 다시 시도하세요.",

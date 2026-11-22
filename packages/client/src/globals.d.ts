@@ -193,6 +193,15 @@ declare global {
       backupOmnicodeSessionDbNow?(): Promise<
         import("@zcode/shared").OmnicodeSessionDbBackupResult
       >;
+      // [OmniCode] 模式二 R3（spec: docs/omnicode/multi-account-sessions.md §6/§7）：
+      // 附加账号目录元数据 + 调度器槽位用量查询（仅 omnicode 实例 preload 暴露；
+      // 元数据 only——凭据/deviceMid 永不进 renderer 红线）。
+      getOmnicodeAccountDirectoryList?(): Promise<
+        import("@zcode/shared").OmnicodeAccountDirectoryListResultPayload
+      >;
+      getOmnicodeAccountSlots?(): Promise<
+        import("@zcode/shared").OmnicodeAccountSlotsResultPayload
+      >;
       /** [OmniCode] 失败态恢复入口：手动粘贴完整 OAuth 回调 URL，main 复用 handleDeepLink 路由 */
       submitOmnicodeCallback?(payload: { url: string }): Promise<{
         ok: boolean;

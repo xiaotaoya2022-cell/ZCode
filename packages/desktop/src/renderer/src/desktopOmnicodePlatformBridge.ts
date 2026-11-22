@@ -22,6 +22,9 @@ import type {
   OmnicodeProfileRenameInput,
   OmnicodeProfileSummaryInfo,
   OmnicodeConsoleCredentialOsState,
+  // [OmniCode] 模式二 R3：附加账号目录/槽位元数据载荷（无凭据红线）。
+  OmnicodeAccountDirectoryListResultPayload,
+  OmnicodeAccountSlotsResultPayload,
   OmnicodeTakeoverEventPayload,
   OmnicodeTakeoverConfirmPayload,
   OmnicodeTakeoverSubmitResult,
@@ -168,4 +171,13 @@ export const desktopOmnicodePlatformBridge = {
     requireBridge(window.zcode.getOmnicodeSessionDbStatus?.()),
   backupOmnicodeSessionDbNow: (): Promise<OmnicodeSessionDbBackupResult> =>
     requireBridge(window.zcode.backupOmnicodeSessionDbNow?.()),
+  // [OmniCode] 模式二 R3（spec: docs/omnicode/multi-account-sessions.md §6/§7）：附加账号
+  // 目录元数据 + 调度器槽位用量（仅 omnicode 实例 preload 暴露；缺席=官方/管理器/旧
+  // preload——选择器账号层与槽位可视化据此隐藏，官方零改动铁律）。元数据 only。
+  getOmnicodeAccountDirectoryList: (): Promise<OmnicodeAccountDirectoryListResultPayload> =>
+    window.zcode.getOmnicodeAccountDirectoryList?.() ??
+    Promise.resolve({ ok: false, error: "omnicode.profile-bridge-unavailable" }),
+  getOmnicodeAccountSlots: (): Promise<OmnicodeAccountSlotsResultPayload> =>
+    window.zcode.getOmnicodeAccountSlots?.() ??
+    Promise.resolve({ ok: false, error: "omnicode.profile-bridge-unavailable" }),
 };

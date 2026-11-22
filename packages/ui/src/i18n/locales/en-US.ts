@@ -4339,6 +4339,10 @@ const enUS: Record<string, string> = {
     "Sign in to start working in this instance. Create and manage instances in the OmniCode Instance Hub.",
   "settings.omnicodeProfiles.description":
     "Run isolated ZCode instances per account: credentials, sessions and browser storage stay separate, and logins survive restarts. Launched instances run alongside this window.",
+  "settings.omnicodeProfiles.smartScheduling": "智能调度",
+  "settings.omnicodeProfiles.smartSchedulingDescription":
+    "开启后自动把新任务分派到剩余并发槽最多的账号，无需手动选择；关闭后完全手动。",
+  "settings.omnicodeProfiles.smartSchedulingSaveError": "智能调度设置保存失败，请重试",
   "settings.omnicodeProfiles.namePlaceholder": "Instance name (e.g. Work)",
   "settings.omnicodeProfiles.notesPlaceholder": "Notes (optional)",
   "settings.omnicodeProfiles.create": "Create instance",
@@ -6954,6 +6958,10 @@ const enUS: Record<string, string> = {
   "chat.toolbar.combined.effort": "Effort",
   "chat.toolbar.combined.selectModel": "Select model",
   "chat.toolbar.model.label": "Choose model",
+  "chat.omnicode.accountLayer": "账号",
+  "chat.omnicode.accountPrimary": "主账号",
+  "chat.omnicode.accountAuto": "自动",
+  "chat.omnicode.accountSlotsTooltip": "运行中 {running} / 上限 {limit}",
   "chat.toolbar.draftConfigWriteFailed": "Failed to update configuration. Please try again.",
   "chat.toolbar.model.description":
     "Choose the model used by this task. The shortcut opens the model menu.",

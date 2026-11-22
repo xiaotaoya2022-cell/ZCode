@@ -182,6 +182,16 @@ export const commandPayloadSchemas = {
       // 定时任务会话的后续用户输入也必须保持 turn-scoped 工具面隔离；不能借用
       // automationId，否则会把普通用户输入误标成一次 automation 派发。
       toolDisallowlist: z.array(z.string().min(1)).optional(),
+      // [OmniCode] 模式二 R3（spec: docs/omnicode/multi-account-sessions.md §4/§7）：
+      // 会话绑定的附加账号 id（与 modelSelection 同路透传，下一次请求生效，会话内可换）。
+      // additive 可选：官方渲染器从不携带该键；Host 在 omnicode 门控内读取并**剥离**后
+      // 才转发 CLI（CLI 旧 schema 会静默丢弃未知键，但剥离保证官方执行端零触碰）。
+      // 形态与 omnicodeAccountMaterialRequestPayloadSchema.accountId 同约束（防串号）。
+      omnicodeAccountId: z
+        .string()
+        .max(64)
+        .regex(/^[A-Za-z0-9._:-]+$/u, "omnicodeAccountId 形态非法")
+        .optional(),
     })
     .superRefine((payload, context) => {
       if (payload.automationId && payload.offPeakTaskId) {

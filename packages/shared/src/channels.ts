@@ -35,6 +35,11 @@ import type {
   RendererActionTraceConfigV1,
 } from "./rendererActionTrace.js";
 import type { RendererHeapSample } from "./validation.js";
+// [OmniCode] 模式二 R3：附加账号目录/槽位元数据载荷（无凭据红线，见 omnicodeAccountMaterial.ts）。
+import type {
+  OmnicodeAccountDirectoryListResultPayload,
+  OmnicodeAccountSlotsResultPayload,
+} from "./omnicodeAccountMaterial.js";
 import type {
   ExtensionNotificationClick,
   ExtensionNotificationPayload,
@@ -356,6 +361,14 @@ export const PlatformChannels = {
   // [OmniCode] omni.5 真机修复（F2-5）：console 根 os: 旧密文迁移状态查询（unrecoverable
   // 标记存在时管理器 UI 给明确重登引导；null=无标记）。仅管理器装配。
   OmnicodeConsoleCredentialStateGet: "zcode:omnicode-console-credential-state-get",
+  // [OmniCode] 模式二 R3（spec: docs/omnicode/multi-account-sessions.md §7）：附加账号目录
+  // 元数据查询（选择器账号层 + 任务徽标数据源）。仅 omnicode 实例进程装配；载荷为
+  // omnicodeAccountDirectoryListResultPayloadSchema（元数据 only，无凭据红线）。
+  OmnicodeAccountDirectoryListGet: "zcode:omnicode-account-directory-list-get",
+  // [OmniCode] 模式二 R3（spec §6/§7）：调度器槽位用量快照查询（选择器/任务列表
+  // "running/上限" 数据源）。仅 omnicode 实例进程装配；载荷为
+  // omnicodeAccountSlotsResultPayloadSchema（元数据 only）。
+  OmnicodeAccountSlotsGet: "zcode:omnicode-account-slots-get",
   /** Renderer → Main：用 Chromium 打印引擎把当前页面 print 媒体版面导出为 PDF */
   PrintToPdf: "zcode:print-to-pdf",
   /** Renderer → Main：检查并按需请求系统麦克风权限 */
@@ -852,6 +865,12 @@ export const HostMessageTypes = {
   // main → host：bridge-proxy 附加账号材料请求的应答。R1.5 只定义协议类型与 main 侧
   // 路由占位（缺省处理者恒 ok=false 结构化错误）；实接（管理器解密代理）属 R2。
   OmnicodeAccountMaterialResult: "omnicode-account-material-result",
+  // [OmniCode] 模式二 R3（spec §6/§7）：main → host：附加账号目录元数据查询应答
+  //（实例 main 的 TTL 缓存应答，供调度器候选；元数据 only）。
+  OmnicodeAccountDirectoryListResult: "omnicode-account-directory-list-result",
+  // [OmniCode] 模式二 R3（spec §6/§7）：main → host：调度器槽位用量查询请求
+  //（renderer 槽位可视化经 main 转问 Host 调度器；requestId 关联应答）。
+  OmnicodeAccountSlotsRequest: "omnicode-account-slots-request",
 } as const;
 
 /** host process → main process 的反馈消息类型 */
@@ -974,6 +993,12 @@ export const HostResponseTypes = {
   // host → main：请求经管理器解密代理读取 bridge-proxy 附加账号材料（零重登迁移）。
   // R1.5 只定义协议类型与 main 侧路由占位；实接（Host 侧发起 + 管理器应答）属 R2。
   OmnicodeAccountMaterialRequest: "omnicode-account-material-request",
+  // [OmniCode] 模式二 R3/R4（spec §6）：host → main：附加账号目录元数据查询
+  //（智能调度 pickAccount 候选来源；实例 main TTL 缓存应答，管理器仍是唯一枚举权威）。
+  OmnicodeAccountDirectoryListRequest: "omnicode-account-directory-list-request",
+  // [OmniCode] 模式二 R3（spec §6/§7）：host → main：调度器槽位用量快照上报应答
+  //（main → host 的 OmnicodeAccountSlotsRequest 查询经此回传，槽位可视化元数据源）。
+  OmnicodeAccountSlotsResult: "omnicode-account-slots-result",
 } as const;
 
 // ============================================================================
@@ -1172,6 +1197,16 @@ export interface PlatformChannelMap {
   [PlatformChannels.OmnicodeConsoleCredentialStateGet]: {
     request: void;
     response: OmnicodeConsoleCredentialOsState | null;
+  };
+  // [OmniCode] 模式二 R3：附加账号目录元数据查询（仅 omnicode 实例装配；元数据 only）
+  [PlatformChannels.OmnicodeAccountDirectoryListGet]: {
+    request: void;
+    response: OmnicodeAccountDirectoryListResultPayload;
+  };
+  // [OmniCode] 模式二 R3：调度器槽位用量快照（仅 omnicode 实例装配；元数据 only）
+  [PlatformChannels.OmnicodeAccountSlotsGet]: {
+    request: void;
+    response: OmnicodeAccountSlotsResultPayload;
   };
   [PlatformChannels.PrintToPdf]: {
     request: void;

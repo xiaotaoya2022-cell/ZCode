@@ -65,6 +65,10 @@ import { omnicodeSharedAssetRequestSchema } from "./omnicodeSharedAssets.js";
 import {
   omnicodeAccountMaterialRequestPayloadSchema,
   omnicodeAccountMaterialResultPayloadSchema,
+  // [OmniCode] 模式二 R3：附加账号目录/槽位元数据载荷契约。
+  omnicodeAccountDirectoryListRequestPayloadSchema,
+  omnicodeAccountDirectoryListResultPayloadSchema,
+  omnicodeAccountSlotsResultPayloadSchema,
 } from "./omnicodeAccountMaterial.js";
 import { zcodeProcessDiagnosticSchema } from "./process-diagnostic.js";
 import { PROCESS_RESOURCE_CLI_LANES } from "./processResourceTelemetry.js";
@@ -1144,6 +1148,31 @@ export type HostOmnicodeAccountMaterialResultMessage = z.infer<
   typeof hostOmnicodeAccountMaterialResultMessageSchema
 >;
 
+// [OmniCode] 模式二 R3（spec: docs/omnicode/multi-account-sessions.md §7）：
+// main → host：附加账号目录元数据查询应答（实例 main TTL 缓存应答；元数据 only）。
+export const hostOmnicodeAccountDirectoryListResultMessageSchema = z
+  .object({
+    type: z.literal("omnicode-account-directory-list-result"),
+    requestId: nonEmptyStringSchema,
+    ...omnicodeAccountDirectoryListResultPayloadSchema.shape,
+  })
+  .strict();
+export type HostOmnicodeAccountDirectoryListResultMessage = z.infer<
+  typeof hostOmnicodeAccountDirectoryListResultMessageSchema
+>;
+
+// [OmniCode] 模式二 R3（spec §6/§7）：main → host：调度器槽位用量查询请求
+//（renderer 槽位可视化经 main 转问 Host 调度器；requestId 关联应答）。
+export const hostOmnicodeAccountSlotsRequestMessageSchema = z
+  .object({
+    type: z.literal("omnicode-account-slots-request"),
+    requestId: nonEmptyStringSchema,
+  })
+  .strict();
+export type HostOmnicodeAccountSlotsRequestMessage = z.infer<
+  typeof hostOmnicodeAccountSlotsRequestMessageSchema
+>;
+
 /** 手机只提交项目意图；实际目录和远端 scope 必须由窗口 Host 准备。 */
 export const hostPrepareProjectWorkspaceMessageSchema = z
   .object({
@@ -1251,6 +1280,9 @@ export const hostIncomingMessageSchema = z.discriminatedUnion("type", [
   hostSharedAssetFetchResultMessageSchema,
   // [OmniCode] 模式二 R2 预留：bridge-proxy 附加账号材料应答（main → host）。
   hostOmnicodeAccountMaterialResultMessageSchema,
+  // [OmniCode] 模式二 R3：附加账号目录元数据应答 + 调度器槽位用量查询（main → host）。
+  hostOmnicodeAccountDirectoryListResultMessageSchema,
+  hostOmnicodeAccountSlotsRequestMessageSchema,
 ]);
 
 export const hostRemoteWorkspaceConnectedResponseSchema = z
@@ -1755,6 +1787,33 @@ export type HostOmnicodeAccountMaterialRequestMessage = z.infer<
   typeof hostOmnicodeAccountMaterialRequestResponseSchema
 >;
 
+// [OmniCode] 模式二 R3/R4（spec: docs/omnicode/multi-account-sessions.md §6/§7）：
+// host → main：附加账号目录元数据查询（智能调度候选来源；实例 main TTL 缓存应答，
+// 管理器仍是唯一枚举权威；载荷元数据 only，无凭据红线）。
+export const hostOmnicodeAccountDirectoryListRequestResponseSchema = z
+  .object({
+    type: z.literal("omnicode-account-directory-list-request"),
+    requestId: nonEmptyStringSchema,
+    request: omnicodeAccountDirectoryListRequestPayloadSchema,
+  })
+  .strict();
+export type HostOmnicodeAccountDirectoryListRequestMessage = z.infer<
+  typeof hostOmnicodeAccountDirectoryListRequestResponseSchema
+>;
+
+// [OmniCode] 模式二 R3（spec §6/§7）：host → main：调度器槽位用量快照应答
+//（main → host 的 omnicode-account-slots-request 查询经此回传；元数据 only）。
+export const hostOmnicodeAccountSlotsResultResponseSchema = z
+  .object({
+    type: z.literal("omnicode-account-slots-result"),
+    requestId: nonEmptyStringSchema,
+    ...omnicodeAccountSlotsResultPayloadSchema.shape,
+  })
+  .strict();
+export type HostOmnicodeAccountSlotsResultMessage = z.infer<
+  typeof hostOmnicodeAccountSlotsResultResponseSchema
+>;
+
 /** host → main：登记已校验的插件 UI HTML。 */
 export const hostPluginSandboxRegisterRequestResponseSchema = z
   .object({
@@ -1952,6 +2011,10 @@ export const hostResponseMessageSchema = z.discriminatedUnion("type", [
   hostSharedAssetFetchRequestResponseSchema,
   // [OmniCode] 模式二 R2 预留：bridge-proxy 附加账号材料请求（host → main）。
   hostOmnicodeAccountMaterialRequestResponseSchema,
+  // [OmniCode] 模式二 R3/R4：附加账号目录元数据查询（host → main）。
+  hostOmnicodeAccountDirectoryListRequestResponseSchema,
+  // [OmniCode] 模式二 R3：调度器槽位用量快照应答（host → main）。
+  hostOmnicodeAccountSlotsResultResponseSchema,
 ]);
 
 export const zcodeTaskPersistStatusSchema = z.enum(["running", "completed", "error"]);

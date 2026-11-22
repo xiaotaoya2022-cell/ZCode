@@ -504,6 +504,15 @@ export interface ConversationComposerProps {
   ) => Promise<void> | void;
   /** context usage 面板的 /compact 入口（宿主走 v4 compact 命令）。 */
   onSendCompressionCommand?: (command: string) => void;
+  /**
+   * [OmniCode] 模式二 R3：选择器账号层（spec: docs/omnicode/multi-account-sessions.md §7）。
+   * 宿主（SessionPane）在 omnicode 实例且附加账号目录非空时注入；官方调用方不传=零改动。
+   */
+  omnicodeAccountMenu?: {
+    groups: readonly import("@/lib/composerPlanGroups.js").ComposerOmnicodeAccountGroup[];
+    selectedAccountId: string | null;
+    onSelect: (accountId: string | null) => void;
+  };
   /** v4 会话级错误（snapshot.control.lastError），展示在输入框上方。 */
   error?: ZCodeUiError | null;
   onDismissError?: () => void;
@@ -618,6 +627,7 @@ function ConversationComposerImpl({
   runningSubagentCount = 0,
   onRecoverCustomModelSelection,
   onSendCompressionCommand,
+  omnicodeAccountMenu,
   error,
   onDismissError,
   onOpenModelSettings,
@@ -2698,6 +2708,8 @@ function ConversationComposerImpl({
               onSwitchMode={onSwitchMode}
               onRecoverCustomModelSelection={onRecoverCustomModelSelection}
               onSendCompressionCommand={onSendCompressionCommand}
+              // [OmniCode] 模式二 R3：选择器账号层（宿主注入；undefined=官方路径零改动）。
+              omnicodeAccountMenu={omnicodeAccountMenu}
             />
           </span>
         ) : null}
@@ -2780,6 +2792,7 @@ function ConversationComposerImpl({
       onSelectThought,
       onRecoverCustomModelSelection,
       onSendCompressionCommand,
+      omnicodeAccountMenu,
       onSwitchMode,
       pending,
       provider,

@@ -1,5 +1,8 @@
 import { formatBotInputClientId, isAuxiliarySessionKind } from "@zcode/shared";
 import type { OmnicodeSessionAccountScopeRegistry } from "#src/omnicode/sessionAccountScope.js";
+// [OmniCode] 模式二 R3/R4：调度器类型 + 会话绑定决策（sendPrompt 缺省路径自动挑选）。
+import type { OmnicodeAccountScheduler } from "#src/omnicode/accountScheduler.js";
+import { shouldBindOmnicodeSessionAccount } from "#src/omnicode/sessionAccountBinding.js";
 import { createBotTopicAdmission } from "#src/zcode-agent/botTopicAdmission.js";
 import {
   readBotGroupRuntimeSnapshot,
@@ -197,6 +200,12 @@ interface CreateZCodeTaskServiceAdapterOptions {
   // 会话→附加账号绑定注册表（内建 omnicode 门控）。缺省（官方实例）→ 绑定 no-op，
   // 官方路径逐字不变。
   omnicodeSessionAccounts?: OmnicodeSessionAccountScopeRegistry;
+  // [OmniCode] 模式二 R3/R4（spec §6）：调度器（并发计数登记/释放）+ 目录候选 + 智能调度
+  // 开关读取点。sendPrompt 缺省路径（未显式选账号）的自动挑选在这三个注入点上裁决；
+  // 任一缺席 → 缺省不挑不绑定，官方行为逐字不变。
+  omnicodeAccountScheduler?: OmnicodeAccountScheduler;
+  omnicodeAccountDirectoryCandidates?: () => Promise<readonly string[]>;
+  isOmnicodeSmartSchedulingEnabled?: () => Promise<boolean>;
 }
 
 interface TaskTarget {
@@ -427,6 +436,38 @@ export function createZCodeTaskServiceAdapter(
         sessionId: target.taskId,
         accountId: params.omnicodeAccountId,
       });
+      options.omnicodeAccountScheduler?.registerStart({
+        sessionId: target.taskId,
+        accountId: params.omnicodeAccountId,
+      });
+    } else {
+      // [OmniCode] 模式二 R4（spec §6）：sendPrompt 缺省路径——未显式选账号且智能调度
+      // 开时自动挑剩余槽最多的附加账号（含退避降权跳过）。注入任一缺席（官方/远端装配）
+      // 或门控关或开关关 → 决策恒 no-bind，官方行为逐字不变。绑定后并入上方同一登记链。
+      const decision = shouldBindOmnicodeSessionAccount({
+        gateActive: options.omnicodeSessionAccounts?.isActive() ?? false,
+        explicitAccountId: null,
+        smartEnabled: options.isOmnicodeSmartSchedulingEnabled
+          ? await options.isOmnicodeSmartSchedulingEnabled().catch(() => false)
+          : false,
+        candidates: options.omnicodeAccountDirectoryCandidates
+          ? await options.omnicodeAccountDirectoryCandidates().catch(() => [])
+          : [],
+        pickAccount: options.omnicodeAccountScheduler
+          ? (candidates) => options.omnicodeAccountScheduler!.pickAccount(candidates)
+          : null,
+      });
+      if (decision.accountId) {
+        options.omnicodeSessionAccounts?.bind({
+          workspaceKey: resolveWorkspaceKey(target),
+          sessionId: target.taskId,
+          accountId: decision.accountId,
+        });
+        options.omnicodeAccountScheduler?.registerStart({
+          sessionId: target.taskId,
+          accountId: decision.accountId,
+        });
+      }
     }
     notifySyncerSession(target);
     // live tool projection 只用于当前运行的终态收口。
@@ -3036,6 +3077,13 @@ export function createZCodeTaskServiceAdapter(
     },
 
     async deleteTask(params): Promise<void> {
+      // [OmniCode] 模式二 R3/R4（spec §6）：会话删除即释放调度器并发计数并解除凭据作用域
+      // 绑定（register 表有界 FIFO 兜底之外的显式回收；未登记 no-op，官方路径零影响）。
+      options.omnicodeAccountScheduler?.releaseFinish(params.taskId);
+      options.omnicodeSessionAccounts?.unbind({
+        workspaceKey: params.workspacePath,
+        sessionId: params.taskId,
+      });
       await taskIndexSyncer.mutateSessionFacts(
         { ...params, sessionId: params.taskId },
         { type: "delete" },

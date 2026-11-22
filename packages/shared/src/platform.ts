@@ -1,5 +1,10 @@
 /* eslint-disable max-lines -- 跨端 platform contract 集中声明 renderer 能力；OAuth 与 browser lifecycle 必须保持 desktop/web 类型合同，本 MR 不拆分平台边界。 */
 import type { OmnicodeInstanceSortMode } from "./omnicodeInstanceSort.js";
+// [OmniCode] 模式二 R3：附加账号目录/槽位元数据载荷（无凭据红线，见 omnicodeAccountMaterial.ts）。
+import type {
+  OmnicodeAccountDirectoryListResultPayload,
+  OmnicodeAccountSlotsResultPayload,
+} from "./omnicodeAccountMaterial.js";
 import type { OmnicodeTakeoverOutcome } from "./omnicodeTakeover.js";
 import type {
   DockerConnectOptions,
@@ -1687,6 +1692,18 @@ export interface IPlatformService {
   onOmnicodeAccountClaimEvent?(
     handler: (payload: OmnicodeAccountClaimEventPayload) => void,
   ): () => void;
+  /**
+   * [OmniCode] 模式二 R3（spec: docs/omnicode/multi-account-sessions.md §7）：读附加账号
+   * 目录元数据列表（选择器账号层 + 任务徽标显示名数据源）。**元数据 only**——凭据/
+   * deviceMid 永不进 renderer（红线）。仅 omnicode 实例 Desktop（官方/管理器/旧 preload
+   * 缺席 → 消费面不渲染账号层）。
+   */
+  getOmnicodeAccountDirectoryList?(): Promise<OmnicodeAccountDirectoryListResultPayload>;
+  /**
+   * [OmniCode] 模式二 R3（spec §6/§7）：读调度器槽位用量快照（running/上限，元数据 only）。
+   * ok=false（Host 缺席/官方装配）→ 消费方隐藏槽位可视化。仅 omnicode 实例 Desktop。
+   */
+  getOmnicodeAccountSlots?(): Promise<OmnicodeAccountSlotsResultPayload>;
 
   // [OmniCode] 实例专属登录浏览器：失败态恢复入口（手动粘贴完整 OAuth 回调 URL，spec:
   // docs/omnicode/instance-login-browser.md）。accepted=false 表示回调未被接收

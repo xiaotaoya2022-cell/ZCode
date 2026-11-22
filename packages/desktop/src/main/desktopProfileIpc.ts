@@ -60,7 +60,10 @@ import {
 import { mergeOmnicodeConsoleUiState } from "./omnicode/consoleUiState.js";
 // [OmniCode] 模式二 R2（spec: docs/omnicode/multi-account-sessions.md §5）：管理器侧
 // 附加账号解密代理（桥钩子消费；管理器唯一解密权威，材料内存现取不落盘不进日志）。
-import { resolveOmnicodeBridgeAccountMaterial } from "./omnicode/accountDirectory.js";
+import {
+  listOmnicodeBridgeAccounts,
+  resolveOmnicodeBridgeAccountMaterial,
+} from "./omnicode/accountDirectory.js";
 // [OmniCode] 丙1 远程聚合 R3（spec: docs/omnicode/remote-aggregation.md §4/§5/§8-R3）：
 // 跨实例桥转发装配（目录查询/转投 + 上行钩子消费；经 contract 面与 takeover 同款约定）。
 import {
@@ -294,6 +297,26 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
               accountId: request.accountId,
               requesterProfileId: profileId,
             }),
+          // [OmniCode] 模式二 R3（spec: docs/omnicode/multi-account-sessions.md §7）：实例
+          // 附加账号目录元数据查询 → 管理器目录枚举。**元数据 only**：逐 profile 枚举后
+          // 裁剪为 accountId/sourceProfileId/family/displayName——deviceMid 与任何凭据
+          // 材料永不越过本边界（红线）。仅 omnicode flavor 装配（钩子缺席=官方零改动）。
+          onAccountDirectoryListRequest: async (profileId: string) => {
+            try {
+              const entries = await listOmnicodeBridgeAccounts({ excludeProfileId: profileId });
+              return {
+                ok: true,
+                accounts: entries.map((entry) => ({
+                  accountId: entry.accountId,
+                  sourceProfileId: entry.sourceProfileId,
+                  family: entry.family,
+                  displayName: entry.displayName,
+                })),
+              };
+            } catch {
+              return { ok: false, error: "account_directory_unavailable" };
+            }
+          },
         }
       : {}),
     // [OmniCode] D12 接管流：观察者→持有者转投 + 回执路由（身份绑定认证在桥服务侧

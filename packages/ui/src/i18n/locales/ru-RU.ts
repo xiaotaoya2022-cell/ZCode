@@ -6373,6 +6373,10 @@ const ruRU: Record<string, string> = {
   "chat.toolbar.combined.effort": "Рассуждение",
   "chat.toolbar.combined.selectModel": "Выбрать модель",
   "chat.toolbar.model.label": "Выбор модели",
+  "chat.omnicode.accountLayer": "Аккаунт",
+  "chat.omnicode.accountPrimary": "Основной аккаунт",
+  "chat.omnicode.accountAuto": "Авто",
+  "chat.omnicode.accountSlotsTooltip": "Выполняется {running} / лимит {limit}",
   "chat.toolbar.draftConfigWriteFailed": "Не удалось обновить конфигурацию. Повторите попытку.",
   "chat.toolbar.model.description":
     "Выберите модель для этой задачи. Сочетание клавиш открывает меню моделей.",
@@ -8819,6 +8823,10 @@ const ruRU: Record<string, string> = {
   "console.maintenance.actionFailed": "Действие не удалось. Повторите.",
   "console.instanceFilterPlaceholder": "Фильтр экземпляров (имя/№)",
   // [OmniCode] D12 поток перехвата: кнопка баннера наблюдателя + тосты результатов + диалог подтверждения владельца（五語慣例）
+  "settings.omnicodeProfiles.smartScheduling": "Умное планирование",
+  "settings.omnicodeProfiles.smartSchedulingDescription":
+    "Если включено, новые задачи автоматически назначаются аккаунту с наибольшим числом свободных слотов; выключено — полностью вручную.",
+  "settings.omnicodeProfiles.smartSchedulingSaveError": "Не удалось сохранить настройку умного планирования. Повторите попытку",
   "omnicode.takeover.bannerButton": "Запросить перехват",
   "omnicode.takeover.bannerPending": "Ожидание ответа…",
   "omnicode.takeover.requestFailed": "Не удалось отправить запрос перехвата (экземпляр не подключён к менеджеру). Повторите позже.",

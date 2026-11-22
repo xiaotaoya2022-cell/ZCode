@@ -99,6 +99,11 @@ import { logger } from "@/logger.js";
 import { useCodingPlanUpgradeDialog } from "@/settings/CodingPlanUpgradeDialogProvider.js";
 import { useCodingPlanEntitlements } from "@/settings/model-provider-section/useCodingPlanEntitlements.js";
 import { decodeCustomModelValue, encodeCustomModelValue } from "@/lib/zcodeCustomModelValue.js";
+// [OmniCode] 模式二 R3：选择器账号层（spec: docs/omnicode/multi-account-sessions.md §7）。
+// 传入 omnicodeAccountMenu（附加账号清单非空 ∧ omnicode 实例桥可用）才渲染账号层区块；
+// 官方调用方不传 → 逐字不变。
+import { ComposerOmnicodeAccountMenu } from "@/omnicode/ComposerOmnicodeAccountMenu.js";
+import type { ComposerOmnicodeAccountGroup } from "@/lib/composerPlanGroups.js";
 import { buildRegistryModelSelectGroups } from "@/lib/modelSelectionGroups.js";
 import {
   buildCodingPlanUsageSources,
@@ -438,6 +443,17 @@ export interface V4ComposerToolbarProps {
     sourceModel: ModelSelectionSource | null,
   ) => Promise<void> | void;
   onSendCompressionCommand?: (command: string) => void;
+  /**
+   * [OmniCode] 模式二 R3：选择器账号层（spec §7——三层：账号 → 套餐 → 模型）。undefined
+   * （官方调用方 / 目录为空 / 平台桥缺席）= 不渲染，官方逐字不变；选中回调把会话账号
+   * 写入 omnicode 账号选择 store，下一次 sendText 随 payload.omnicodeAccountId 透传
+   * （R1.5 管道）。
+   */
+  omnicodeAccountMenu?: {
+    groups: readonly ComposerOmnicodeAccountGroup[];
+    selectedAccountId: string | null;
+    onSelect: (accountId: string | null) => void;
+  };
 }
 
 /** 模型 / 思考深度 / context usage 簇（渲染在发送键左侧，与旧 UI 同位）。 */
@@ -470,6 +486,7 @@ function V4ComposerModelControlsImpl({
   onSelectThought,
   onSendCompressionCommand,
   onRecoverCustomModelSelection,
+  omnicodeAccountMenu,
 }: V4ComposerToolbarProps) {
   const { intl, locale } = useZCodeIntl();
   const { openCodingPlanUpgrade } = useCodingPlanUpgradeDialog();
@@ -859,6 +876,20 @@ function V4ComposerModelControlsImpl({
     });
   }, [draftMode, effectiveConfig, modelSelectionView?.revision]);
 
+  // [OmniCode] 模式二 R3：账号层区块（传入了 omnicodeAccountMenu 且目录非空才构建；
+  // 官方路径 omnicodeAccountMenu=undefined → accountSection=undefined，逐字不变）。
+  const omnicodeAccountSection = useMemo(
+    () =>
+      omnicodeAccountMenu && omnicodeAccountMenu.groups.length > 0 ? (
+        <ComposerOmnicodeAccountMenu
+          groups={omnicodeAccountMenu.groups}
+          selectedAccountId={omnicodeAccountMenu.selectedAccountId}
+          onSelect={omnicodeAccountMenu.onSelect}
+        />
+      ) : undefined,
+    [omnicodeAccountMenu],
+  );
+
   const modelGroupLabels = useMemo(
     () => ({
       apiKeyLabel: intl.formatMessage({ id: "settings.modelProvider.apiKey" }),
@@ -1170,6 +1201,8 @@ function V4ComposerModelControlsImpl({
         pending: connectionSwitch.pending || modelSelectionPending,
         // 团队目录查询不是用户的连接切换操作，不能把登录错误挂到 API 菜单。
         error: connectionSwitch.error,
+        // [OmniCode] 模式二 R3：账号层区块（undefined=官方路径零改动）。
+        ...(omnicodeAccountSection ? { accountSection: omnicodeAccountSection } : {}),
         onSelect: (group) => {
           // 原因：展示失败时设置可能已成功；已选连接仍须允许重试，不能被同 key 短路。
           if (group.key === selectedPlanKey && !connectionSwitch.error) return;
@@ -1223,6 +1256,7 @@ function V4ComposerModelControlsImpl({
       thoughtOption,
       displayProvider,
       handleThoughtValueChange,
+      omnicodeAccountSection,
     ],
   );
   const isModelOptionLocked = useCallback(() => false, []);

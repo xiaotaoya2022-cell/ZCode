@@ -6394,6 +6394,10 @@ const jaJP: Record<string, string> = {
   "chat.toolbar.combined.effort": "強度",
   "chat.toolbar.combined.selectModel": "モデルを選択",
   "chat.toolbar.model.label": "モデルを選択",
+  "chat.omnicode.accountLayer": "アカウント",
+  "chat.omnicode.accountPrimary": "メインアカウント",
+  "chat.omnicode.accountAuto": "自動",
+  "chat.omnicode.accountSlotsTooltip": "実行中 {running} / 上限 {limit}",
   "chat.toolbar.draftConfigWriteFailed": "構成の更新に失敗しました。もう一度お試しください。",
   "chat.toolbar.model.description":
     "このタスクで使用するモデルを選択します。ショートカットでモデルメニューを開けます。",
@@ -8855,6 +8859,10 @@ const jaJP: Record<string, string> = {
   "console.maintenance.actionFailed": "操作に失敗しました。再試行してください。",
   "console.instanceFilterPlaceholder": "インスタンス絞り込み（名前/番号）",
   // [OmniCode] D12 接管流：观察者横幅按钮 + 回执トースト + 保持側確認ダイアログ（五語慣例）
+  "settings.omnicodeProfiles.smartScheduling": "スマートスケジューリング",
+  "settings.omnicodeProfiles.smartSchedulingDescription":
+    "オンにすると、残り同時実行スロットが最も多いアカウントへ新しいタスクを自動割り当てします。オフの場合は完全手動です。",
+  "settings.omnicodeProfiles.smartSchedulingSaveError": "スマートスケジューリング設定の保存に失敗しました。再試行してください",
   "omnicode.takeover.bannerButton": "テイクオーバーを要求",
   "omnicode.takeover.bannerPending": "応答を待っています…",
   "omnicode.takeover.requestFailed": "テイクオーバー要求の送信に失敗しました（インスタンスがマネージャーに未接続）。後でもう一度お試しください。",

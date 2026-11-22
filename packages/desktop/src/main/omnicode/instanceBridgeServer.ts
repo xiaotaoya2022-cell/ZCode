@@ -73,6 +73,10 @@ export interface OmnicodeInstanceBridgeCommand {
     // accountMaterialResult = 附加账号材料取回的应答（管理器 → 实例；requestId 关联
     // 实例侧 pending 请求；ok=false 时实例 Host 回落 local 文件来源提供者）。
     | "accountMaterialResult"
+    // [OmniCode] 模式二 R3（spec §7）：accountDirectoryListResult = 附加账号目录元数据
+    // 查询的应答（管理器 → 实例；requestId 关联实例侧 pending；条目为元数据 only，
+    // 凭据/deviceMid 永不出管理器——红线）。
+    | "accountDirectoryListResult"
     // [OmniCode] 丙1 远程聚合 R4 failover（spec: docs/omnicode/remote-aggregation.md §6）：
     // 宿主变更广播（宿主退出 → epoch+1；本阶段不做宿主自动转移——实例按 epoch 判新旧
     // 并刷新本地目录视图缓存，载荷按 R1 omnicodeRemoteHostAnnounceMessageSchema 校验）。
@@ -97,6 +101,10 @@ export interface OmnicodeInstanceBridgeCommand {
   accountRequestId?: string;
   /** accountMaterialResult 命令的结果载荷（ok=false 时实例回落 local 文件来源）。 */
   accountResult?: { ok: boolean; dataBase64?: string; error?: string };
+  // [OmniCode] 模式二 R3：accountDirectoryListResult 命令载荷（requestId 关联实例侧 pending 表）。
+  accountDirectoryRequestId?: string;
+  /** accountDirectoryListResult 命令的结果载荷（元数据 only；ok=false 只带结构化错误键）。 */
+  accountDirectoryResult?: { ok: boolean; accounts?: unknown[]; error?: string };
   // [OmniCode] 丙1 远程聚合 R4 failover：remoteHostAnnounce 命令载荷（R1 schema 校验）。
   hostProfileId?: string;
   epoch?: number;
@@ -168,6 +176,17 @@ export interface OmnicodeInstanceBridgeManagerHooks {
     profileId: string,
     request: OmnicodeAccountMaterialRequestPayload,
   ) => Promise<{ ok: boolean; dataBase64?: string; error?: string }>;
+  /**
+   * [OmniCode] 模式二 R3（spec: docs/omnicode/multi-account-sessions.md §7）：实例附加账号
+   * 目录元数据查询。管理器仍是唯一枚举权威：钩子内经附加账号目录逐 profile 只读枚举，
+   * 并**裁剪为元数据 only**（accountId/sourceProfileId/family/displayName）——deviceMid
+   * 与任何凭据材料永不越过本边界（红线）。钩子缺席（官方 flavor / 未装配）时桥服务回
+   * 结构化错误，实例侧目录显示为空。首参 profileId = 桥握手已验连接真身（排除请求方
+   * 自身的主账号 profile）。
+   */
+  onAccountDirectoryListRequest?: (
+    profileId: string,
+  ) => Promise<{ ok: boolean; accounts?: unknown[]; error?: string }>;
   // ─── [OmniCode] D12 接管流（spec: docs/omnicode/profile-runtime.md §批次3 D12）───
   // 三个钩子的首参都是桥握手已验的连接身份（senderProfileId）——请求方/回执方绑定认证
   // 在这里完成，协调器不信任任何载荷自报身份。
@@ -422,6 +441,43 @@ export function startOmnicodeInstanceBridgeServer(
                   error instanceof Error && error.message
                     ? error.message
                     : "account_material_fetch",
+              }),
+            );
+          return;
+        }
+        // [OmniCode] 模式二 R3：实例附加账号目录元数据查询。管理器是唯一枚举权威（钩子
+        // 内逐 profile 只读枚举并裁剪为元数据 only）；钩子缺席（官方 flavor/未装配）回
+        // 结构化错误，实例侧目录显示为空。应答只回请求实例（requestId 关联）。
+        if (message.type === "accountDirectoryList") {
+          const requestId = (message as { requestId?: unknown }).requestId;
+          const reply = (result: { ok: boolean; accounts?: unknown[]; error?: string }) => {
+            const socket = connectionsByProfileId.get(profileIdParam);
+            if (socket && socket.readyState === 1) {
+              socket.send(
+                JSON.stringify({
+                  type: "accountDirectoryListResult",
+                  ...(typeof requestId === "string" && requestId
+                    ? { accountDirectoryRequestId: requestId }
+                    : {}),
+                  accountDirectoryResult: result,
+                }),
+              );
+            }
+          };
+          if (typeof requestId !== "string" || !requestId) {
+            reply({ ok: false, error: "account_directory_request" });
+            return;
+          }
+          void Promise.resolve()
+            .then(() => managerHooks?.onAccountDirectoryListRequest?.(profileIdParam))
+            .then((result) =>
+              reply(result ?? { ok: false, error: "account_directory_unavailable" }),
+            )
+            .catch((error: unknown) =>
+              reply({
+                ok: false,
+                error:
+                  error instanceof Error && error.message ? error.message : "account_directory_fetch",
               }),
             );
           return;

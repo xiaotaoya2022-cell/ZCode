@@ -82,6 +82,21 @@ export type OmnicodeAccountMaterialFetchReply = {
 };
 /** 附加账号材料取回总预算：管理器本地解密链（bounded 读 + 逐字段解密）+ 回环两跳。 */
 export const OMNICODE_ACCOUNT_MATERIAL_FETCH_TIMEOUT_MS = 15_000;
+// [OmniCode] 模式二 R3（spec: docs/omnicode/multi-account-sessions.md §7）：附加账号目录
+// 元数据查询的在途请求表。管理器侧逐 profile 只读枚举（本地盘扫描），预算与材料同量级；
+// 条目为元数据 only（凭据/deviceMid 永不出管理器——红线）。
+const pendingAccountDirectoryRequests = new Map<
+  string,
+  { resolve: (result: OmnicodeAccountDirectoryFetchReply) => void; timer: NodeJS.Timeout }
+>();
+/** 附加账号目录取回应答载荷（ok=false 时实例侧目录显示为空）。 */
+export type OmnicodeAccountDirectoryFetchReply = {
+  ok: boolean;
+  accounts?: unknown[];
+  error?: string;
+};
+/** 附加账号目录取回总预算：管理器逐 profile 只读枚举（bounded 读）+ 回环两跳。 */
+export const OMNICODE_ACCOUNT_DIRECTORY_FETCH_TIMEOUT_MS = 15_000;
 
 function getPrimaryInstanceWindow(): BrowserWindow | undefined {
   // 实例是单主窗口应用（primaryWindowCoordinator 单飞）
@@ -201,7 +216,7 @@ function releaseEmbed(win: BrowserWindow): void {
   restoreDesktopWindowConstraints(win);
 }
 
-function applyCommand(command: { type?: string; bounds?: unknown; path?: unknown; rects?: unknown; prefs?: unknown; sourceInstanceId?: unknown; title?: unknown; assetRequestId?: unknown; assetResult?: unknown; accountRequestId?: unknown; accountResult?: unknown }): void {
+function applyCommand(command: { type?: string; bounds?: unknown; path?: unknown; rects?: unknown; prefs?: unknown; sourceInstanceId?: unknown; title?: unknown; assetRequestId?: unknown; assetResult?: unknown; accountRequestId?: unknown; accountResult?: unknown; accountDirectoryRequestId?: unknown; accountDirectoryResult?: unknown }): void {
   // [OmniCode] D12 接管流：takeoverRequest（转投持有者）/ takeoverResult（回执通知
   // 观察者）不依赖窗口存在性判断的其余分支——转发前自行校验（shared schema）+ 惰性取
   // 主窗口（渲染层未就绪的确认请求由管理器死线按 timeout 收口）。
@@ -260,6 +275,30 @@ function applyCommand(command: { type?: string; bounds?: unknown; path?: unknown
             ...(typeof result.error === "string" ? { error: result.error } : {}),
           }
         : { ok: false, error: "account_material_reply" },
+    );
+    return;
+  }
+  // [OmniCode] 模式二 R3：accountDirectoryListResult 应答不依赖窗口存在性——按 requestId
+  // 关联 pending 表（迟到/陌生 requestId 直接丢弃防串扰；条目由 accountDirectoryClient
+  // 按 shared schema 逐条校验后才进缓存/renderer/Host，防桥载荷放大）。
+  if (command.type === "accountDirectoryListResult") {
+    const requestId =
+      typeof command.accountDirectoryRequestId === "string"
+        ? command.accountDirectoryRequestId
+        : "";
+    const pending = pendingAccountDirectoryRequests.get(requestId);
+    if (!pending) return;
+    pendingAccountDirectoryRequests.delete(requestId);
+    clearTimeout(pending.timer);
+    const result = command.accountDirectoryResult as OmnicodeAccountDirectoryFetchReply | undefined;
+    pending.resolve(
+      result && typeof result === "object"
+        ? {
+            ok: result.ok === true,
+            ...(Array.isArray(result.accounts) ? { accounts: result.accounts } : {}),
+            ...(typeof result.error === "string" ? { error: result.error } : {}),
+          }
+        : { ok: false, error: "account_directory_reply" },
     );
     return;
   }
@@ -580,6 +619,12 @@ export function startOmnicodeInstanceBridgeClient(): void {
         pending.resolve({ ok: false, error: "bridge_disconnected" });
       }
       pendingAccountMaterialRequests.clear();
+      // [OmniCode] 模式二 R3：断连同样即失败全部在途目录查询（实例侧目录显示为空）。
+      for (const pending of pendingAccountDirectoryRequests.values()) {
+        clearTimeout(pending.timer);
+        pending.resolve({ ok: false, error: "bridge_disconnected" });
+      }
+      pendingAccountDirectoryRequests.clear();
       // [OmniCode] D12 接管流：断连清持有者在途确认簿记（管理器死线按 timeout 收口）。
       clearOmnicodeTakeoverInstanceState();
       stopHelloLoop();
@@ -671,6 +716,43 @@ export function requestOmnicodeAccountMaterialFromManager(
       pendingAccountMaterialRequests.delete(requestId);
       clearTimeout(timer);
       resolve({ ok: false, error: "account_material_send" });
+    }
+  });
+}
+
+/**
+ * [OmniCode] 模式二 R3（spec: docs/omnicode/multi-account-sessions.md §7）：实例 → 管理器
+ * 附加账号目录元数据查询（requestId 关联，超时/断连即失败 → 实例侧目录显示为空）。
+ * 管理器是唯一枚举权威；条目元数据 only（凭据/deviceMid 永不出管理器——红线）。
+ * 未回连立刻失败（不等待重连）。
+ */
+export function requestOmnicodeAccountDirectoryFromManager(
+  timeoutMs: number = OMNICODE_ACCOUNT_DIRECTORY_FETCH_TIMEOUT_MS,
+): Promise<OmnicodeAccountDirectoryFetchReply> {
+  const ws = activeReportSocket;
+  if (!ws || ws.readyState !== 1) {
+    return Promise.resolve({ ok: false, error: "bridge_disconnected" });
+  }
+  const requestId = randomUUID();
+  return new Promise<OmnicodeAccountDirectoryFetchReply>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingAccountDirectoryRequests.delete(requestId);
+      resolve({ ok: false, error: "account_directory_timeout" });
+    }, Math.max(1_000, timeoutMs));
+    timer.unref?.();
+    pendingAccountDirectoryRequests.set(requestId, {
+      resolve: (result) => {
+        clearTimeout(timer);
+        resolve(result);
+      },
+      timer,
+    });
+    try {
+      ws.send(JSON.stringify({ type: "accountDirectoryList", requestId, request: {} }));
+    } catch {
+      pendingAccountDirectoryRequests.delete(requestId);
+      clearTimeout(timer);
+      resolve({ ok: false, error: "account_directory_send" });
     }
   });
 }

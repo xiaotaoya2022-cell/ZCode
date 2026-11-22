@@ -2468,6 +2468,21 @@ exceptions:
     paths:
       - packages/shared/src/omnicodeAccountMaterial.ts
     reason: OmniCode multi-account mode R2 reserve defines the bridge-proxy account material request/result message payload shapes consumed by desktop main (routing placeholder) and the host side; a strict-zod shared contract is the only shared home, mirroring the omnicodeSharedAssets admission pattern, and adopting the whole shared module is out of scope for this feature.
+  # [OmniCode] 模式二 R3/R4：选择器账号层 / 任务账号徽标 / 槽位可视化的 ui 精确路径准入
+  #（同 omnide-profile-runtime-unmanaged-new-files 先例）。账号层 = composer 三层选择器的
+  # omnicode 门控区块（官方 flavor 不渲染，官方逐字不变）；徽标/槽位 = 任务列表与调度器
+  # 计数的元数据展示面；智能调度开关 = 管理器设置 omnicode 分区的布尔行（读写既有
+  # omnicodeGlobalPrefs 键体系）。全部元数据 only，零凭据字段（spec 红线）；采纳整个 ui
+  # 模块树不属于本特性。
+  - id: omnicode-multi-account-r3-ui
+    rule: unmanaged-new-file
+    paths:
+      - packages/ui/src/omnicode/omnicodeAccountUi.ts
+      - packages/ui/src/omnicode/useOmnicodeComposerAccountMenu.ts
+      - packages/ui/src/omnicode/ComposerOmnicodeAccountMenu.tsx
+      - packages/ui/src/omnicode/TaskAccountBadge.tsx
+      - packages/ui/src/settings/OmnicodeSmartSchedulingSetting.tsx
+    reason: OmniCode multi-account mode R3 adds the gated composer account layer (three-layer selector), task-list account badge, scheduler slot visualization and the R4 smart-scheduling toggle row; all files are OmniCode-fork feature additions rendering only when the omnicode instance bridge exposes the account directory (official flavor unchanged verbatim), mirroring the omnide-profile-runtime-unmanaged-new-files admission pattern, and adopting the whole ui module tree needs a separate boundary refactor.
   # [OmniCode] M4c Browser Relay：relay 频道实现自 packages/server 迁入 services（精确路径准入）。
   # 远端 workspace 的 server 有两个形态——stdio bundle（@zcode/server entry-stdio/entry-http）
   # 与 zcode-server-cli 的 Source Server Core；依赖边界禁止 zcode-server-cli 反向依赖

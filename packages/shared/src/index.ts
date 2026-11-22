@@ -163,11 +163,22 @@ export {
   omnicodeAccountMaterialFileSchema,
   omnicodeAccountMaterialRequestPayloadSchema,
   omnicodeAccountMaterialResultPayloadSchema,
+  // [OmniCode] 模式二 R3：附加账号目录/槽位元数据契约（无凭据红线）。
+  omnicodeAccountDirectoryEntrySchema,
+  omnicodeAccountDirectoryListRequestPayloadSchema,
+  omnicodeAccountDirectoryListResultPayloadSchema,
+  omnicodeAccountSlotUsageSchema,
+  omnicodeAccountSlotsResultPayloadSchema,
 } from "./omnicodeAccountMaterial.js";
 export type {
   OmnicodeAccountMaterialFileData,
   OmnicodeAccountMaterialRequestPayload,
   OmnicodeAccountMaterialResultPayload,
+  OmnicodeAccountDirectoryEntry,
+  OmnicodeAccountDirectoryListRequestPayload,
+  OmnicodeAccountDirectoryListResultPayload,
+  OmnicodeAccountSlotUsage,
+  OmnicodeAccountSlotsResultPayload,
 } from "./omnicodeAccountMaterial.js";
 // [OmniCode] D12 请求接管流：七态状态机 + 桥命令 schema（spec:
 // docs/omnicode/profile-runtime.md §批次3 D12）

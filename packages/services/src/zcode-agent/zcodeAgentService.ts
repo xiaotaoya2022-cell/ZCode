@@ -29,6 +29,14 @@ import {
   runWithOmnicodeSessionAccountScope,
   type OmnicodeSessionAccountScopeRegistry,
 } from "#src/omnicode/sessionAccountScope.js";
+// [OmniCode] 模式二 R3/R4：调度器（并发计数 + pickAccount）与绑定决策纯函数。
+import {
+  OMNICODE_ACCOUNT_DEFAULT_CONCURRENCY_LIMIT,
+  type OmnicodeAccountScheduler,
+} from "#src/omnicode/accountScheduler.js";
+import {
+  shouldBindOmnicodeSessionAccount,
+} from "#src/omnicode/sessionAccountBinding.js";
 import { createAppControlReverseRpc } from "#src/app-control/index.js";
 import type { AppControlService } from "#src/app-control/contract.js";
 import { SessionControlError } from "@zcode/session-control/contracts";
@@ -1235,6 +1243,14 @@ interface CreateZCodeAgentServiceBaseOptions extends Omit<
   // 会话→附加账号绑定注册表（node.ts 装配注入）。缺省（官方/远端装配）→ undefined，
   // resolveAccountRequestAuth 走官方路径逐字不变。
   omnicodeSessionAccountScopes?: OmnicodeSessionAccountScopeRegistry;
+  // [OmniCode] 模式二 R3/R4（spec §6/§7）：调度器 + 目录候选 + 智能调度开关读取点
+  //（node.ts 装配注入；桌面 v4 sendText 的会话绑定/自动挑选在这三个注入点上裁决）。
+  // 三者任一缺席（官方/远端装配）→ 桌面 v4 路径零绑定零挑选，官方行为逐字不变。
+  omnicodeAccountScheduler?: OmnicodeAccountScheduler;
+  /** 附加账号候选（注册表序；pickAccount 平局稳定依据）。缺席 → 智能挑选关闭。 */
+  omnicodeAccountDirectoryCandidates?: () => Promise<readonly string[]>;
+  /** 智能调度开关读取点（omnicodeSmartScheduling setting.json 键；缺席/读取失败 → 关）。 */
+  isOmnicodeSmartSchedulingEnabled?: () => Promise<boolean>;
   channelReplyExecutor?: (request: ChannelReplyHostRequest) => Promise<ChannelReplyResult>;
   topicResourceExecutor?: (
     request: ZCodeTopicResourceReadParams &
@@ -1767,6 +1783,11 @@ export function createZCodeAgentService(
   // [OmniCode] 模式二 R1.5：会话→附加账号绑定注册表（node.ts 装配注入；官方装配缺省
   // undefined → 下方包裹决策恒 false，官方路径逐字不变）。
   const omnicodeSessionAccountScopes = options?.omnicodeSessionAccountScopes;
+  // [OmniCode] 模式二 R3/R4：调度器槽位收口 + 用量快照（元数据 only；调度器缺席 = 空）。
+  const releaseOmnicodeAccountSlot = (workspace: ZCodeAgentWorkspaceTarget, sessionId: string): void => {
+    options?.omnicodeAccountScheduler?.releaseFinish(sessionId);
+    void workspace;
+  };
   const accountProviderConfigSource = options?.accountProviderConfigSource;
   const modelSelectionReadinessSource = options?.modelSelectionReadinessSource;
   const sessionRuntimePreferencesAuthority = options?.sessionRuntimePreferencesAuthority ?? "local";
@@ -2808,6 +2829,20 @@ export function createZCodeAgentService(
             // v4 会话不会投影 legacy session/event，CUA 提示必须直接消费 runtime sideband，
             // 避免把两条独立事件流的 sequenceNumber/seq 混为同一顺序域。
             cuaOperationTurnTracker?.accept(workspace, parsed.data);
+            // [OmniCode] 模式二 R3/R4（spec §6）：调度器并发计数随 turn 生命周期收口——
+            // 绑定在 sendText 派发时登记（registerStart），turn 终态（completed/failed）或
+            // 会话关闭时释放（releaseFinish）；下次发送重新登记。omnicode 门控外无注册表
+            // 消费，releaseFinish 对未登记会话 no-op，官方路径零影响。
+            if (parsed.data.kind === "turn-completed" || parsed.data.kind === "turn-failed") {
+              releaseOmnicodeAccountSlot(workspace, parsed.data.sessionId);
+            } else if (parsed.data.kind === "session-closed") {
+              releaseOmnicodeAccountSlot(workspace, parsed.data.sessionId);
+              // 会话关闭同时解除凭据作用域绑定（register 表有界 FIFO 兜底之外的显式回收）。
+              omnicodeSessionAccountScopes?.unbind({
+                workspaceKey: resolveWorkspaceKey(workspace),
+                sessionId: parsed.data.sessionId,
+              });
+            }
           } else {
             logger.warn(undefined, "丢弃无效 ZCode Protocol Computer Use operation event", {
               issues: parsed.error.issues.map((issue) => ({
@@ -7104,6 +7139,50 @@ export function createZCodeAgentService(
       };
       // 来自 UI 的同名字段永远不是授权；relay 透传的是下游握手。旧 CLI 严格校验，缺席比发送 false 安全。
       delete envelope.pluginDiscoveryUi;
+      // [OmniCode] 模式二 R3/R4（spec: docs/omnicode/multi-account-sessions.md §6/§7）：
+      // sendText 的 omnicodeAccountId 会话绑定 + 智能调度缺省挑选（R1.5 管道之外的桌面
+      // v4 主链收口点）。注入三依赖任一缺席（官方/远端装配）或门控关 → 决策恒 no-bind
+      // 且仅剥离显式字段（官方路径逐字不变）；绑定后该字段不再转发 CLI（官方执行端零触碰）。
+      if (envelope.type === "sendText" && omnicodeSessionAccountScopes) {
+        const sendPayload = envelope.payload as { omnicodeAccountId?: unknown } | undefined;
+        const explicitAccountId =
+          typeof sendPayload?.omnicodeAccountId === "string" && typeof envelope.sessionId === "string"
+            ? sendPayload.omnicodeAccountId
+            : null;
+        const decision = shouldBindOmnicodeSessionAccount({
+          gateActive: omnicodeSessionAccountScopes.isActive(),
+          explicitAccountId,
+          smartEnabled: options?.isOmnicodeSmartSchedulingEnabled
+            ? await options.isOmnicodeSmartSchedulingEnabled().catch(() => false)
+            : false,
+          candidates: options?.omnicodeAccountDirectoryCandidates
+            ? await options.omnicodeAccountDirectoryCandidates().catch(() => [])
+            : [],
+          pickAccount: options?.omnicodeAccountScheduler
+            ? (candidates) => options.omnicodeAccountScheduler!.pickAccount(candidates)
+            : null,
+        });
+        if (decision.accountId && typeof envelope.sessionId === "string") {
+          // 绑定登记（凭据作用域）+ 调度器并发计数（换账号 = 旧计数先释放再计入新账号）。
+          omnicodeSessionAccountScopes.bind({
+            workspaceKey: resolveWorkspaceKey(params),
+            sessionId: envelope.sessionId,
+            accountId: decision.accountId,
+          });
+          options?.omnicodeAccountScheduler?.registerStart({
+            sessionId: envelope.sessionId,
+            accountId: decision.accountId,
+          });
+        }
+        if (
+          typeof envelope.payload === "object" &&
+          envelope.payload !== null &&
+          "omnicodeAccountId" in envelope.payload
+        ) {
+          const { omnicodeAccountId: _bound, ...rest } = envelope.payload as Record<string, unknown>;
+          envelope = { ...envelope, payload: rest };
+        }
+      }
       if (
         envelope.type === "createSession" &&
         envelope.payload &&
@@ -7221,6 +7300,28 @@ export function createZCodeAgentService(
       });
       const client = await getReadOnlyClient(params);
       return client.request(V4_METHODS.commandsQuery, query, commandsQueryResultSchema);
+    },
+
+    // [OmniCode] 模式二 R3（spec: docs/omnicode/multi-account-sessions.md §6/§7）：
+    // 调度器槽位用量快照（running/上限；元数据 only，绝不携带任何凭据材料）。
+    // 调度器缺席（官方/远端装配）恒空数组——消费方据此隐藏槽位可视化面。
+    async getOmnicodeAccountSlots() {
+      const scheduler = options?.omnicodeAccountScheduler;
+      if (!scheduler) return [];
+      const candidates = options?.omnicodeAccountDirectoryCandidates
+        ? await options.omnicodeAccountDirectoryCandidates().catch(() => [])
+        : [];
+      const slots: { accountId: string; running: number; limit: number }[] = [];
+      for (const accountId of candidates) {
+        const key = accountId.trim();
+        if (!key || scheduler.runningCountOf(key) === 0) continue;
+        slots.push({
+          accountId: key,
+          running: scheduler.runningCountOf(key),
+          limit: OMNICODE_ACCOUNT_DEFAULT_CONCURRENCY_LIMIT,
+        });
+      }
+      return slots;
     },
 
     async attachmentBeginV4(params: ZCodeAgentAttachmentBeginParams) {

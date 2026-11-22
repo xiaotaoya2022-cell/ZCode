@@ -41,6 +41,8 @@ export interface ComposerModelOptions {
     pending: boolean;
     error: string | null;
     onSelect: (group: ComposerPlanGroup) => void;
+    /** [OmniCode] 模式二 R3：账号层区块（渲染在套餐 radio 组上方；官方不传=零改动）。 */
+    accountSection?: ReactNode;
   };
   providerLabel: string;
   modelsLabel: string;
@@ -160,6 +162,7 @@ export function ComposerModelMenu({
         error={options.providerMenu?.error}
         disabled={options.providerMenu?.pending}
         loading={options.providerMenu?.pending}
+        accountSection={options.providerMenu?.accountSection}
         isDisabled={(candidate) => Boolean((candidate as ComposerPlanGroup).connection?.disabled)}
         separatorBeforeKey={
           options.providerMenu

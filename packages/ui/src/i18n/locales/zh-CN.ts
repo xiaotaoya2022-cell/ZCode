@@ -4073,6 +4073,10 @@ const zhCN: Record<string, string> = {
     "登录后即可在此实例开始工作；实例的创建与管理请回到 OmniCode 实例管理中枢。",
   "settings.omnicodeProfiles.description":
     "为每个账号创建独立隔离的 ZCode 实例：凭据、会话、浏览器存储互不相通，重启不掉线。启动的实例与本窗口并行运行。",
+  "settings.omnicodeProfiles.smartScheduling": "智能调度",
+  "settings.omnicodeProfiles.smartSchedulingDescription":
+    "开启后自动把新任务分派到剩余并发槽最多的账号，无需手动选择；关闭后完全手动。",
+  "settings.omnicodeProfiles.smartSchedulingSaveError": "智能调度设置保存失败，请重试",
   "settings.omnicodeProfiles.namePlaceholder": "实例名称（如：工作号）",
   "settings.omnicodeProfiles.notesPlaceholder": "备注（可选）",
   "settings.omnicodeProfiles.create": "新建实例",
@@ -6517,6 +6521,10 @@ const zhCN: Record<string, string> = {
   "chat.toolbar.combined.effort": "思考强度",
   "chat.toolbar.combined.selectModel": "选择模型",
   "chat.toolbar.model.label": "选择模型",
+  "chat.omnicode.accountLayer": "账号",
+  "chat.omnicode.accountPrimary": "主账号",
+  "chat.omnicode.accountAuto": "自动",
+  "chat.omnicode.accountSlotsTooltip": "运行中 {running} / 上限 {limit}",
   "chat.toolbar.draftConfigWriteFailed": "配置修改失败，请重试",
   "chat.toolbar.model.description": "选择当前任务使用的模型。快捷键只打开模型菜单。",
   "chat.agentSwitch.switchTo": "{provider}",

@@ -63,6 +63,9 @@ import { logger } from "@/logger.js";
 import { runUserAction, runUserActionAsync } from "@/lib/userActionTelemetry.js";
 import { TaskRowActionButton } from "@/workspace-grouped-tasks/task-row-action-button.js";
 import { TaskWorkflowRunLines } from "@/components/workflow-run-line/TaskWorkflowRunLines.js";
+// [OmniCode] 模式二 R3：任务账号徽标 + 目录快照订阅（未绑定/缺席 → 徽标不渲染，官方零改动）。
+import { TaskAccountBadge } from "@/omnicode/TaskAccountBadge.js";
+import { useOmnicodeAccountCatalog } from "@/omnicode/omnicodeAccountUi.js";
 
 type TaskListItemIntl = {
   formatMessage: (desc: { id: string }, values?: Record<string, string>) => string;
@@ -417,6 +420,9 @@ export const MemoTaskItem = memo(function TaskListItem({
     () => deriveTaskLeadingIndicator(task, taskActivity),
     [task, taskActivity],
   );
+  // [OmniCode] 模式二 R3：账号徽标数据源（目录快照 store 订阅；官方平台桥缺席 →
+  // bridgeAvailable=false → TaskAccountBadge 恒不渲染，官方任务行逐字不变）。
+  const omnicodeAccountCatalog = useOmnicodeAccountCatalog();
   const isTaskCron = isCronTask(task);
   // 月亮身份改为持久 meta 标记判断；off-peak store 反查在任务被删除后会丢失
   // 会话溯源，且让每一行多背一个全局 store 订阅。
@@ -705,6 +711,15 @@ export const MemoTaskItem = memo(function TaskListItem({
               </ControlHintTooltip>
             ) : null}
             {remoteConnectionBadge}
+            {/* [OmniCode] 模式二 R3：任务账号徽标（spec: docs/omnicode/multi-account-sessions.md
+                §7）。未绑定附加账号/目录晚到/平台桥缺席 → 不渲染，官方任务行逐字不变。 */}
+            <TaskAccountBadge
+              sessionId={task.taskId}
+              workspacePath={workspacePath}
+              workspaceIdentity={task.workspaceIdentity}
+              accounts={omnicodeAccountCatalog.accounts}
+              catalogAvailable={omnicodeAccountCatalog.bridgeAvailable}
+            />
             <TaskTitleOverflowText
               className="text-ui-base text-foreground"
               title={taskTitleWithChanges}

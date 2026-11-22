@@ -1,6 +1,8 @@
 import type { ModelSelectionView, ProviderSettingsView } from "@zcode/services";
 import {
   resolveModelProviderFamilySpecByProviderId,
+  type OmnicodeAccountDirectoryEntry,
+  type OmnicodeAccountSlotUsage,
   type ProviderFamilyDomain,
   type ProviderFamilyConnectionSelection,
   type ZCodeProvider,
@@ -194,5 +196,61 @@ export function buildComposerPlanGroups(
           Number(b.connection?.selection?.kind === "team-coding-plan"),
     ),
     ...others,
+  ];
+}
+
+// ─── [OmniCode] 模式二 R3：选择器账号层（spec: docs/omnicode/multi-account-sessions.md §7）───
+// 账号层与套餐层同构（plan 本身就是凭据引用，账号是同构扩展）：条目=主账号/附加账号，
+// 显示名 + 槽位徽标（running/limit）。仅 omnicode 实例且目录非空时由调用方渲染；
+// 官方 flavor 不调用（门控 = 附加账号清单非空 ∧ ZCODE_PRODUCT_FLAVOR），本模块纯函数
+// 不持有任何状态，官方路径零改动。
+
+/** 账号层条目（渲染输入；主账号 = sourceProfileId 为 null 的合成条目）。 */
+export interface ComposerOmnicodeAccountEntry {
+  accountId: string | null;
+  displayName: string;
+  family: "zai" | "bigmodel" | null;
+  running?: number;
+  limit?: number;
+}
+
+/** 账号层分组的稳定 key 前缀（选择器 onSelect 以此区分账号层与套餐层意图）。 */
+export const OMNICODE_ACCOUNT_GROUP_KEY_PREFIX = "omnicode-account:";
+
+export interface ComposerOmnicodeAccountGroup {
+  key: string;
+  /** 账号条目（accountId=null = 主账号/自动模式回主账号）。 */
+  account: ComposerOmnicodeAccountEntry;
+}
+
+/**
+ * 账号层分组构建（纯函数，单测锁定）：主账号行固定第一，附加账号按目录序；每行携带
+ * 槽位徽标数据（running/limit）。空目录 → 仅主账号行（仍可显示"主账号"标签）。
+ */
+export function buildComposerOmnicodeAccountGroups(params: {
+  accounts: readonly OmnicodeAccountDirectoryEntry[];
+  slots: readonly OmnicodeAccountSlotUsage[];
+  primaryLabel: string;
+}): ComposerOmnicodeAccountGroup[] {
+  const slotOf = (accountId: string) => params.slots.find((slot) => slot.accountId === accountId);
+  return [
+    {
+      key: `${OMNICODE_ACCOUNT_GROUP_KEY_PREFIX}primary`,
+      account: { accountId: null, displayName: params.primaryLabel, family: null },
+    },
+    ...params.accounts.map((entry) => {
+      const slot = slotOf(entry.accountId);
+      return {
+        key: `${OMNICODE_ACCOUNT_GROUP_KEY_PREFIX}${entry.accountId}`,
+        account: {
+          accountId: entry.accountId,
+          displayName: entry.displayName,
+          family: entry.family,
+          ...(slot
+            ? { running: slot.running, limit: slot.limit }
+            : {}),
+        },
+      };
+    }),
   ];
 }

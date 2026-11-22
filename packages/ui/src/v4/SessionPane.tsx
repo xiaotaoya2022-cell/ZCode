@@ -40,6 +40,13 @@ import {
   ZCODE_AGENT_PROVIDER,
 } from "@zcode/shared";
 import { TID_CHAT_EMPTY, TID_V4_SESSION_PANE, testId } from "@zcode/shared/test-ids";
+// [OmniCode] 模式二 R3：选择器账号层数据装配 + 会话账号选择 store（sendText 透传/徽标共用）。
+import { useOmnicodeComposerAccountMenu } from "@/omnicode/useOmnicodeComposerAccountMenu.js";
+import {
+  omnicodeAccountScopeKey,
+  readOmnicodeAccountSelection,
+  writeOmnicodeAccountSelection,
+} from "@/omnicode/omnicodeAccountUi.js";
 import type {
   ConversationShareAccessMode,
   ConversationShareTtlOptions,
@@ -3930,6 +3937,17 @@ export function SessionPane({
     ],
   );
 
+  // [OmniCode] 模式二 R3（spec: docs/omnicode/multi-account-sessions.md §7）：选择器账号层
+  //（门控在 hook 内：平台桥缺席 / 附加账号目录为空 → undefined=官方逐字不变）。选择意图
+  // 按 scope（workspacePath+identity+sessionId|draft）存 store，sendText 派发时随
+  // payload.omnicodeAccountId 透传（R1.5 管道），任务徽标与选择器回显同一事实源。
+  const omnicodeAccountMenu = useOmnicodeComposerAccountMenu({
+    workspacePath,
+    workspaceIdentity,
+    sessionId,
+    primaryLabel: intl.formatMessage({ id: "chat.omnicode.accountPrimary" }),
+  });
+
   const dispatchSendTextAfterConfig = useCallback(
     async (
       text: string,
@@ -4170,11 +4188,22 @@ export function SessionPane({
         prepareHighspeedTurn,
         submission.modelSelection,
       );
+      // [OmniCode] 模式二 R3：会话账号选择透传（R1.5 管道）。读取 scope 选择意图
+      // （null=主账号→不携带，官方路径零变化）；Host 在 omnicode 门控内读取并绑定后
+      // 剥离该字段（CLI 永不见）。官方路径读取恒 null，payload 逐字不变。
+      const omnicodeSendAccountId = readOmnicodeAccountSelection(
+        omnicodeAccountScopeKey({
+          workspacePath,
+          workspaceIdentity: workspaceIdentity ?? null,
+          sessionId: sessionId ?? null,
+        }),
+      );
       const ack = await dispatchSubmissionCommand(
         "sendText",
         {
           text,
           ...submission,
+          ...(omnicodeSendAccountId ? { omnicodeAccountId: omnicodeSendAccountId } : {}),
           ...(options?.requestedDelivery ? { requestedDelivery: options.requestedDelivery } : {}),
           conversationQuotes: options?.conversationQuotes,
           ...(readyAttachments.length > 0 ? { attachments: readyAttachments } : {}),
@@ -4239,6 +4268,18 @@ export function SessionPane({
         );
       } else if (heldQueueDisposition === "clearQueueAndSend") {
         settleCurrentQueueInputs(targetSessionId);
+      }
+      // [OmniCode] 模式二 R3：accepted 后把账号选择迁移到目标会话 scope——任务列表徽标
+      // 与后续会话内发送沿用同一绑定（选择器/徽标回显同一 store）。
+      if (omnicodeSendAccountId && targetSessionId) {
+        writeOmnicodeAccountSelection(
+          omnicodeAccountScopeKey({
+            workspacePath,
+            workspaceIdentity: workspaceIdentity ?? null,
+            sessionId: targetSessionId,
+          }),
+          omnicodeSendAccountId,
+        );
       }
     },
     [
@@ -6364,6 +6405,8 @@ export function SessionPane({
       onDraftStateChange={handleComposerDraftStateChange}
       onTextChange={handleComposerTextChange}
       onSubmissionSettled={handleComposerSubmissionSettled}
+      // [OmniCode] 模式二 R3：选择器账号层（门控在 hook 内；undefined=官方路径零改动）。
+      omnicodeAccountMenu={omnicodeAccountMenu}
       draftScopeId={composerEditScopeId}
       editFocusRequest={composerEdit.editSession?.focusRequest ?? 0}
       editSubmitRequest={composerEditSubmitRequest}

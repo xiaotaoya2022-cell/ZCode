@@ -3420,6 +3420,29 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
     return;
   }
 
+  // [OmniCode] 模式二 R3（spec: docs/omnicode/multi-account-sessions.md §6/§7）：
+  // main → host 调度器槽位用量查询（renderer 槽位可视化经 main 转问）。服务缺席
+  //（官方/远端装配）回 ok=false 结构化错误——main 侧按"槽位不可见"渲染，不瘫。
+  if (msg.type === HostMessageTypes.OmnicodeAccountSlotsRequest) {
+    let slots: { accountId: string; running: number; limit: number }[] = [];
+    let ok = false;
+    let error: string | undefined;
+    try {
+      slots = (await activeServices?.getOptional(IZCodeAgentService)?.getOmnicodeAccountSlots?.()) ?? [];
+      ok = true;
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : String(cause);
+    }
+    parentPort.postMessage({
+      type: HostResponseTypes.OmnicodeAccountSlotsResult,
+      requestId: msg.requestId,
+      ok,
+      ...(ok ? { slots } : {}),
+      ...(!ok && error ? { error } : {}),
+    });
+    return;
+  }
+
   if (msg.type === HostMessageTypes.ProviderProvisioningLaneResult) {
     hostProviderProvisioningStatus.handleResult(msg);
     return;

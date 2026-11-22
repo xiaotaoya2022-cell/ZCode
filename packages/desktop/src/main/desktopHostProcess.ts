@@ -5,6 +5,12 @@ import {
 } from "@zcode/shared/credential-security";
 import { getAppConfigDir } from "@zcode/services/node";
 import { ingestToolExecResource } from "./desktopResourceTelemetry.js";
+// [OmniCode] 模式二 R3：host → main 调度器槽位用量快照应答路由（main 侧 pending 表簿记）。
+import { resolveOmnicodeAccountSlotsResult } from "./omnicode/accountSlotsQuery.js";
+import {
+  registerOmnicodeHostChild,
+  unregisterOmnicodeHostChild,
+} from "./omnicode/hostChildRegistry.js";
 import { bindAppControlNavigationHost } from "#src/app-control-navigation/main.js";
 import { ingestMcpResourceSamples } from "./processResourceMcpTelemetrySource.js";
 /* eslint-disable max-lines -- host process 统一处理 main↔host 生命周期、日志、ZCode Agent，拆分前先保持跨进程消息收口。 */
@@ -285,6 +291,17 @@ export function spawnHostProcess(
     handleAccountMaterialRequest?: (
       request: OmnicodeAccountMaterialRequestPayload,
     ) => Promise<{ ok: boolean; dataBase64?: string; error?: string }>;
+    // [OmniCode] 模式二 R3/R4（spec §6/§7）：host → main：附加账号目录元数据查询
+    //（智能调度 pickAccount 候选来源；实例 main TTL 缓存应答，管理器仍是唯一枚举权威）。
+    // 缺省实现回结构化错误——Host 决策按"无候选"不挑，官方路径逐字不变。
+    handleOmnicodeAccountDirectoryListRequest?: () => Promise<{
+      ok: boolean;
+      accounts?: unknown[];
+      error?: string;
+    }>;
+    // [OmniCode] 模式二 R3（spec §6/§7）：main → host 槽位查询在 Host 侧的应答经
+    // OmnicodeAccountSlotsResult 回传；main 侧 pending 表由 accountSlotsQuery.ts 登记
+    //（本路由只做转发，无簿记）。
   },
   options?: SpawnHostProcessOptions,
 ): ElectronUtilityProcess {
@@ -645,6 +662,41 @@ export function spawnHostProcess(
       return;
     }
 
+    // [OmniCode] 模式二 R3/R4（spec: docs/omnicode/multi-account-sessions.md §6/§7）：
+    // host → main 附加账号目录元数据查询路由（智能调度候选）。处理依赖缺席（官方/管理器
+    // Host）恒回 ok=false 结构化错误，Host 决策按"无候选"不挑，官方路径零变化。
+    if (result.data.type === HostResponseTypes.OmnicodeAccountDirectoryListRequest) {
+      const request = result.data;
+      const handler = dependencies.handleOmnicodeAccountDirectoryListRequest;
+      const reply = (payload: { ok: boolean; accounts?: unknown[]; error?: string }) =>
+        child.postMessage({
+          type: HostMessageTypes.OmnicodeAccountDirectoryListResult,
+          requestId: request.requestId,
+          ok: payload.ok,
+          ...(payload.ok && payload.accounts ? { accounts: payload.accounts } : {}),
+          ...(!payload.ok && payload.error ? { error: payload.error } : {}),
+        });
+      void (
+        handler
+          ? handler().catch((error: unknown) => ({
+              ok: false as const,
+              error: error instanceof Error ? error.message : String(error),
+            }))
+          : Promise.resolve({
+              ok: false as const,
+              error: "omnicode_account_directory_unavailable",
+            })
+      ).then(reply);
+      return;
+    }
+
+    // [OmniCode] 模式二 R3（spec §6/§7）：host → main 调度器槽位用量快照应答路由
+    //（main 侧 pending 表在 accountSlotsQuery.ts 登记；迟到/陌生 requestId 直接丢弃）。
+    if (result.data.type === HostResponseTypes.OmnicodeAccountSlotsResult) {
+      resolveOmnicodeAccountSlotsResult(result.data);
+      return;
+    }
+
     if (result.data.type === HostResponseTypes.BrowserExecuteRequest) {
       // browser-use：main 用 WebContentsView+CDP 执行命令（handleBrowserExecuteRequest）。
       // 缺省实现时返回 backend_unavailable，保证通道打通但不阻塞。
@@ -841,6 +893,9 @@ export function spawnHostProcess(
   }
 
   registerHostProcess(label, child);
+  // [OmniCode] 模式二 R3：Host child 只读登记（槽位用量查询经 main→Host parentPort；
+  // hostChildRegistry 中性簿记，避免 desktopHostProcess↔accountSlotsQuery 互相成环）。
+  registerOmnicodeHostChild(label, child);
 
   child.on("exit", (code) => {
     exitedHostProcesses.add(child);
@@ -854,6 +909,8 @@ export function spawnHostProcess(
       dependencies.broadcastHub.unregister(windowId);
     }
     unregisterHostProcess(label);
+    // [OmniCode] 模式二 R3：Host 退出同步摘除槽位查询的登记项（无 child 即结构化失败）。
+    unregisterOmnicodeHostChild(label);
     for (const [wcId, process] of dependencies.windowHostProcessMap) {
       if (process === child) {
         dependencies.windowHostProcessMap.delete(wcId);

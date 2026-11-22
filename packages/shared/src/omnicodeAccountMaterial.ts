@@ -80,3 +80,79 @@ export const omnicodeAccountMaterialFileSchema = z
 
 /** 材料快照文件数据（schema 推断）。 */
 export type OmnicodeAccountMaterialFileData = z.infer<typeof omnicodeAccountMaterialFileSchema>;
+
+// ─── [OmniCode] 模式二 R3：附加账号目录 / 槽位 元数据契约（无凭据红线） ───
+// renderer（选择器账号层 + 任务徽标）与 Host 调度器（智能挑选候选）都需要附加账号的
+// **元数据**列表。两类消费者共用同一形状事实源（本文件）；与 R1.5 材料契约同风格：
+// 严格 zod、载荷只带键名/显示名/family 等**非凭据**字段——deviceMid、任何 token/JWT/材料
+// 内容永不进入本契约（spec §5 红线"材料永不进 renderer/日志"）。
+
+const omnicodeAccountFamilyEnum = z.enum(["zai", "bigmodel"]);
+
+/** 附加账号目录条目（元数据 only；accountId = acct-<sourceProfileId>，与材料请求同形态）。 */
+export const omnicodeAccountDirectoryEntrySchema = z
+  .object({
+    accountId: z
+      .string()
+      .min(1)
+      .max(64)
+      .regex(/^[A-Za-z0-9._:-]+$/u, "accountId 形态非法"),
+    sourceProfileId: z
+      .string()
+      .min(1)
+      .max(64)
+      .regex(/^p[0-9a-z]{8,20}$/u, "sourceProfileId 形态非法"),
+    family: omnicodeAccountFamilyEnum,
+    displayName: z.string().min(1).max(200),
+  })
+  .strict();
+export type OmnicodeAccountDirectoryEntry = z.infer<typeof omnicodeAccountDirectoryEntrySchema>;
+
+/** 目录查询请求载荷（桥上行 / Host→main 同形；无参数——请求方身份由通道认证）。 */
+export const omnicodeAccountDirectoryListRequestPayloadSchema = z.object({}).strict();
+export type OmnicodeAccountDirectoryListRequestPayload = z.infer<
+  typeof omnicodeAccountDirectoryListRequestPayloadSchema
+>;
+
+/**
+ * 目录查询应答载荷（ok=false 时只带结构化错误键；accounts 条目数上限 32 防桥载荷放大）。
+ * 条目结构在此只做传输层装框（unknown record），**逐条严格校验在消费方**（Host 提供者 /
+ * 实例目录客户端按 omnicodeAccountDirectoryEntrySchema 逐条校验后入缓存/renderer）——
+ * 单个坏 profile 不应让整份目录失效。
+ */
+export const omnicodeAccountDirectoryListResultPayloadSchema = z
+  .object({
+    ok: z.boolean(),
+    accounts: z.array(z.record(z.string(), z.unknown())).max(32).optional(),
+    error: z.string().max(200).optional(),
+  })
+  .strict();
+export type OmnicodeAccountDirectoryListResultPayload = z.infer<
+  typeof omnicodeAccountDirectoryListResultPayloadSchema
+>;
+
+/** 单账号槽位用量（调度器计数快照；running/limit 为非负整数，上限字段与 spec §6 可配上限一致）。 */
+export const omnicodeAccountSlotUsageSchema = z
+  .object({
+    accountId: z
+      .string()
+      .min(1)
+      .max(64)
+      .regex(/^[A-Za-z0-9._:-]+$/u, "accountId 形态非法"),
+    running: z.number().int().min(0).max(10_000),
+    limit: z.number().int().min(0).max(10_000),
+  })
+  .strict();
+export type OmnicodeAccountSlotUsage = z.infer<typeof omnicodeAccountSlotUsageSchema>;
+
+/** 槽位用量查询应答载荷（调度器计数快照，元数据 only；ok=false 只带结构化错误键）。 */
+export const omnicodeAccountSlotsResultPayloadSchema = z
+  .object({
+    ok: z.boolean(),
+    slots: z.array(omnicodeAccountSlotUsageSchema).max(64).optional(),
+    error: z.string().max(200).optional(),
+  })
+  .strict();
+export type OmnicodeAccountSlotsResultPayload = z.infer<
+  typeof omnicodeAccountSlotsResultPayloadSchema
+>;

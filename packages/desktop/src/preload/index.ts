@@ -566,6 +566,16 @@ contextBridge.exposeInMainWorld("zcode", {
           ipcRenderer.on(PlatformChannels.OmnicodeTakeoverConfirm, handler);
           return () => ipcRenderer.removeListener(PlatformChannels.OmnicodeTakeoverConfirm, handler);
         },
+        // [OmniCode] 模式二 R3（spec: docs/omnicode/multi-account-sessions.md §6/§7）：
+        // 附加账号目录元数据 + 调度器槽位用量查询（选择器账号层/任务徽标/槽位可视化
+        // 数据源）。仅 omnicode 实例进程暴露——官方/管理器/旧 preload 缺席即天然禁用
+        // （官方零改动铁律）；载荷元数据 only，无凭据红线。
+        getOmnicodeAccountDirectoryList: (): Promise<
+          import("@zcode/shared").OmnicodeAccountDirectoryListResultPayload
+        > => ipcRenderer.invoke(PlatformChannels.OmnicodeAccountDirectoryListGet),
+        getOmnicodeAccountSlots: (): Promise<
+          import("@zcode/shared").OmnicodeAccountSlotsResultPayload
+        > => ipcRenderer.invoke(PlatformChannels.OmnicodeAccountSlotsGet),
       }
     : {}),
   // [OmniCode] 失败态恢复入口：手动粘贴完整 OAuth 回调 URL，main 复用 handleDeepLink 路由

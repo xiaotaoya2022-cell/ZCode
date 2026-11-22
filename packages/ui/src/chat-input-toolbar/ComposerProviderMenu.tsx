@@ -48,6 +48,7 @@ export function ComposerProviderMenu({
   onSelect,
   children,
   error,
+  accountSection,
 }: {
   groups: readonly ModelSelectGroup[];
   disabled?: boolean;
@@ -60,6 +61,8 @@ export function ComposerProviderMenu({
   onSelect: (group: ModelSelectGroup) => void;
   children: ReactNode;
   error?: string | null;
+  /** [OmniCode] 模式二 R3：账号层区块（渲染在套餐 radio 组上方；官方调用方不传=零改动）。 */
+  accountSection?: ReactNode;
 }) {
   const { intl } = useZCodeIntl();
   const narrow = useSyncExternalStore(subscribe, snapshot, () => false);
@@ -77,6 +80,8 @@ export function ComposerProviderMenu({
           {error}
         </div>
       ) : null}
+      {/* [OmniCode] 模式二 R3：账号层区块（仅 omnicode 实例传入；官方逐字不变）。 */}
+      {accountSection}
       <DropdownMenuRadioGroup
         value={group?.key}
         data-composer-provider-list
