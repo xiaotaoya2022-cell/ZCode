@@ -94,7 +94,8 @@ export function createOmnicodeSessionAccountRegistry(options?: {
     unbindBySessionId(sessionId) {
       if (!sessionId.trim()) return;
       const suffix = `${registryKeyJoiner}${sessionId.trim()}`;
-      for (const key of [...entries.keys()]) {
+      // Map 迭代器对遍历中删除安全（被删键跳过继续），无需快照拷贝。
+      for (const key of entries.keys()) {
         if (key === sessionId.trim() || key.endsWith(suffix)) entries.delete(key);
       }
     },
