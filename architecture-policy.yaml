@@ -1821,6 +1821,9 @@ modules:
     requires:
       - services
       - shared
+      # 模式二（multi-account-sessions §5）：附加账号材料文件加密 requires 增补
+      # credential-security（X2 loginHealth 同款先例）。
+      - credential-security
     publicEntrypoints:
       - packages/services/src/omnicode/contract.ts
     layers:

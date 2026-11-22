@@ -191,6 +191,7 @@
   "packages/desktop/test/omnicodeAutoObserverConflict.test.ts",
   "packages/desktop/test/omnicodeBatch6BackgroundFrame.test.ts",
   "packages/desktop/test/omnicodeSharedAssetsCache.test.ts",
+  "packages/services/test/omnicodeAccountOverride.test.ts",
   "packages/services/test/omnicodeSharedAssetKernel.test.ts",
   "packages/desktop/test/omnicodeOmni5Bugfix.test.ts",
   "packages/ui/test/omnicodeOmni5BrandLogo.test.tsx",

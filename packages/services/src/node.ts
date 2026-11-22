@@ -497,6 +497,10 @@ import {
   readLatestOmnicodeProfileDisplayName,
   type WorkspaceLockCoordinator,
 } from "./omnicode/contract.js";
+// [OmniCode] 模式二：per-session 账号覆盖边界（附加账号材料本地文件提供者 + 作用域包裹；
+// spec: docs/omnicode/multi-account-sessions.md §4/§5/§8）。
+import { createOmnicodeAccountOverride } from "./omnicode/accountOverride.js";
+import { createOmnicodeAccountFileMaterialProvider } from "./omnicode/accountMaterialFile.js";
 // [OmniCode] D12 接管流：管理器 main 侧锁占用方查询（桥上行 takeoverRequest 转投持有者
 // 前的锁事实读取；只读原语，锁语义零改动——spec §批次3 D12）。
 export { readWorkspaceLockOwner, listWorkspaceLocks } from "./omnicode/contract.js";
@@ -1594,11 +1598,23 @@ export function createLocalServices(options: {
       });
     },
   });
+  // [OmniCode] 模式二（单实例多账号并发，spec: docs/omnicode/multi-account-sessions.md
+  // §4/§8）：per-session 账号覆盖边界——官方"用哪份凭据"的唯一汇聚点就是下面三个 loader，
+  // 作用域未激活时原样透传官方路径（行为逐字不变）；激活时按附加账号材料作答，
+  // 材料缺失/family 不匹配一律 null（fail-closed，绝不回落主账号材料防串号）。
+  // 门控默认 = OMNICODE_PROFILE_ID env（仅 omnicode Profile 实例进程注入；管理器/官方恒 inert）。
+  const omnicodeAccountOverride = createOmnicodeAccountOverride({
+    materialProvider: createOmnicodeAccountFileMaterialProvider(),
+  });
   const loadOAuthAccountMaterial = (family: ProviderFamilyDomain) =>
-    oauthCredentialRepo.loadFamilyMaterial(family);
+    omnicodeAccountOverride.loadFamilyMaterial(family, (f) =>
+      oauthCredentialRepo.loadFamilyMaterial(f),
+    );
   // Start 与付费套餐分开取材料：国内无关联账号只有 Start 材料（ZCode 主体与共享 JWT）。
   const loadStartPlanMaterial = (family: ProviderFamilyDomain) =>
-    oauthCredentialRepo.loadStartPlanMaterial(family);
+    omnicodeAccountOverride.loadStartPlanMaterial(family, (f) =>
+      oauthCredentialRepo.loadStartPlanMaterial(f),
+    );
   const loadOAuthFamilyTokenSet = async (providerId: string) => {
     if (providerId !== ZAI_PROVIDER_ID && providerId !== BIGMODEL_PROVIDER_ID) return null;
     const account = await loadOAuthAccountMaterial(providerId);
@@ -1638,7 +1654,7 @@ export function createLocalServices(options: {
     apiClient,
     loadOAuthTokenSet: loadOAuthFamilyTokenSet,
   });
-  const readAccountProviderSettings = async () => {
+  const readAccountProviderSettingsOfficial = async () => {
     // 迁移只在账号事实入口协调。ApiClient 的代理/端点仍读普通 Setting，不递归等待迁移。
     // 外部注入的 Setting（远端 attachment）由其所属 Host 管理，不读取本机旧文件。
     const prepare =
@@ -1651,6 +1667,8 @@ export function createLocalServices(options: {
       unresolvedFamilies,
     };
   };
+  const readAccountProviderSettings = async () =>
+    omnicodeAccountOverride.readSettings(readAccountProviderSettingsOfficial);
   const loadAccountIdentity = async (family: ProviderFamilyDomain) =>
     (await loadOAuthAccountMaterial(family))?.accountIdentity ?? null;
   const accountRequestAuthService = createAccountRequestAuthService(

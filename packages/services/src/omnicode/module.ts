@@ -4,7 +4,10 @@
  */
 export const omnicodeWorkspaceGovernanceModule = {
   id: "omnicode-workspace-governance",
-  requires: ["services", "shared"],
+  // 模式二（multi-account-sessions §5）：附加账号材料文件用
+  // createSystemCredentialCipher 加密——requires 增补 credential-security
+  //（loginHealth X2 同款先例）。
+  requires: ["services", "shared", "credential-security"],
   provides: ["omnicode-workspace-governance"],
   publicEntrypoints: ["contract.ts"],
 } as const;
