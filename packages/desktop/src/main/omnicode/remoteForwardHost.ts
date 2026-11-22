@@ -11,6 +11,15 @@
 // - 跨账号开关接口（spec §7 默认关）：readCrossAccountAggregation / listCrossAccountProfileIds
 //   缺省恒 false/恒空（全部在线实例按同账号聚合）；R4 接 omnicodeGlobalPrefs 设置面
 //   与实例账号族快照时替换注入即可，目录/聚合代码零改动。
+// [OmniCode] 丙1 R4 增量（spec: docs/omnicode/remote-aggregation.md §6/§7/§8-R4）：
+// - 跨账号开关接线面落地：readCrossAccountAggregation ← globalPrefs 开关缓存
+//   （omnicodeRemoteCrossAccount，侧车持久化 + applyGlobalPrefs 下发，缺省关）；
+//   listCrossAccountProfileIds ← accountFamily 账号族快照（未知身份保守归类同账号，
+//   保持 R3 缺省聚合行为不变）。
+// - failover 提示链（宿主退出，自动转移为二期）：宿主登记（noteOmnicodeRemoteAggregate
+//   HostInstance，无选举事实时生产装配不指派——不误报）→ onInstanceDisconnected 对账
+//   → deps.onAggregateHostExit（管理器 toast）+ remoteHostAnnounce(epoch+1) 广播剩余
+//   实例刷新目录视图；门控关零提示零广播（spec §7）。
 //
 // 红线（实现即约束）：
 // - 门控 = isOmnicodeRemoteAggregateHostEnabled（flavor=omnicode ∧ per-instance env 开关，
@@ -23,6 +32,7 @@
 import { randomUUID } from "node:crypto";
 import {
   OMNICODE_REMOTE_FORWARD_RPC_FRAME_MAX_BYTES,
+  omnicodeRemoteHostAnnounceMessageSchema,
   omnicodeRemoteWorkspaceListRequestCommandSchema,
   type OmnicodeRemoteWorkspaceEntry,
   type OmnicodeRemoteWorkspaceListRequestCommand,
@@ -70,11 +80,15 @@ export interface OmnicodeRemoteForwardHost {
 export interface OmnicodeRemoteForwardHostDeps {
   /**
    * 桥命令发送（管理器进程装配 sendOmnicodeInstanceCommand；单测注入 fake）。
-   * false = 实例未回连。命令域 = 目录查询 + openWorkspace 转投（既有桥命令复用）。
+   * false = 实例未回连。命令域 = 目录查询 + openWorkspace 转投（既有桥命令复用）+
+   * remoteHostAnnounce 广播（R4 failover，spec §6）。
    */
   sendCommand: (
     profileId: string,
-    command: OmnicodeRemoteWorkspaceListRequestCommand | { type: "openWorkspace"; path: string },
+    command:
+      | OmnicodeRemoteWorkspaceListRequestCommand
+      | { type: "openWorkspace"; path: string }
+      | { type: "remoteHostAnnounce"; hostProfileId: string; epoch: number },
   ) => boolean;
   /** 当前已回连实例（管理器进程装配 getOmnicodeConnectedInstanceProfileIds；单测注入）。 */
   getConnectedProfileIds: () => string[];
@@ -86,6 +100,11 @@ export interface OmnicodeRemoteForwardHostDeps {
   readCrossAccountAggregation?: () => boolean;
   /** 跨账号 profileId 名单读取（R4 接账号族快照；缺省恒空 = 全部按同账号处理）。 */
   listCrossAccountProfileIds?: () => string[];
+  /**
+   * [OmniCode] 丙1 R4 failover：聚合宿主退出通知（desktopProfileIpc 装配 → 管理器
+   * renderer toast 提示 + remoteHostAnnounce 广播链的宿主侧第一拍）。缺省 = 仅记日志。
+   */
+  onAggregateHostExit?: (profileId: string) => void;
   /** 目录查询在途死线（单测注入；缺省 10s，惰性收口非常驻轮询）。 */
   queryTtlMs?: number;
   /** 时刻源（单测注入；缺省 Date.now）。 */
@@ -103,6 +122,9 @@ interface OmnicodeRemoteForwardCore {
   handleInstanceDisconnected(profileId: string): void;
   getDirectoryView(): OmnicodeRemoteWorkspaceDirectoryView;
   openWorkspaceOnInstance(request: OmnicodeRemoteForwardOpenRequest): OmnicodeRemoteForwardOpenResult;
+  noteAggregateHostInstance(profileId: string | null): void;
+  handleAggregateHostDisconnected(profileId: string): boolean;
+  broadcastHostAnnounce(hostProfileId: string | null): number;
 }
 
 const INSTANCE_PROFILE_ID_PATTERN = /^p[0-9a-z]{8,20}$/u;
@@ -123,6 +145,14 @@ function createOmnicodeRemoteForwardCore(deps: OmnicodeRemoteForwardHostDeps): O
   /** 在途查询（profileId → 登记时刻）。惰性收口：TTL 过期只在下一次事件时点清扫。 */
   const pendingQueries = new Map<string, number>();
   let namesResolving = false;
+
+  // ─── R4 failover 状态（spec: docs/omnicode/remote-aggregation.md §6）───
+  // 聚合宿主登记（桥真身 profileId；null = R3 拓扑缺省"宿主 = 管理器进程本进程"，
+  // 不再单独指派实例——宿主选举/自动转移为 spec 二期，本阶段登记面仅显式 API +
+  // 单测覆盖，避免无选举事实时的误报 toast）。epoch 单调递增（remoteHostAnnounce
+  // 广播序，实例按 epoch 判新旧广播——R1 schema 注释语义）。
+  let designatedHostProfileId: string | null = null;
+  let announceEpoch = 0;
 
   const notifyChanged = (): void => {
     // 双通道：deps.onWorkspacesChanged（单测注入）+ 模块通知器（index.ts 装配的管理器
@@ -260,6 +290,44 @@ function createOmnicodeRemoteForwardCore(deps: OmnicodeRemoteForwardHostDeps): O
       });
       return sent ? { forwarded: true } : { forwarded: false, error: "instance_offline" };
     },
+    noteAggregateHostInstance(profileId) {
+      // 宿主登记（R4 failover 事实源；null = 注销/回退管理器本进程宿主形态）。
+      designatedHostProfileId =
+        profileId && INSTANCE_PROFILE_ID_PATTERN.test(profileId) ? profileId : null;
+    },
+    handleAggregateHostDisconnected(profileId) {
+      // spec §6：宿主退出 → 管理器提示 + remoteHostAnnounce(epoch+1) 广播各实例刷新
+      // 目录视图；不做宿主自动转移（二期）。双保险门控：聚合门控关时零提示零广播
+      // （spec §7 开关语义），登记缺席（null）不误报——R3 拓扑缺省宿主 = 管理器进程。
+      if (!isEnabled() || designatedHostProfileId !== profileId) return false;
+      designatedHostProfileId = null;
+      try {
+        deps.onAggregateHostExit?.(profileId);
+      } catch {
+        // 通知旁路失败吞掉（announce 广播不受影响——目录对账照常收敛）。
+      }
+      // 宿主退出广播：hostProfileId 携带退出宿主真身（实例只消费 epoch 做视图失效）。
+      core.broadcastHostAnnounce(profileId);
+      return true;
+    },
+    broadcastHostAnnounce(hostProfileId) {
+      // 宿主变更广播（epoch+1）经既有桥命令面下发全部已回连实例：载荷按 R1 schema
+      // 校验后投递；hostProfileId 缺席/形态非法时仅递增 epoch 不投递（R1 schema 的
+      // hostProfileId 白名单是桥真身形态——无宿主事实不伪造广播面）。fire-and-forget
+      // 不重试（实例断连场景由断连摘除对账收敛）。门控关零递增零投递（零行为）。
+      if (!isEnabled()) return announceEpoch;
+      announceEpoch += 1;
+      const parsed = omnicodeRemoteHostAnnounceMessageSchema.safeParse({
+        type: "remoteHostAnnounce",
+        hostProfileId,
+        epoch: announceEpoch,
+      });
+      if (!parsed.success) return announceEpoch;
+      for (const profileId of deps.getConnectedProfileIds()) {
+        deps.sendCommand(profileId, parsed.data);
+      }
+      return announceEpoch;
+    },
   };
   return core;
 }
@@ -338,6 +406,37 @@ export function handleOmnicodeRemoteWorkspaceInstanceConnected(profileId: string
 /** 实例断连：快照摘除 + 聚合列表重推（spec §6 对账）。 */
 export function handleOmnicodeRemoteWorkspaceInstanceDisconnected(profileId: string): void {
   core?.handleInstanceDisconnected(profileId);
+}
+
+// ─── R4 failover 装配面（desktopProfileIpc managerHooks 消费；单例缺席全部 no-op——
+//     与 D12 takeover 钩子同先例：官方 flavor 无实例上行，死钩子零影响）───
+
+/**
+ * 聚合宿主实例登记（R4 failover 事实源；null = 注销/回退管理器本进程宿主形态）。
+ * R3 拓扑缺省宿主 = 管理器进程（目录/转投都直调本进程桥）——生产装配**不做实例宿主
+ * 选举**（spec §6 选举/自动转移同为二期），本 API 为选举落地预留 + 单测覆盖面：
+ * 未登记时实例断连零误报（宁缺毋滥——假宿主退出 toast 比无 toast 更伤信任）。
+ */
+export function noteOmnicodeRemoteAggregateHostInstance(profileId: string | null): void {
+  core?.noteAggregateHostInstance(profileId);
+}
+
+/**
+ * 实例断连 → 聚合宿主退出对账（desktopProfileIpc onInstanceDisconnected 挂载，
+ * handleOmnicodeTakeoverInstanceDisconnected 同款位置）：门控开 ∧ 断连者 = 登记宿主
+ * → ① deps.onAggregateHostExit（管理器 toast 提示链）② remoteHostAnnounce(epoch+1)
+ * 广播剩余实例刷新目录视图。返回是否触发（测试断言面）。
+ */
+export function handleOmnicodeRemoteAggregateInstanceDisconnected(profileId: string): boolean {
+  return core?.handleAggregateHostDisconnected(profileId) ?? false;
+}
+
+/**
+ * 宿主变更广播（epoch+1）直发面（宿主选举落地后的装配入口；当前仅测试消费）。
+ * hostProfileId 必须为桥真身形态——无效形态只递增 epoch 不投递（不伪造广播面）。
+ */
+export function broadcastOmnicodeRemoteHostAnnounce(hostProfileId: string | null): number {
+  return core?.broadcastHostAnnounce(hostProfileId) ?? 0;
 }
 
 // ─── index.ts 装配面 ───

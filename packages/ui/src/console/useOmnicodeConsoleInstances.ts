@@ -123,9 +123,18 @@ export function useOmnicodeConsoleInstances() {
         });
         void refresh();
       }
+      // [OmniCode] 丙1 远程聚合 R4 failover（spec: docs/omnicode/remote-aggregation.md
+      // §6）：聚合宿主退出提示——D11 openedToast 同款 toast 机制（i18n 五语）。仅管理器
+      // 进程窗口可收到该事件（广播源 = 管理器桥服务的 remoteForwardHost failover 对账；
+      // 宿主自动转移为二期——本提示只告知跨实例远控暂不可用）。
+      if (payload.type === "remoteHostExited") {
+        toast(intl.formatMessage({ id: "omnicode.remoteAggregate.hostExitedToast" }), {
+          variant: "warning",
+        });
+      }
     });
     return unsubscribe ?? (() => {});
-  }, [platform, refresh]);
+  }, [platform, refresh, intl]);
 
   // [OmniCode] B2 评审修复（P2-8 兜底）：实例停止/删除后清非 running 实例的帧
   //（disconnected 事件之外的停止路径——如管理器重启后的列表重建）。停帧态同步清除。

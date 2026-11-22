@@ -70,10 +70,24 @@ import {
   setupOmnicodeRemoteForwardHost,
 } from "./omnicode/contract.js";
 import type { OmnicodeRemoteForwardHostDeps } from "./omnicode/remoteForwardHost.js";
+// [OmniCode] 丙1 远程聚合 R4（spec: docs/omnicode/remote-aggregation.md §6/§7/§8-R4）：
+// 跨账号聚合开关（globalPrefs 键体系侧车层 + 账号族快照名单）+ 宿主退出 failover
+// 提示对账（断连钩子 → 管理器 toast 广播 + remoteHostAnnounce epoch+1 下发）。
+import {
+  getOmnicodeRemoteCrossAccountPref,
+  handleOmnicodeRemoteAggregateInstanceDisconnected,
+  listOmnicodeCrossAccountProfileIds,
+  refreshOmnicodeAccountFamilyForProfile,
+  seedOmnicodeAccountFamilyOwnKey,
+  seedOmnicodeRemoteCrossAccountPrefFromSidecar,
+} from "./omnicode/contract.js";
 // [OmniCode] 实例元数据批次：改名/排序态变化触发托盘名称缓存刷新 + 菜单重建（直接从
 // 实现文件导入，与 consoleUiState 同款约定——经 contract.ts 不含 trayMenu 导出）。
 import { refreshOmnicodeTrayNameCache } from "./omnicode/trayMenu.js";
-import { setOmnicodeInstanceBridgeManagerHooks } from "./omnicode/instanceBridgeServer.js";
+import {
+  broadcastOmnicodeInstanceEvent,
+  setOmnicodeInstanceBridgeManagerHooks,
+} from "./omnicode/instanceBridgeServer.js";
 // [OmniCode] D12 接管流：管理器协调器（观察者→持有者转投 + 回执路由；spec §批次3 D12）
 import {
   handleOmnicodeTakeoverCancelFromInstance,
@@ -232,6 +246,9 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
       // [OmniCode] 丙1 远程聚合 R3：连接即目录查询（门控内聚在 remoteForwardHost——
       // 开关关闭零查询；实例上行 Report 为另一路收敛来源，spec §5 目录双保险）。
       handleOmnicodeRemoteWorkspaceInstanceConnected(profileId);
+      // [OmniCode] 丙1 远程聚合 R4：连接即刷新该实例账号族快照（跨账号聚合名单
+      // 事实源；事件驱动零轮询，读失败归未知=同账号保守归类，spec §7 默认关）。
+      void refreshOmnicodeAccountFamilyForProfile(profileId);
     },
     onInstanceDisconnected: (profileId) => {
       notifyOmnicodeInstanceDisconnected(profileId);
@@ -240,6 +257,10 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
       handleOmnicodeTakeoverInstanceDisconnected(profileId);
       // [OmniCode] 丙1 远程聚合 R3：断连摘除该实例的聚合条目并重推（spec §6 对账）。
       handleOmnicodeRemoteWorkspaceInstanceDisconnected(profileId);
+      // [OmniCode] 丙1 远程聚合 R4 failover：断连者 = 登记宿主 → 管理器 toast 提示 +
+      // remoteHostAnnounce(epoch+1) 广播剩余实例刷新目录视图（自动转移为二期，spec §6；
+      // 门控关/未登记宿主 = 零行为——R3 拓扑缺省宿主是管理器进程本进程，不误报）。
+      handleOmnicodeRemoteAggregateInstanceDisconnected(profileId);
     },
     onInstanceHello: (profileId, hwndHex) => notifyOmnicodeInstanceHello(profileId, hwndHex),
     // [OmniCode] 批次4：实例上行全局偏好（载荷已在桥服务侧消毒；协调器内二次消毒 +
@@ -306,8 +327,25 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
           return null;
         }
       },
+      // [OmniCode] 丙1 远程聚合 R4：跨账号聚合开关接线（spec §7 默认关）。开关读取端 =
+      // globalPrefs 键体系缓存（omnicodeRemoteCrossAccount：管理器侧车事实源 +
+      // applyGlobalPrefs 下发，实例侧内存缓存——目录过滤权威在管理器，只有宿主同时
+      // 持有宿主账号与各实例账号族事实）；名单 = accountFamily 账号族快照（未知身份
+      // 保守归类同账号——保持 R3 缺省聚合行为不变）。
+      readCrossAccountAggregation: () => getOmnicodeRemoteCrossAccountPref(),
+      listCrossAccountProfileIds: () => listOmnicodeCrossAccountProfileIds(),
+      // [OmniCode] 丙1 远程聚合 R4 failover：宿主退出 → 管理器 toast 提示链（D11
+      // openedToast 同款机制：main 广播 OmnicodeInstanceEvent remoteHostExited 变体 →
+      // 管理器 renderer toast，i18n 五语）。仅管理器进程窗口可收到（广播源 = 本桥服务）。
+      onAggregateHostExit: (profileId) => {
+        broadcastOmnicodeInstanceEvent({ profileId, type: "remoteHostExited" });
+      },
     };
     setupOmnicodeRemoteForwardHost(forwardDeps);
+    // [OmniCode] 丙1 远程聚合 R4：装配即 seed（跨账号开关侧车缓存 + 管理器自身账号族
+    // 键；fire-and-forget，读失败保持缺省关/同账号——事件驱动收敛，不阻断装配）。
+    void seedOmnicodeRemoteCrossAccountPrefFromSidecar();
+    void seedOmnicodeAccountFamilyOwnKey();
   }
   // [OmniCode] D12 接管流协调器装配（桥命令直发 + 锁直读 workspaceLocks 只读原语——
   // 锁核心语义零改动；显示名解析经 Profile 注册表 listOmnicodeProfiles，防伪造）。

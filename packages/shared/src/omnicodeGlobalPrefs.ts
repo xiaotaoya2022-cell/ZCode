@@ -48,6 +48,21 @@ export function isOmnicodeThemePreference(value: unknown): value is OmnicodeThem
   return value === "system" || value === "zai-light" || value === "zai-dark";
 }
 
+/**
+ * [OmniCode] 丙1 远程聚合 R4（spec: docs/omnicode/remote-aggregation.md §7/§8-R4）：
+ * 跨账号聚合开关（布尔，缺省 false = 仅同账号聚合，spec §7 红线）。
+ * 存储分层与 theme 同款：**不进 setting.json**（appSettingsSchema 的 zod strip 会在
+ * 下次写盘丢弃未知键）——走管理器侧 omnicode-global-prefs.json 侧车持久化 + 桥命令
+ * 下发（applyGlobalPrefs 同款通道），实例侧内存消费（目录过滤权威在管理器：只有
+ * 管理器同时持有宿主账号与各实例账号族事实）。
+ */
+export const OMNICODE_REMOTE_CROSS_ACCOUNT_PREF_KEY = "omnicodeRemoteCrossAccount";
+
+/** 跨账号聚合开关值域（布尔；缺省/非法 = false）。 */
+export function isOmnicodeRemoteCrossAccountValue(value: unknown): value is boolean {
+  return typeof value === "boolean";
+}
+
 /** 快捷键覆盖表值域：键名非空字符串 → 数组（元素为非空字符串组合键）。 */
 export function isOmnicodeShortcutBindingsValue(value: unknown): value is Record<string, string[]> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -67,6 +82,8 @@ export interface OmnicodeGlobalPrefsPayload {
   localePreference?: LocalePreference;
   shortcutBindings?: Record<string, string[]>;
   theme?: OmnicodeThemePreference;
+  // [OmniCode] 丙1 远程聚合 R4：跨账号聚合开关（默认关 = 仅同账号聚合，spec §7）。
+  omnicodeRemoteCrossAccount?: boolean;
 }
 
 function hasOwnObject(value: object, key: string): boolean {
@@ -94,6 +111,14 @@ export function filterOmnicodeGlobalPrefsFromPatch(
   }
   if (hasOwnObject(patch, OMNICODE_THEME_PREF_KEY) && isOmnicodeThemePreference(patch.theme)) {
     filtered.theme = patch.theme;
+  }
+  // [OmniCode] 丙1 远程聚合 R4：跨账号聚合开关（布尔值域；非法值丢弃，缺席=关 = 仅同
+  // 账号聚合，spec §7 红线：默认关闭）。
+  if (
+    hasOwnObject(patch, OMNICODE_REMOTE_CROSS_ACCOUNT_PREF_KEY) &&
+    isOmnicodeRemoteCrossAccountValue(patch[OMNICODE_REMOTE_CROSS_ACCOUNT_PREF_KEY])
+  ) {
+    filtered.omnicodeRemoteCrossAccount = patch[OMNICODE_REMOTE_CROSS_ACCOUNT_PREF_KEY];
   }
   return filtered;
 }

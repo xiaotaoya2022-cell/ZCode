@@ -72,7 +72,11 @@ export interface OmnicodeInstanceBridgeCommand {
     // [OmniCode] 模式二 R2（spec: docs/omnicode/multi-account-sessions.md §5）：
     // accountMaterialResult = 附加账号材料取回的应答（管理器 → 实例；requestId 关联
     // 实例侧 pending 请求；ok=false 时实例 Host 回落 local 文件来源提供者）。
-    | "accountMaterialResult";
+    | "accountMaterialResult"
+    // [OmniCode] 丙1 远程聚合 R4 failover（spec: docs/omnicode/remote-aggregation.md §6）：
+    // 宿主变更广播（宿主退出 → epoch+1；本阶段不做宿主自动转移——实例按 epoch 判新旧
+    // 并刷新本地目录视图缓存，载荷按 R1 omnicodeRemoteHostAnnounceMessageSchema 校验）。
+    | "remoteHostAnnounce";
   /** arrange 命令的目标矩形（父进程由 workArea 计算后下发）。 */
   bounds?: { x: number; y: number; width: number; height: number };
   /** openWorkspace 命令的工作区目录路径。 */
@@ -93,6 +97,9 @@ export interface OmnicodeInstanceBridgeCommand {
   accountRequestId?: string;
   /** accountMaterialResult 命令的结果载荷（ok=false 时实例回落 local 文件来源）。 */
   accountResult?: { ok: boolean; dataBase64?: string; error?: string };
+  // [OmniCode] 丙1 远程聚合 R4 failover：remoteHostAnnounce 命令载荷（R1 schema 校验）。
+  hostProfileId?: string;
+  epoch?: number;
   // [OmniCode] D12 接管流：takeoverRequest/takeoverResult 命令载荷（shared schema 校验）。
   requestId?: string;
   requesterProfileId?: string;

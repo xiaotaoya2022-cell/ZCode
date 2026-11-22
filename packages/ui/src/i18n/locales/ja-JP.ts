@@ -8860,6 +8860,7 @@ const jaJP: Record<string, string> = {
   "omnicode.takeover.requestFailed": "テイクオーバー要求の送信に失敗しました（インスタンスがマネージャーに未接続）。後でもう一度お試しください。",
   "omnicode.takeover.acceptedToast": "テイクオーバーが承認されました。ワークスペースを編集可能モードで再開しています…",
   "omnicode.takeover.reopenFailed": "テイクオーバーは承認されましたが、{path} の再オープンに失敗しました。手動で再オープンしてください。",
+  "omnicode.remoteAggregate.hostExitedToast": "集約ホストが終了しました。インスタンス間リモート操作は現在利用できません。",
   "omnicode.takeover.deniedToast": "インスタンス {name} がテイクオーバー要求を拒否しました。",
   "omnicode.takeover.timeoutToast": "インスタンス {name} からテイクオーバー要求への応答がありません。",
   "omnicode.takeover.busyToast": "保持者が別のテイクオーバー要求を処理中です。後でもう一度お試しください。",

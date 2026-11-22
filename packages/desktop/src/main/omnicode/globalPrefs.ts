@@ -25,9 +25,11 @@ import {
   filterOmnicodeGlobalPrefsFromPatch,
   isLocale,
   isOmnicodeGlobalPrefsEchoSelf,
+  isOmnicodeRemoteCrossAccountValue,
   isOmnicodeThemePreference,
   isEmptyOmnicodeGlobalPrefsPayload,
   OMNICODE_GLOBAL_PREFS_MANAGER_SOURCE_ID,
+  OMNICODE_REMOTE_CROSS_ACCOUNT_PREF_KEY,
   sanitizeOmnicodeGlobalPrefsPayload,
   type Locale,
   type LocalePreference,
@@ -121,6 +123,11 @@ export async function readOmnicodeManagerGlobalPrefsSnapshot(): Promise<Omnicode
   if (theme) {
     prefs.theme = theme;
   }
+  // [OmniCode] 丙1 远程聚合 R4：跨账号聚合开关进快照（侧车层键，缺席=缺省关）。
+  const remoteCrossAccount = await readOmnicodeGlobalPrefsSidecarRemoteCrossAccount();
+  if (remoteCrossAccount !== undefined) {
+    prefs.omnicodeRemoteCrossAccount = remoteCrossAccount;
+  }
   return prefs;
 }
 
@@ -135,6 +142,20 @@ export async function readOmnicodeGlobalPrefsSidecarTheme(): Promise<OmnicodeGlo
   return raw !== undefined && isOmnicodeThemePreference(raw.theme) ? raw.theme : undefined;
 }
 
+/**
+ * [OmniCode] 丙1 远程聚合 R4：跨账号聚合开关键侧车读档（spec: docs/omnicode/
+ * remote-aggregation.md §7）。文件不存在/损坏/字段非法 → undefined（缺省关）。
+ */
+export async function readOmnicodeGlobalPrefsSidecarRemoteCrossAccount(): Promise<
+  OmnicodeGlobalPrefsPayload["omnicodeRemoteCrossAccount"]
+> {
+  const sidecarPath = join(getOmnicodeConsoleDataBaseDir(), OMNICODE_GLOBAL_PREFS_SIDECAR_FILE);
+  if (!existsSync(sidecarPath)) return undefined;
+  const raw = await readJsonWithRecovery<Record<string, unknown>>(sidecarPath);
+  const value = raw?.[OMNICODE_REMOTE_CROSS_ACCOUNT_PREF_KEY];
+  return isOmnicodeRemoteCrossAccountValue(value) ? value : undefined;
+}
+
 async function writeOmnicodeGlobalPrefsSidecarTheme(theme: OmnicodeGlobalPrefsPayload["theme"]): Promise<void> {
   const sidecarPath = join(getOmnicodeConsoleDataBaseDir(), OMNICODE_GLOBAL_PREFS_SIDECAR_FILE);
   const existing = existsSync(sidecarPath)
@@ -147,6 +168,78 @@ async function writeOmnicodeGlobalPrefsSidecarTheme(theme: OmnicodeGlobalPrefsPa
     next.theme = theme;
   }
   await writeJsonAtomic(sidecarPath, next);
+}
+
+/**
+ * [OmniCode] 丙1 远程聚合 R4：跨账号聚合开关侧车写档（保留既有 theme 键原样——同一
+ * omnicode 自有文件，原子写互不覆盖）。
+ */
+async function writeOmnicodeGlobalPrefsSidecarRemoteCrossAccount(
+  value: OmnicodeGlobalPrefsPayload["omnicodeRemoteCrossAccount"],
+): Promise<void> {
+  const sidecarPath = join(getOmnicodeConsoleDataBaseDir(), OMNICODE_GLOBAL_PREFS_SIDECAR_FILE);
+  const existing = existsSync(sidecarPath)
+    ? await readJsonWithRecovery<Record<string, unknown>>(sidecarPath)
+    : undefined;
+  const next: Record<string, unknown> = { ...existing, version: 1 };
+  if (value === undefined) {
+    delete next[OMNICODE_REMOTE_CROSS_ACCOUNT_PREF_KEY];
+  } else {
+    next[OMNICODE_REMOTE_CROSS_ACCOUNT_PREF_KEY] = value;
+  }
+  await writeJsonAtomic(sidecarPath, next);
+}
+
+// ─── 跨账号聚合开关（R4：读取端模块缓存，spec: docs/omnicode/remote-aggregation.md §7）───
+// 键值经既有 globalPrefs 下发链到达实例（applyGlobalPrefs 桥命令）：管理器侧事实源 =
+// omnicode-global-prefs.json 侧车；实例侧 = 内存缓存（setting.json schema strip 不收该
+// 键——红线上同 theme 的侧车裁定）。读取端：宿主（管理器 remoteForwardHost 目录过滤
+// deps）与被聚合实例（快照探针同开关的本地读取面）统一经 getOmnicodeRemoteCrossAccountPref。
+
+let remoteCrossAccountPrefCache: boolean | undefined;
+
+/**
+ * 跨账号聚合开关当前值（缺省 false = 仅同账号聚合，spec §7 默认关）。
+ * 管理器与实例共用：管理器经侧车 seed/自身变更维护；实例经 applyGlobalPrefs 下行维护。
+ */
+export function getOmnicodeRemoteCrossAccountPref(): boolean {
+  return remoteCrossAccountPrefCache ?? false;
+}
+
+/**
+ * 跨账号聚合开关写入端（管理器设置面；实例改值走上行 reportGlobalPrefs 既有链路）。
+ * 更新缓存 + 落侧车 + dispatch 下行广播（fire-and-forget，失败不重试——同步链既有语义）。
+ */
+export async function setOmnicodeRemoteCrossAccountPref(value: boolean): Promise<void> {
+  remoteCrossAccountPrefCache = value;
+  if (coordinator?.deps.identity === "manager") {
+    try {
+      await writeOmnicodeGlobalPrefsSidecarRemoteCrossAccount(value);
+    } catch (error) {
+      coordinator.deps.logger.warn("[omnicode] 跨账号聚合开关侧车写入失败（不阻断同步）:", error);
+    }
+    void dispatchOmnicodeGlobalPrefsChange({ omnicodeRemoteCrossAccount: value });
+  }
+}
+
+/**
+ * 管理器装配即从侧车 seed 开关缓存（fire-and-forget；读失败保持缺省关）。
+ * 目录查询是事件驱动重推——seed 迟到不影响正确性（下一次广播/连接快照收敛）。
+ */
+export async function seedOmnicodeRemoteCrossAccountPrefFromSidecar(): Promise<void> {
+  try {
+    const value = await readOmnicodeGlobalPrefsSidecarRemoteCrossAccount();
+    if (value !== undefined) {
+      remoteCrossAccountPrefCache = value;
+    }
+  } catch {
+    // 读失败保持缺省关（fail-open 缺省值；下一次变更/连接快照收敛）。
+  }
+}
+
+/** 测试复位：清空开关缓存（与协调器复位同约定，跨用例隔离）。 */
+export function resetOmnicodeRemoteCrossAccountPrefForTest(): void {
+  remoteCrossAccountPrefCache = undefined;
 }
 
 // ─── 观察点（main/index.ts 装配的两路变更来源） ───
@@ -229,6 +322,16 @@ async function dispatchOmnicodeGlobalPrefsChange(prefs: OmnicodeGlobalPrefsPaylo
       void writeOmnicodeGlobalPrefsSidecarTheme(normalized.theme).catch((error) => {
         deps.logger.warn("[omnicode] manager theme 侧车写入失败（不阻断同步）:", error);
       });
+    }
+    // [OmniCode] 丙1 远程聚合 R4：管理器自身改跨账号聚合开关 → 缓存即时生效 + 落侧车
+    //（与 theme 同一写盘内核；缓存先更新——目录过滤 deps 同步读缓存，不等落盘）。
+    if (normalized.omnicodeRemoteCrossAccount !== undefined) {
+      remoteCrossAccountPrefCache = normalized.omnicodeRemoteCrossAccount;
+      void writeOmnicodeGlobalPrefsSidecarRemoteCrossAccount(normalized.omnicodeRemoteCrossAccount).catch(
+        (error) => {
+          deps.logger.warn("[omnicode] 跨账号聚合开关侧车写入失败（不阻断同步）:", error);
+        },
+      );
     }
     return;
   }
@@ -363,6 +466,16 @@ export async function handleOmnicodeGlobalPrefsReportFromInstance(
       coordinator.deps.logger.warn("[omnicode] theme 侧车写入失败（不阻断同步）:", error);
     }
   }
+  // [OmniCode] 丙1 远程聚合 R4：跨账号聚合开关上行落地（侧车层键；缓存随
+  // applyOmnicodeGlobalPrefsLocally 同步刷新，下行广播沿用既有链路）。
+  if (prefs.omnicodeRemoteCrossAccount !== undefined) {
+    try {
+      await writeOmnicodeGlobalPrefsSidecarRemoteCrossAccount(prefs.omnicodeRemoteCrossAccount);
+      appliedKeys.push("omnicodeRemoteCrossAccount");
+    } catch (error) {
+      coordinator.deps.logger.warn("[omnicode] 跨账号聚合开关侧车写入失败（不阻断同步）:", error);
+    }
+  }
   applyOmnicodeGlobalPrefsLocally(prefs);
   // 下行广播带源实例 id（环形抑制在源实例侧裁决；管理器不做跳过——连接簿记可能滞后）。
   broadcastOmnicodeGlobalPrefsDownstream(prefs, sourceInstanceId || OMNICODE_GLOBAL_PREFS_MANAGER_SOURCE_ID);
@@ -442,6 +555,11 @@ export async function handleOmnicodeGlobalPrefsApplyCommand(
 function applyOmnicodeGlobalPrefsLocally(prefs: OmnicodeGlobalPrefsPayload): void {
   if (!coordinator) return;
   const { deps } = coordinator;
+  // [OmniCode] 丙1 远程聚合 R4：跨账号聚合开关热应用 = 本进程缓存更新（上行/下行两条
+  // 路径共用；manager/instance 身份一致——remoteForwardHost 目录过滤与实例读取端同源）。
+  if (prefs.omnicodeRemoteCrossAccount !== undefined) {
+    remoteCrossAccountPrefCache = prefs.omnicodeRemoteCrossAccount;
+  }
   if (prefs.theme !== undefined) {
     try {
       deps.injectStateBroadcast(STATE_THEME_CHANNEL, prefs.theme);
@@ -547,6 +665,9 @@ export async function mergeOmnicodeGlobalPrefsIntoSettingsFile(
     next.shortcutBindings = snapshot.shortcutBindings;
     written.push("shortcutBindings");
   }
+  // [OmniCode] 丙1 远程聚合 R4：omnicodeRemoteCrossAccount 不进 setting.json（appSettings
+  // schema strip 会在下次写盘丢弃未知键——与 theme 同款裁定）；实例侧经连接即推快照
+  // 交付到内存缓存（getOmnicodeRemoteCrossAccountPref），跨账号过滤权威在管理器目录视图。
   if (written.length === 0) return [];
   await writeJsonAtomic(instanceSettingsFile, next);
   return written;

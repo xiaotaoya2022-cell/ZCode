@@ -66,11 +66,14 @@ export {
 export {
   OMNICODE_GLOBAL_PREF_KEYS,
   OMNICODE_GLOBAL_PREFS_MANAGER_SOURCE_ID,
+  // [OmniCode] 丙1 远程聚合 R4：跨账号聚合开关键常量 + 值域校验（spec §7/§8-R4）
+  OMNICODE_REMOTE_CROSS_ACCOUNT_PREF_KEY,
   OMNICODE_THEME_PREF_KEY,
   buildOmnicodeLocaleSyncFields,
   filterOmnicodeGlobalPrefsFromPatch,
   isEmptyOmnicodeGlobalPrefsPayload,
   isOmnicodeGlobalPrefsEchoSelf,
+  isOmnicodeRemoteCrossAccountValue,
   isOmnicodeShortcutBindingsValue,
   isOmnicodeThemePreference,
   sanitizeOmnicodeGlobalPrefsPayload,

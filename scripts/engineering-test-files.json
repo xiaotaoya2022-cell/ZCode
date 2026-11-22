@@ -202,5 +202,6 @@
   "packages/desktop/test/omnicodeOmni5Bugfix.test.ts",
   "packages/ui/test/omnicodeOmni5BrandLogo.test.tsx",
   "packages/ui/test/omnicodeConsoleMaintenanceUi.test.ts",
-  "packages/ui/test/omnicodeTakeoverUi.test.ts"
+  "packages/ui/test/omnicodeTakeoverUi.test.ts",
+  "packages/desktop/test/omnicodeRemoteForwardR4.test.ts"
 ]

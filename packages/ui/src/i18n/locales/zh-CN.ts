@@ -4040,6 +4040,7 @@ const zhCN: Record<string, string> = {
   "omnicode.takeover.requestFailed": "接管请求发送失败（实例未连接管理器），请稍后重试。",
   "omnicode.takeover.acceptedToast": "接管成功，正在以可写模式重新打开工作区…",
   "omnicode.takeover.reopenFailed": "接管成功但重新打开 {path} 失败，请手动重新打开。",
+  "omnicode.remoteAggregate.hostExitedToast": "聚合宿主已退出，跨实例远控暂不可用。",
   "omnicode.takeover.deniedToast": "实例 {name} 已拒绝接管请求。",
   "omnicode.takeover.timeoutToast": "实例 {name} 未响应接管请求。",
   "omnicode.takeover.busyToast": "持有者正在处理其他接管请求，请稍后重试。",

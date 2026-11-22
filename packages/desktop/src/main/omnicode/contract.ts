@@ -118,3 +118,21 @@ export {
   handleOmnicodeRemoteWorkspaceListUplink,
   setupOmnicodeRemoteForwardHost,
 } from "./remoteForwardHost.js";
+// [OmniCode] 丙1 远程聚合 R4（spec: docs/omnicode/remote-aggregation.md §6/§7/§8-R4）：
+// 跨账号聚合开关（globalPrefs 键体系侧车层）+ 宿主退出 failover 提示对账面
+// （desktopProfileIpc managerHooks/断连钩子消费）。
+export {
+  broadcastOmnicodeRemoteHostAnnounce,
+  handleOmnicodeRemoteAggregateInstanceDisconnected,
+  noteOmnicodeRemoteAggregateHostInstance,
+} from "./remoteForwardHost.js";
+export {
+  getOmnicodeRemoteCrossAccountPref,
+  seedOmnicodeRemoteCrossAccountPrefFromSidecar,
+  setOmnicodeRemoteCrossAccountPref,
+} from "./globalPrefs.js";
+export {
+  listOmnicodeCrossAccountProfileIds,
+  refreshOmnicodeAccountFamilyForProfile,
+  seedOmnicodeAccountFamilyOwnKey,
+} from "./accountFamily.js";

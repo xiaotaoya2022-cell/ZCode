@@ -8653,6 +8653,7 @@ const koKR: Record<string, string> = {
   "omnicode.takeover.requestFailed": "인수 요청 전송 실패(인스턴스가 관리자에 연결되지 않음). 나중에 다시 시도하세요.",
   "omnicode.takeover.acceptedToast": "인수가 승인되었습니다. 워크스페이스를 편집 가능 모드로 다시 여는 중…",
   "omnicode.takeover.reopenFailed": "인수는 승인되었지만 {path} 다시 열기에 실패했습니다. 수동으로 다시 열어 주세요.",
+  "omnicode.remoteAggregate.hostExitedToast": "집계 호스트가 종료되었습니다. 인스턴스 간 원격 제어는 현재 사용할 수 없습니다.",
   "omnicode.takeover.deniedToast": "인스턴스 {name}이(가) 인수 요청을 거부했습니다.",
   "omnicode.takeover.timeoutToast": "인스턴스 {name}에서 인수 요청에 응답하지 않았습니다.",
   "omnicode.takeover.busyToast": "보유자가 다른 인수 요청을 처리 중입니다. 나중에 다시 시도하세요.",

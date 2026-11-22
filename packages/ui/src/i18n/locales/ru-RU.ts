@@ -8824,6 +8824,7 @@ const ruRU: Record<string, string> = {
   "omnicode.takeover.requestFailed": "Не удалось отправить запрос перехвата (экземпляр не подключён к менеджеру). Повторите позже.",
   "omnicode.takeover.acceptedToast": "Перехват принят. Повторно открываем рабочее пространство в режиме редактирования…",
   "omnicode.takeover.reopenFailed": "Перехват принят, но не удалось повторно открыть {path}. Откройте его вручную.",
+  "omnicode.remoteAggregate.hostExitedToast": "Хост агрегации завершил работу. Межэкземплярное удалённое управление сейчас недоступно.",
   "omnicode.takeover.deniedToast": "Экземпляр {name} отклонил запрос перехвата.",
   "omnicode.takeover.timeoutToast": "Экземпляр {name} не ответил на запрос перехвата.",
   "omnicode.takeover.busyToast": "Владелец обрабатывает другой запрос перехвата. Повторите позже.",

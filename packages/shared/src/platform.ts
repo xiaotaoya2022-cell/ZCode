@@ -523,7 +523,17 @@ export interface OmnicodeConsoleAdoptInput {
 /** [OmniCode] 控制台 main → renderer 的实例事件（缩略图帧 / 连接态 / 停帧态）。 */
 export interface OmnicodeInstanceEventPayload {
   profileId: string;
-  type: "thumbnail" | "connected" | "disconnected" | "focusRequested" | "framePaused";
+  type:
+    | "thumbnail"
+    | "connected"
+    | "disconnected"
+    | "focusRequested"
+    | "framePaused"
+    // [OmniCode] 丙1 远程聚合 R4（spec: docs/omnicode/remote-aggregation.md §6）：
+    // 聚合宿主实例退出（failover 提示，宿主自动转移为二期）——管理器对账钩子在
+    // omnicode 门控下广播；renderer 复用 D11 openedToast 同款 toast 机制提示
+    // （i18n 五语）。仅管理器进程窗口可收到（广播源 = 管理器桥服务）。
+    | "remoteHostExited";
   /** type=thumbnail 时的 JPEG base64 */
   frame?: string;
   /**

@@ -28,6 +28,7 @@ import { handleOmnicodeTakeoverDownlink, clearOmnicodeTakeoverInstanceState } fr
 // [OmniCode] 丙1 远程聚合 R3（spec: docs/omnicode/remote-aggregation.md §4/§5/§8-R3）：
 // 被聚合实例侧执行器——目录查询应答 + 快照变化上行报告（事件驱动零轮询；实例零 relay）。
 import {
+  handleOmnicodeRemoteHostAnnounce,
   handleOmnicodeRemoteWorkspaceListRequest,
   notifyOmnicodeRemoteWorkspaceSnapshotChanged,
 } from "./remoteForwardInstance.js";
@@ -267,6 +268,13 @@ function applyCommand(command: { type?: string; bounds?: unknown; path?: unknown
   // 被聚合实例零 relay 零凭据——只应答目录查询，spec §3 角色边界）。
   if (command.type === "remoteWorkspaceListRequest") {
     handleOmnicodeRemoteWorkspaceListRequest(command, sendOmnicodeInstanceBridgeUplink);
+    return;
+  }
+  // [OmniCode] 丙1 远程聚合 R4 failover：remoteHostAnnounce 宿主变更广播（spec §6）。
+  // 不依赖窗口存在性——schema 校验 + epoch 单调去重 + 本地目录视图缓存失效全在
+  // 执行器内完成（本阶段不做宿主自动转移，接收面只做提示配套的视图失效）。
+  if (command.type === "remoteHostAnnounce") {
+    handleOmnicodeRemoteHostAnnounce(command);
     return;
   }
   // [OmniCode] 批次2 B2-1（T4）：openWorkspace 不依赖窗口存在性——冷启动早期的请求也

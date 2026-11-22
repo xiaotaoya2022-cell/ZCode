@@ -4304,6 +4304,7 @@ const enUS: Record<string, string> = {
   "omnicode.takeover.requestFailed": "Failed to send takeover request (instance not connected to the manager). Try again later.",
   "omnicode.takeover.acceptedToast": "Takeover accepted. Reopening the workspace in editable mode…",
   "omnicode.takeover.reopenFailed": "Takeover accepted but reopening {path} failed. Please reopen it manually.",
+  "omnicode.remoteAggregate.hostExitedToast": "The aggregation host has exited. Cross-instance remote control is unavailable for now.",
   "omnicode.takeover.deniedToast": "Instance {name} declined the takeover request.",
   "omnicode.takeover.timeoutToast": "Instance {name} did not respond to the takeover request.",
   "omnicode.takeover.busyToast": "The holder is processing another takeover request. Try again later.",
