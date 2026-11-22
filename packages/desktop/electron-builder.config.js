@@ -1,8 +1,8 @@
 /* eslint-disable max-lines -- Electron Builder config keeps related packaging hooks together so build order stays explicit. */
-import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { createRequire } from "node:module";
 import { HELPER_APP_NAME } from "@zcode/zcode-cua/broker/helperConstants";
 import { runCommand, runCommandAndReadStdout } from "../../scripts/spawn-command.mjs";
@@ -223,6 +223,11 @@ const PACKAGING_PRUNE_PATTERNS = [
   "!**/CONTRIBUTING*",
   "!**/CODE_OF_CONDUCT*",
   "!**/SECURITY*",
+  // 打包清扫（2026-11-22，审计 F6/F7 收口）：tsup onSuccess 写入的 dev-ready 标记
+  // 只被 dev.mjs 消费（scripts/write-dev-ready-marker.mjs），发布包不携带；依赖包
+  // 文档变体 HISTORY.md（axios 链 mime-db/mime-types 等）未被 README*/CHANGELOG* 覆盖。
+  "!**/.*-build-ready",
+  "!**/HISTORY*",
   // 打包瘦身（2026-11-21）：tsbuildinfo 是增量编译缓存，任何运行时都不会读取；
   // out/ 顶层两个 + 随包依赖里的共 ~1.9MB，全部不入包。
   "!**/*.tsbuildinfo",
@@ -252,6 +257,42 @@ const PACKAGING_PRUNE_PATTERNS = [
 function buildDesktopArtifactName(platformName, extension = "${ext}") {
   // 测试环境产物必须和正式安装包文件名区分，避免上传、下载或人工验收时混用。
   return `\${productName}-\${version}-${platformName}-\${arch}${desktopArtifactEnvSuffix}.${extension}`;
+}
+
+// 打包清扫（2026-11-22，审计 F6/F7 收口）：afterPack 的运行时依赖补缺按包整目录
+// cpSync（injectHoistedRuntimeModulesIntoAsar），会绕过 files 的白名单裁剪，把
+// README/CHANGELOG/HISTORY、.map、tsbuildinfo 与 test/example 目录重新带进 app.asar
+// （omni.2 实测 nan/cpu-features/node-addon-api 文档残留）。这里按
+// PACKAGING_PRUNE_PATTERNS 的同一语义在复制入口过滤，保证两条注入路径产物一致；
+// LICENSE 继续保留（与 files 裁剪语义相同）。
+const PRUNED_PACKAGING_COPY_FILE_NAME_RE =
+  /^(?:README|CHANGELOG|HISTORY|CONTRIBUTING|CODE_OF_CONDUCT|SECURITY)/i;
+const PRUNED_PACKAGING_COPY_DIRECTORY_NAMES = new Set([
+  "__tests__",
+  "test",
+  "tests",
+  "example",
+  "examples",
+]);
+
+// 导出供 electronBuilderSecurity.test.ts 断言与 files 裁剪的同口径语义（electron-builder
+// 只消费本模块 default export，多余具名导出不影响打包行为）。
+export function isPrunedPackagingCopyEntry(sourcePath) {
+  const entryName = basename(sourcePath);
+  if (
+    entryName.endsWith(".map") ||
+    entryName.endsWith(".pdb") ||
+    entryName.endsWith(".tsbuildinfo")
+  ) {
+    return true;
+  }
+  if (PRUNED_PACKAGING_COPY_FILE_NAME_RE.test(entryName)) {
+    return true;
+  }
+  if (PRUNED_PACKAGING_COPY_DIRECTORY_NAMES.has(entryName)) {
+    return statSync(sourcePath, { throwIfNoEntry: false })?.isDirectory() ?? false;
+  }
+  return false;
 }
 
 function runAsarCommand(args) {
@@ -411,7 +452,12 @@ async function injectHoistedRuntimeModulesIntoAsar(context) {
         // 所以在 afterPack 阶段直接重写 app.asar，先把这些运行时包补进去，再交给后续签名和出包。
         mkdirSync(dirname(targetModulePath), { recursive: true });
         rmSync(targetModulePath, { force: true, recursive: true });
-        cpSync(sourceModulePath, targetModulePath, { recursive: true });
+        // 打包清扫（2026-11-22）：整目录补缺复制必须与 files 裁剪同口径，避免注入
+        // 把文档/测试/缓存文件重新带进 app.asar（详见 isPrunedPackagingCopyEntry 注释）。
+        cpSync(sourceModulePath, targetModulePath, {
+          recursive: true,
+          filter: (sourcePath) => !isPrunedPackagingCopyEntry(sourcePath),
+        });
       }
     });
 
@@ -621,6 +667,11 @@ export default {
   electronLanguages: ["en-US", "zh-CN", "ja-JP", "ko-KR", "ru-RU"],
   // builder 的依赖树推导不稳定；显式读取 package.json，避免开发与安装包版本分叉。
   electronVersion: desktopElectronVersion,
+  // 构建打包审计 F4（2026-11-22）：electron-builder 的 compression 缺省 normal，NSIS
+  // 安装器走 7z/LZMA 常规压缩。maximum 用构建时长换安装包体积（omni.2 基线 149.4MiB
+  // 实测预估 -6~12MB）。代价面：blockmap 差分本轮已因瘦身轮失效（全量重下为一次性成本），
+  // 这里不引入新增差分代价；该键是全局配置，官方/omnicode 共用同一构建配置，无 flavor 分叉。
+  compression: "maximum",
   // 旧 Windows 协议注册可能在应用 JS 重写注册表前注入 --inspect-brk。
   // 在签名前关闭原生 Inspector 参数，覆盖升级后首次启动；保留 Agent 所需的 RunAsNode。
   ...(targetPlatform.os === "win32"

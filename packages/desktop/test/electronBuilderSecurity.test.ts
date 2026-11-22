@@ -271,3 +271,43 @@ it("files 规则裁剪已核实为构建期的依赖，且保留 @babel/runtime"
     files.indexOf("!node_modules/@babel/**"),
   );
 });
+
+// 打包清扫（2026-11-22，审计 F6/F7 收口）：dev-ready 标记与 HISTORY.md 文档变体
+// 不入发布包；afterPack 整目录补缺复制必须与 files 裁剪同口径（两条注入路径产物一致）。
+it("files 裁剪覆盖 dev-ready 标记与 HISTORY 文档变体，补缺复制同口径过滤", async () => {
+  const { default: config, isPrunedPackagingCopyEntry } = await import(
+    "../electron-builder.config.js"
+  );
+  const files = config.files as string[];
+  for (const pattern of ["!**/.*-build-ready", "!**/HISTORY*"]) {
+    expect(files, `files 应包含 ${pattern}`).toContain(pattern);
+    expect(files.indexOf(pattern)).toBeGreaterThan(files.indexOf("!node_modules/**"));
+  }
+
+  const tmpRoot = await mkdtemp(join(tmpdir(), "zcode-packaging-copy-"));
+  try {
+    for (const [entryName, expectedPruned] of [
+      ["README.md", true],
+      ["HISTORY.md", true],
+      ["CHANGELOG.md", true],
+      ["source.js.map", true],
+      ["tsconfig.tsbuildinfo", true],
+      ["LICENSE", false],
+      ["index.js", false],
+      ["package.json", false],
+    ] as const) {
+      expect(isPrunedPackagingCopyEntry(join(tmpRoot, entryName)), entryName).toBe(expectedPruned);
+    }
+    const testDir = join(tmpRoot, "test");
+    await mkdir(testDir);
+    expect(isPrunedPackagingCopyEntry(testDir), "test/ 目录应整体跳过").toBe(true);
+    // 名为 test 的普通文件（非目录）不裁剪，避免误伤运行时入口文件。
+    const testNamedFile = join(tmpRoot, "pkg");
+    await mkdir(testNamedFile);
+    const testFilePath = join(testNamedFile, "test");
+    await writeFile(testFilePath, "module.exports = {};\n");
+    expect(isPrunedPackagingCopyEntry(testFilePath), "test 名字文件不应误裁").toBe(false);
+  } finally {
+    await rm(tmpRoot, { force: true, recursive: true });
+  }
+});
