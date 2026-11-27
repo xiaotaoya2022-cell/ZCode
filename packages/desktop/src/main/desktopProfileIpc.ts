@@ -115,6 +115,7 @@ import { startOmnicodeAccountClaimRun } from "./omnicode/claimRunner.js";
 import { detectOmnicodeClaimableAccountsShared } from "./omnicode/accountDetection.js";
 import { createOmnicodeClaimAutoPollDeps, startOmnicodeClaimAutoPoll } from "./omnicode/claimAutoPoll.js";
 import { assertValidProfileId } from "./omnicode/contract.js";
+import { isOmnicodeProfileRunning } from "./omnicode/instanceManager.js";
 
 export function registerDesktopOmnicodeProfileIpcHandlers(): void {
   // [OmniCode] 批次2 B2-1（T3）：omnicode 实例进程不装配管理面（桥 server、reconcile、
@@ -164,6 +165,13 @@ export function registerDesktopOmnicodeProfileIpcHandlers(): void {
   });
 
   ipcMain.handle(PlatformChannels.OmnicodeProfileRemove, async (_event, input: { id: string }) => {
+    // [OmniCode] 2026-11-28 挑刺 A-02（P0）修复：main 侧运行态守卫。此前两层都无检查
+    //（profileRuntime 注释推责给"IPC/编排层"，IPC 层却只做确认后直调）——运行实例的
+    // .zcode 数据根会被 rm -rf 半毁（Windows 上持有句柄的 sqlite/凭据文件部分失败），
+    // 数据损坏级。renderer 的 running 状态可能过期，main 侧实时判定为准。
+    if (isOmnicodeProfileRunning(input.id)) {
+      throw new Error(`[omnicode] 实例正在运行，拒绝删除（先停止实例）: ${input.id}`);
+    }
     await removeOmnicodeProfile(input.id);
     // [OmniCode] 批次3 终审修复（P2-⑤）：清理 console-ui dockedByProfileId 残留键
     //（删实例后覆盖键不再有意义——键为时间戳+随机无碰撞，dockAll 亦会清空，此处只是

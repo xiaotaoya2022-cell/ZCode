@@ -29,6 +29,7 @@ import {
   type OmnicodeAccountDataSnapshot,
 } from "./accountData.js";
 import { probeOmnicodeClaimSource } from "./accountDetection.js";
+import { logger } from "../logger.js";
 import { appendOmnicodeClaimHistory, readOmnicodeConsoleUiState, writeOmnicodeConsoleUiState } from "./consoleUiState.js";
 import { runOmnicodeClaimQueue, type OmnicodeClaimJob } from "./claimPacer.js";
 import {
@@ -139,20 +140,28 @@ export type OmnicodeClaimRunStart =
  * 启动一次领取 run：目标解析（同步段 await）→ 节奏器逐张 → 历史 FIFO 追加 →
  * 事件广播。run 启动即返回 runId（结果经事件 + claimHistory），不阻塞 IPC 调用方。
  * 连发保护：已有 run 时拒绝（in_progress）。
+ * [OmniCode] 2026-11-28 挑刺 A-01 修复：此前判空（146）与占位（153）之间隔着
+ * resolveOmnicodeClaimTargets 的多次网络 await——并发第二调用在第一调用挂于 148 行时
+ * 同样通过判空，随后双方各自覆盖 activeRun 并启动双 run（重复 claim 踩风控红线）。
+ * 修法：判空后【同步】占位 activeRun，竞态窗口闭合；目标解析失败/无目标在 finally
+ * 回滚占位（run 主体接管后由其自身 finally 清理）。
  */
 export async function startOmnicodeAccountClaimRun(
   options: OmnicodeClaimRunOptions,
 ): Promise<OmnicodeClaimRunStart> {
   if (activeRun) return { ok: false, reason: "in_progress" };
   const runId = randomUUID();
-  const targets = options.targets ?? (await resolveOmnicodeClaimTargets({ fetchImpl: options.fetchImpl }));
-  const total = targets.jobs.length + targets.skippedAccounts.length;
-  if (total === 0) {
-    return { ok: false, reason: "no_targets" };
-  }
   activeRun = { runId };
-  void (async () => {
+  let runBodyStarted = false;
+  try {
+    const targets = options.targets ?? (await resolveOmnicodeClaimTargets({ fetchImpl: options.fetchImpl }));
+    const total = targets.jobs.length + targets.skippedAccounts.length;
+    if (total === 0) {
+      return { ok: false, reason: "no_targets" };
+    }
+    void (async () => {
     try {
+      runBodyStarted = true;
       options.broadcast({ type: "started", runId, mode: options.mode, total });
       // 无法执行的账号先行作为 skipped 事件发出（保持"逐张"叙事顺序：先不可领后可领）
       for (const skipped of targets.skippedAccounts) {
@@ -226,11 +235,36 @@ export async function startOmnicodeAccountClaimRun(
       });
       // 历史落盘（best-effort：写失败仅告警不回滚事件；见 consoleUiState.write 注释）
       await persistOmnicodeClaimHistory(result.entries).catch(() => undefined);
+    } catch (error) {
+      // [OmniCode] 挑刺 A-05 修复：run 主体此前无 catch——中途 broadcast/落盘异常 =
+      // 无 done 事件、无历史、UI 永久"进行中"。兜底广播 done（计数不可知如实置 0，
+      // aborted=false）解除 UI 卡态；异常只进日志不抛穿（run 是 fire-and-forget）。
+      logger.warn("[omnicode-claim-runner] run 主体异常（兜底 done 已广播）:", error);
+      try {
+        options.broadcast({
+          type: "done",
+          runId,
+          succeeded: 0,
+          failed: 0,
+          skipped: 0,
+          aborted: false,
+        });
+      } catch {
+        /* 广播本身失败已无通道可告知，日志即终态 */
+      }
     } finally {
       if (activeRun?.runId === runId) activeRun = null;
     }
   })();
-  return { ok: true, runId, total };
+    return { ok: true, runId, total };
+  } catch (error) {
+    // 占位后的前置段异常（resolveOmnicodeClaimTargets 理论不抛，防御性兜底）
+    logger.warn("[omnicode-claim-runner] 目标解析异常:", error);
+    return { ok: false, reason: "no_targets" };
+  } finally {
+    // run 主体未接管（前置段 return/throw）时回滚占位；主体已接管则由其自身 finally 清理
+    if (activeRun?.runId === runId && !runBodyStarted) activeRun = null;
+  }
 }
 
 /** claimHistory 追加写盘（读→追加→写，writeJsonAtomic 原子发布）。 */
