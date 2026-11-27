@@ -987,10 +987,11 @@ export interface OmnicodeAccountClaimRunResult {
 /** 领取执行进度事件（main → renderer 广播；renderer 可订阅渲染逐张动效）。 */
 export type OmnicodeAccountClaimEventPayload =
   | { type: "started"; runId: string; mode: "manual" | "auto"; total: number }
-  | { type: "account_start"; runId: string; index: number; total: number; profileId: string }
+  | { type: "account_start"; runId: string; mode: "manual" | "auto"; index: number; total: number; profileId: string }
   | {
       type: "account_result";
       runId: string;
+      mode: "manual" | "auto";
       profileId: string;
       planId: string;
       outcome: "success" | "failed" | "skipped";
@@ -1000,12 +1001,19 @@ export type OmnicodeAccountClaimEventPayload =
   | {
       type: "done";
       runId: string;
+      mode: "manual" | "auto";
       succeeded: number;
       failed: number;
       skipped: number;
       /** 用户中断（skip 剩余）时为 true。 */
       aborted: boolean;
     };
+/**
+ * [OmniCode] 2026-11-28 挑刺 B-03 修复：全部事件携带 mode。此前只有 started 带 mode，
+ * renderer 靠 manualRunIdRef 时序匹配区分 manual/auto——main 侧 skipped account_result
+ * 在 invoke resolve 前同步广播，manualRunIdRef 尚未赋值 → manual 首批事件误归 auto
+ * 分支静默清票、结算漏计。mode 是广播方事实，与 renderer 时序无关，竞态根除。
+ */
 
 // ─── [OmniCode] 批次3 UI 批次：赛博鸡蛋检测（门票叠数据源）。检测 = 对每个可用账号
 // 调 preview（走既有 billingClient，实例不必在运行）；结果在 main 侧汇聚后经

@@ -8858,6 +8858,7 @@ const jaJP: Record<string, string> = {
   "console.maintenance.sessionDbBackupDone": "セッション DB をバックアップしました：{path}",
   "console.maintenance.sessionDbBackupFailed": "セッション DB のバックアップに失敗しました。",
   "console.maintenance.actionFailed": "操作に失敗しました。再試行してください。",
+  "console.dragSortTitle": "ドラッグでインスタンスを並べ替え",
   "console.instanceFilterPlaceholder": "インスタンス絞り込み（名前/番号）",
   // [OmniCode] D12 接管流：观察者横幅按钮 + 回执トースト + 保持側確認ダイアログ（五語慣例）
   "settings.omnicodeProfiles.smartScheduling": "スマートスケジューリング",

@@ -24,11 +24,16 @@ import { getAppConfigDir } from "../paths.js";
 // 恒为 true（docs/omnicode/de-telemetry.md），保留表达式以便未来以 env 分级放行。
 const REPORT_ENDPOINT = OMNICODE_TELEMETRY_DISABLED ? "" : ZCODE_TELEMETRY_REPORT_ENDPOINT;
 
-// [OmniCode] 2026-11-28 真机修复：去遥测开启时全部上报入口在函数体开头短路。
-// 实证缺陷：此前只有 sendReport 内部静默 return，reportAppDailyActive 会继续把
-// lastDailyActiveDate 写入 telemetry-state.json——本地显示"今日已日活"而服务端
-// 从未收到（鸡蛋投放按设备活跃度定向，本地假标记掩盖了"哑巴设备"真相）。
-// 入口级短路：不写 in-flight、不写完成标记，本地状态如实反映"从未上报"。
+// [OmniCode] 2026-11-28 用户拍板放行（"修"）：设备级心跳专用通道。官方鸡蛋投放按
+// 设备活跃度定向（event/report 是唯一资格信号，端点已从官方安装包 asar 取证）；
+// app_daily_active（每日一条，lastDailyActiveDate 去重）+ app_launch（每次启动一条）
+// 是官方客户端每日本来就会发的最小事件——只有"这个设备今天开了应用"，无任何行为
+// 内容。其余一切行为埋点（reportEvent：send_btn/message_completion/agent_step/
+// session_create 等）继续走空端点全禁。
+const OMNICODE_HEARTBEAT_ENDPOINT = "https://zcode.z.ai/api/v1/event/report";
+
+// [OmniCode] 行为埋点禁用闸门（REPORT_ENDPOINT 置空 → 恒 true）：reportEvent 专属。
+// 设备级心跳（app_launch/app_daily_active）已走专用通道放行，不受此闸门影响。
 const OMNICODE_REPORTING_DISABLED = REPORT_ENDPOINT === "";
 
 function sessionCreateEventId(userId: string, sessionId: string): string {
@@ -431,9 +436,13 @@ export function createTelemetryCore(dependencies: TelemetryCoreDependencies = {}
     eventId: string,
     userId: string,
     deviceMid: string,
+    // [OmniCode] 心跳放行：设备级心跳（app_launch/app_daily_active）传专用端点；
+    // 行为埋点走缺省 REPORT_ENDPOINT（去遥测下为空 → 短路）。
+    endpointOverride?: string,
   ): Promise<void> {
     // 构建期未配置事件上报端点时不上报（见 docs/desktop/build-time-optional-capabilities.md）
-    if (!REPORT_ENDPOINT) return;
+    const endpoint = endpointOverride ?? REPORT_ENDPOINT;
+    if (!endpoint) return;
     // body 的 client_language 与 X-Client-Language 同源，都取发送时刻的界面语言。
     const hostClientLanguage = dependencies.resolveClientLanguage?.()?.trim();
     const context = hostClientLanguage
@@ -476,10 +485,10 @@ export function createTelemetryCore(dependencies: TelemetryCoreDependencies = {}
       ...(payload.messageId ? { message_id: payload.messageId } : {}),
     });
 
-    const endpoint = String(
+    const resolvedEndpoint = String(
       rewriteZCodeEndpointUrl(
-        REPORT_ENDPOINT,
-        (await dependencies.resolveZCodeEndpointOrigin?.()) ?? REPORT_ENDPOINT,
+        endpoint,
+        (await dependencies.resolveZCodeEndpointOrigin?.()) ?? endpoint,
       ),
     );
 
@@ -500,7 +509,7 @@ export function createTelemetryCore(dependencies: TelemetryCoreDependencies = {}
     for (let attempt = 1; attempt <= REPORT_MAX_ATTEMPTS; attempt += 1) {
       attempts = attempt;
       try {
-        await sendReportAttempt(endpoint, requestBody, headers, userId);
+        await sendReportAttempt(resolvedEndpoint, requestBody, headers, userId);
         return;
       } catch (error) {
         lastError =
@@ -575,6 +584,7 @@ export function createTelemetryCore(dependencies: TelemetryCoreDependencies = {}
       talkId?: string;
       messageId?: string;
     }): Promise<void> {
+      // [OmniCode] 行为埋点全禁（空端点短路，见 REPORT_ENDPOINT 注释）。
       if (OMNICODE_REPORTING_DISABLED) return Promise.resolve();
       return trackReport(
         (async () => {
@@ -608,7 +618,7 @@ export function createTelemetryCore(dependencies: TelemetryCoreDependencies = {}
     },
 
     reportAppLaunch(context: TelemetryRendererContext): Promise<void> {
-      if (OMNICODE_REPORTING_DISABLED) return Promise.resolve();
+      // [OmniCode] 设备级心跳（已放行）：走心跳专用端点，与行为埋点禁用互不影响。
       return trackReport(
         (async () => {
           const eventId = randomUUID();
@@ -627,13 +637,15 @@ export function createTelemetryCore(dependencies: TelemetryCoreDependencies = {}
             eventId,
             userId,
             deviceMid,
+            OMNICODE_HEARTBEAT_ENDPOINT,
           );
         })(),
       );
     },
 
     reportAppDailyActive(context: TelemetryRendererContext): Promise<void> {
-      if (OMNICODE_REPORTING_DISABLED) return Promise.resolve();
+      // [OmniCode] 设备级心跳（已放行）：走心跳专用端点；lastDailyActiveDate 仅在
+      // 真实发送成功后写入（telemetry-state 本地标记恢复真实语义）。
       return trackReport(
         (async () => {
           const timestamp = now();
@@ -682,6 +694,7 @@ export function createTelemetryCore(dependencies: TelemetryCoreDependencies = {}
               pendingReport.eventId,
               userId,
               pendingReport.deviceMid,
+              OMNICODE_HEARTBEAT_ENDPOINT,
             );
           } catch (error) {
             await withTelemetryStateLock(dependencies.homeDir, async (state) => {

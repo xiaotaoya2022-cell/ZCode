@@ -168,6 +168,7 @@ export async function startOmnicodeAccountClaimRun(
         options.broadcast({
           type: "account_result",
           runId,
+          mode: options.mode,
           profileId: skipped.profileId,
           planId: "",
           outcome: "skipped",
@@ -203,6 +204,7 @@ export async function startOmnicodeAccountClaimRun(
             options.broadcast({
               type: "account_start",
               runId,
+              mode: options.mode,
               index: event.index + targets.skippedAccounts.length,
               total,
               profileId: event.profileId,
@@ -213,6 +215,7 @@ export async function startOmnicodeAccountClaimRun(
             options.broadcast({
               type: "account_result",
               runId,
+              mode: options.mode,
               profileId: event.profileId,
               planId: event.planId,
               outcome: event.outcome,
@@ -225,6 +228,7 @@ export async function startOmnicodeAccountClaimRun(
             options.broadcast({
               type: "done",
               runId,
+              mode: options.mode,
               succeeded: event.succeeded,
               failed: event.failed,
               skipped: event.skipped + targets.skippedAccounts.length,
@@ -244,6 +248,7 @@ export async function startOmnicodeAccountClaimRun(
         options.broadcast({
           type: "done",
           runId,
+          mode: options.mode,
           succeeded: 0,
           failed: 0,
           skipped: 0,

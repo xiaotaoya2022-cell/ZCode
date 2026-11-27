@@ -4010,6 +4010,7 @@ const zhCN: Record<string, string> = {
   "console.maintenance.sessionDbBackupDone": "会话库已备份：{path}",
   "console.maintenance.sessionDbBackupFailed": "会话库备份失败。",
   "console.maintenance.actionFailed": "操作失败，请重试。",
+  "console.dragSortTitle": "拖拽调整实例排序",
   "console.instanceFilterPlaceholder": "过滤实例（名称/序号）",
   "console.egg.toastInProgress": "已有一轮领取在进行中",
   "console.egg.autoBadgeTitle": "今日已自动领取 {count} 份",

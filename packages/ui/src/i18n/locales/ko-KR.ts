@@ -8651,6 +8651,7 @@ const koKR: Record<string, string> = {
   "console.maintenance.sessionDbBackupDone": "세션 DB 백업 완료: {path}",
   "console.maintenance.sessionDbBackupFailed": "세션 DB 백업에 실패했습니다.",
   "console.maintenance.actionFailed": "작업에 실패했습니다. 다시 시도하세요.",
+  "console.dragSortTitle": "드래그하여 인스턴스 순서 변경",
   "console.instanceFilterPlaceholder": "인스턴스 필터(이름/번호)",
   // [OmniCode] D12 인수 흐름: 관찰자 배너 버튼 + 결과 토스트 + 보유자 확인 대화상자（五語慣例）
   "settings.omnicodeProfiles.smartScheduling": "스마트 스케줄링",

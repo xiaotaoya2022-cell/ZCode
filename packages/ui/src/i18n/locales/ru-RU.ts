@@ -8822,6 +8822,7 @@ const ruRU: Record<string, string> = {
   "console.maintenance.sessionDbBackupDone": "Копия базы сессий создана: {path}",
   "console.maintenance.sessionDbBackupFailed": "Не удалось создать копию базы сессий.",
   "console.maintenance.actionFailed": "Действие не удалось. Повторите.",
+  "console.dragSortTitle": "Перетащите, чтобы изменить порядок",
   "console.instanceFilterPlaceholder": "Фильтр экземпляров (имя/№)",
   // [OmniCode] D12 поток перехвата: кнопка баннера наблюдателя + тосты результатов + диалог подтверждения владельца（五語慣例）
   "settings.omnicodeProfiles.smartScheduling": "Умное планирование",

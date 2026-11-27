@@ -169,7 +169,10 @@ export function EggClaimOverlay() {
       }
       if (payload.type === "account_start") return;
       if (payload.type === "account_result") {
-        const isManual = payload.runId === manualRunIdRef.current;
+        // [OmniCode] 挑刺 B-03：mode 是广播方事实，与 renderer 侧 runId 登记时序无关
+        //（main 的 skipped account_result 在 invoke resolve 前到达，runId 匹配会把
+        // manual 首批事件误归 auto 分支）。runId 匹配保留为双保险，mode 为准。
+        const isManual = payload.mode === "manual" || payload.runId === manualRunIdRef.current;
         if (isManual) {
           const next: OmnicodeClaimTicketOutcome = {
             profileId: payload.profileId,
@@ -189,7 +192,7 @@ export function EggClaimOverlay() {
         return;
       }
       if (payload.type === "done") {
-        const isManual = payload.runId === manualRunIdRef.current;
+        const isManual = payload.mode === "manual" || payload.runId === manualRunIdRef.current;
         if (isManual) {
           const summary = summarizeOmnicodeClaimSettlement(outcomesRef.current, {
             aborted: payload.aborted,

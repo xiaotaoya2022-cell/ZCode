@@ -4274,6 +4274,7 @@ const enUS: Record<string, string> = {
   "console.maintenance.sessionDbBackupDone": "Session DB backed up: {path}",
   "console.maintenance.sessionDbBackupFailed": "Session DB backup failed.",
   "console.maintenance.actionFailed": "Action failed. Retry.",
+  "console.dragSortTitle": "Drag to reorder instances",
   "console.instanceFilterPlaceholder": "Filter instances (name/#seq)",
   "console.egg.toastInProgress": "A claim run is already in progress",
   "console.egg.autoBadgeTitle": "{count} auto-claimed today",
