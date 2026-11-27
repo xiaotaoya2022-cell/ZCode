@@ -341,3 +341,40 @@ describe("模式二 R2 预留：bridge-proxy 附加账号材料协议占位", ()
     );
   });
 });
+
+// [OmniCode] 2026-11-28 紧急修复配套：绑定来源（explicit/smart）入册 + resolveEntry。
+// 真机实证：智能调度把 bigmodel 附加账号绑到 zai-start-plan 会话 → override fail-closed
+// → 凭据不可用永久卡死；自愈处置需区分来源（smart 释放回落，explicit 保持红线）。
+describe("omnicode session account scope: bind source + resolveEntry", () => {
+  it("bind 缺省 source=explicit；显式传 smart 入册；resolveEntry 带来源且 touch 语义同 resolve", () => {
+    const registry = createOmnicodeSessionAccountRegistry({ isActive: () => true });
+    registry.bind({ sessionId: "s1", accountId: "acct-a" });
+    expect(registry.resolveEntry({ sessionId: "s1" })).toEqual({
+      accountId: "acct-a",
+      source: "explicit",
+    });
+    registry.bind({ sessionId: "s2", accountId: "acct-b", source: "smart" });
+    expect(registry.resolveEntry({ sessionId: "s2" })).toEqual({
+      accountId: "acct-b",
+      source: "smart",
+    });
+    // resolve 仍返回 accountId（旧消费方零改动）
+    expect(registry.resolve({ sessionId: "s2" })).toBe("acct-b");
+    // 门控关 → bind no-op
+    const off = createOmnicodeSessionAccountRegistry({ isActive: () => false });
+    off.bind({ sessionId: "s3", accountId: "acct-c", source: "smart" });
+    expect(off.resolveEntry({ sessionId: "s3" })).toBeNull();
+  });
+
+  it("重复绑定覆盖旧值含来源（smart 覆盖 explicit 反之亦然）；unbind 清条目", () => {
+    const registry = createOmnicodeSessionAccountRegistry({ isActive: () => true });
+    registry.bind({ sessionId: "s4", accountId: "acct-x", source: "smart" });
+    registry.bind({ sessionId: "s4", accountId: "acct-y" });
+    expect(registry.resolveEntry({ sessionId: "s4" })).toEqual({
+      accountId: "acct-y",
+      source: "explicit",
+    });
+    registry.unbindBySessionId("s4");
+    expect(registry.resolveEntry({ sessionId: "s4" })).toBeNull();
+  });
+});

@@ -441,6 +441,7 @@ export function createZCodeTaskServiceAdapter(
         workspaceKey: resolveWorkspaceKey(target),
         sessionId: target.taskId,
         accountId: params.omnicodeAccountId,
+        source: "explicit",
       });
       options.omnicodeAccountScheduler?.registerStart({
         sessionId: target.taskId,
@@ -478,6 +479,7 @@ export function createZCodeTaskServiceAdapter(
           workspaceKey: resolveWorkspaceKey(target),
           sessionId: target.taskId,
           accountId: decision.accountId,
+          source: decision.reason === "explicit" ? "explicit" : "smart",
         });
         options.omnicodeAccountScheduler?.registerStart({
           sessionId: target.taskId,

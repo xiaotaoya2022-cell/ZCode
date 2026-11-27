@@ -53,10 +53,28 @@ function sessionScopeRegistryKey(params: {
 }
 
 export interface OmnicodeSessionAccountScopeRegistry {
-  /** 记录会话→附加账号绑定（门控关/键或 accountId 非法时 no-op；重复绑定覆盖旧值）。 */
-  bind(params: { workspaceKey?: string | null; sessionId: string; accountId: string }): void;
+  /**
+   * 记录会话→附加账号绑定（门控关/键或 accountId 非法时 no-op；重复绑定覆盖旧值）。
+   * [OmniCode] 2026-11-28：source 记录绑定来源——explicit（R3 选择器，用户意图）/
+   * smart（R4 智能调度，系统自动）。物化失败的自愈处置只对 smart 生效（显式绑定
+   * fail-closed 红线不变：不能替用户静默换账号扣配额）。缺省 explicit（保守）。
+   */
+  bind(params: {
+    workspaceKey?: string | null;
+    sessionId: string;
+    accountId: string;
+    source?: "explicit" | "smart";
+  }): void;
   /** 读取会话绑定的附加账号 id；未绑定/非法键 → null（官方路径信号）。 */
   resolve(params: { workspaceKey?: string | null; sessionId: string }): string | null;
+  /**
+   * [OmniCode] 2026-11-28：读取绑定条目（含来源；LRU touch 语义与 resolve 一致）。
+   * 物化失败自愈（smart 自动释放）需要区分来源。
+   */
+  resolveEntry(params: {
+    workspaceKey?: string | null;
+    sessionId: string;
+  }): { accountId: string; source: "explicit" | "smart" } | null;
   /** 显式解除会话绑定（会话删除等生产者可调用；未绑定为 no-op）。 */
   unbind(params: { workspaceKey?: string | null; sessionId: string }): void;
   /** 按 sessionId 全局解绑（会话 id 全局唯一——免疫 workspaceKey 归一化漂移，终审 P2-3）。 */
@@ -76,12 +94,12 @@ export function createOmnicodeSessionAccountRegistry(options?: {
   // LRU-by-resolve（Map 保插入序）：resolve/bind 命中先删再插移到队尾 = 最近使用；
   // 淘汰弹出队首 = 最久未 resolve 的绑定（R3.5 终审 P2-1：活跃会话每请求都 resolve →
   // 永不落到队首，运行期永不淘汰）。
-  const entries = new Map<string, string>();
-  const touch = (key: string, accountId: string): void => {
+  const entries = new Map<string, { accountId: string; source: "explicit" | "smart" }>();
+  const touch = (key: string, entry: { accountId: string; source: "explicit" | "smart" }): void => {
     entries.delete(key);
-    entries.set(key, accountId);
+    entries.set(key, entry);
   };
-  return {
+  const registry: OmnicodeSessionAccountScopeRegistry = {
     bind(params) {
       if (!isActive()) return;
       const key = sessionScopeRegistryKey(params);
@@ -92,16 +110,19 @@ export function createOmnicodeSessionAccountRegistry(options?: {
         if (lru === undefined) break;
         entries.delete(lru);
       }
-      touch(key, accountId);
+      touch(key, { accountId, source: params.source ?? "explicit" });
     },
     resolve(params) {
+      return registry.resolveEntry(params)?.accountId ?? null;
+    },
+    resolveEntry(params) {
       const key = sessionScopeRegistryKey(params);
       if (!key) return null;
-      const accountId = entries.get(key);
-      if (accountId === undefined) return null;
+      const entry = entries.get(key);
+      if (entry === undefined) return null;
       // 命中即 touch（LRU 记账；每次凭据解析一次 O(1) Map 重插，无轮询无定时器）。
-      touch(key, accountId);
-      return accountId;
+      touch(key, entry);
+      return entry;
     },
     unbind(params) {
       const key = sessionScopeRegistryKey(params);
@@ -139,6 +160,7 @@ export function createOmnicodeSessionAccountRegistry(options?: {
     },
     isActive,
   };
+  return registry;
 }
 
 /**

@@ -231,6 +231,7 @@ import type {
   AccountRequestAuthMaterial,
   IAccountRequestAuthService,
 } from "#src/model-provider/accountRequestAuthService.js";
+import { AccountRequestCredentialUnavailableError } from "#src/model-provider/accountProviderRequestAuthService.js";
 import {
   mergeAutomationMutationToolDenylist,
   mergeOffPeakMutationToolDenylist,
@@ -1898,29 +1899,68 @@ export function createZCodeAgentService(
     // 会话绑定进入 runWithOmnicodeAccountScope 作用域，accountOverride 的三个 loader
     // 覆盖边界即按附加账号材料作答。未绑定/门控关/官方装配（无注入）→ 决策恒 false，
     // 官方路径逐字不变。
-    const omnicodeAccountId = omnicodeSessionAccountScopes
-      ? omnicodeSessionAccountScopes.resolve({
+    // [OmniCode] 2026-11-28 紧急修复（真机 TraceID 92a51349 实证）：智能调度绑定的
+    // 附加账号若服务不了本请求（family 不匹配——如 bigmodel 附加账号被绑到
+    // GLM-5.3-Flash=zai-start-plan 会话；或该账号无对应套餐材料），override fail-closed
+    // 抛 AccountRequestCredentialUnavailableError 且 retryable=false——每次 sendText
+    // 都重新绑定同一账号，用户永久卡死。
+    // 处置（按绑定来源分治）：
+    // - smart（系统自动挑，无用户意图）：解绑 + 调度器释放槽位 + 回落主账号官方路径
+    //   （与 spec"无可用槽 → 不绑定回落主账号"同一语义；单身份请求，无串号面）；
+    // - explicit（R3 选择器，用户意图）：保持 fail-closed 报错（不能静默换账号扣配额），
+    //   用户可在选择器改选或关智能调度。
+    const omnicodeBindingEntry = omnicodeSessionAccountScopes
+      ? omnicodeSessionAccountScopes.resolveEntry({
           workspaceKey: resolveWorkspaceKey(request.workspace),
           sessionId: request.sessionId,
         })
       : null;
+    const omnicodeAccountId = omnicodeBindingEntry?.accountId ?? null;
     // 官方守卫已收窄 accountAccess；闭包内不再保留属性收窄，提为 const 局部（语义不变）。
     const requestAccountAccess = request.accountAccess;
-    return runWithOmnicodeSessionAccountScope({
-      accountId: omnicodeAccountId,
-      gateActive: omnicodeSessionAccountScopes
-        ? omnicodeSessionAccountScopes.isActive()
-        : undefined,
-      fn: () =>
-        accountRequestAuthService.resolveCurrent({
+    const resolveWithinScope = () =>
+      accountRequestAuthService.resolveCurrent({
+        providerId: request.providerId,
+        modelId: request.modelSelection.modelId,
+        accountAccess: requestAccountAccess,
+        expectedAccountScope: request.expectedAccountScope,
+        rejectedProjectTokenFingerprint: request.rejectedProjectTokenFingerprint,
+        reason: request.reason,
+      });
+    const materialize = async (): Promise<AccountRequestAuthMaterial | undefined> => {
+      if (!omnicodeAccountId || omnicodeBindingEntry?.source !== "smart") {
+        // 未绑定 / 显式绑定：原语义（显式 fail-closed 由 resolveCurrent 抛错收口）。
+        return runWithOmnicodeSessionAccountScope({
+          accountId: omnicodeAccountId,
+          gateActive: omnicodeSessionAccountScopes
+            ? omnicodeSessionAccountScopes.isActive()
+            : undefined,
+          fn: resolveWithinScope,
+        });
+      }
+      try {
+        return await runWithOmnicodeSessionAccountScope({
+          accountId: omnicodeAccountId,
+          gateActive: omnicodeSessionAccountScopes
+            ? omnicodeSessionAccountScopes.isActive()
+            : undefined,
+          fn: resolveWithinScope,
+        });
+      } catch (error) {
+        if (!(error instanceof AccountRequestCredentialUnavailableError)) throw error;
+        // 智能绑定服务不了本请求：解绑 + 释放槽位 + 回落主账号（官方路径，单身份）。
+        logger.warn(undefined, "omnicode 智能绑定账号无法服务本请求，已解绑回落主账号", {
           providerId: request.providerId,
           modelId: request.modelSelection.modelId,
-          accountAccess: requestAccountAccess,
-          expectedAccountScope: request.expectedAccountScope,
-          rejectedProjectTokenFingerprint: request.rejectedProjectTokenFingerprint,
-          reason: request.reason,
-        }),
-    });
+          sessionId: request.sessionId,
+          boundAccountId: omnicodeAccountId,
+        });
+        omnicodeSessionAccountScopes?.unbindBySessionId(request.sessionId);
+        options?.omnicodeAccountScheduler?.releaseSessions([request.sessionId]);
+        return resolveWithinScope();
+      }
+    };
+    return materialize();
   }
 
   async function respondAccountRequestAuthWithoutInteraction(params: {
@@ -7219,10 +7259,13 @@ export function createZCodeAgentService(
         });
         if (decision.accountId && typeof envelope.sessionId === "string") {
           // 绑定登记（凭据作用域）+ 调度器并发计数（换账号 = 旧计数先释放再计入新账号）。
+          // [OmniCode] 2026-11-28：source 入册——物化失败自愈只对 smart 生效（explicit
+          // 是用户意图，fail-closed 红线不自动换号）。
           omnicodeSessionAccountScopes.bind({
             workspaceKey: resolveWorkspaceKey(params),
             sessionId: envelope.sessionId,
             accountId: decision.accountId,
+            source: decision.reason === "explicit" ? "explicit" : "smart",
           });
           options?.omnicodeAccountScheduler?.registerStart({
             sessionId: envelope.sessionId,
