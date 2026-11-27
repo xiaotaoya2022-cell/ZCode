@@ -559,12 +559,16 @@ export function LoginHealthBadge(props: {
           ? "text-red-500"
           : "text-foreground-subtlest";
   const label =
-    status === "healthy" || status === "expiring"
-      ? intl.formatMessage(
-          { id: status === "healthy" ? "console.loginHealthyDays" : "console.loginExpiringDays" },
-          { days: String(loginHealth?.daysRemaining ?? 0) },
-        )
-      : intl.formatMessage({
+    status === "healthy" && loginHealth?.noExpiry === true
+      ? // [OmniCode] 2026-11-27：凭据齐全但官方登录链不写到期（expires_at 被清且
+        // token 非标准 JWT）——如实显示"登录态有效"，不再渲染误导性的"剩余 0 天"。
+        intl.formatMessage({ id: "console.loginHealthyNoExpiry" })
+      : status === "healthy" || status === "expiring"
+        ? intl.formatMessage(
+            { id: status === "healthy" ? "console.loginHealthyDays" : "console.loginExpiringDays" },
+            { days: String(loginHealth?.daysRemaining ?? 0) },
+          )
+        : intl.formatMessage({
           id:
             status === "expired"
               ? "console.loginExpired"

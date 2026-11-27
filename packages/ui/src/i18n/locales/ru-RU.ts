@@ -8798,6 +8798,7 @@ const ruRU: Record<string, string> = {
   "console.egg.zeroDetecting": "Проверка…",
   "console.egg.zeroNoClaim": "Доступных для получения квот нет (возможно, уже получено сегодня или раздачи нет)",
   "console.egg.zeroNeedsLogin": "Не выполнен вход в {count} экземпляр(ах) — после входа можно получить квоту",
+  "console.loginHealthyNoExpiry": "Вход действителен",
   "console.egg.redetect": "Проверить заново",
   // [OmniCode] Новые функции（2026-11-21 аудит-сессия）：блокировки + обслуживание + фильтр
   "console.locksOverview.title": "Блокировки рабочих пространств",

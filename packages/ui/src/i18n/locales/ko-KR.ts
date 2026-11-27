@@ -8627,6 +8627,7 @@ const koKR: Record<string, string> = {
   "console.egg.zeroDetecting": "확인 중…",
   "console.egg.zeroNoClaim": "지금 수령할 수 있는 크레딧이 없습니다(오늘 이미 수령했거나 지급이 없는 것일 수 있습니다)",
   "console.egg.zeroNeedsLogin": "로그인하지 않은 인스턴스가 {count}개 있습니다——로그인하면 수령할 수 있습니다",
+  "console.loginHealthyNoExpiry": "로그인 상태 유효",
   "console.egg.redetect": "다시 확인",
   // [OmniCode] 신기능 배치（2026-11-21 감사 세션）：잠금 목록 + 데이터 유지보수 + 인스턴스 필터
   "console.locksOverview.title": "워크스페이스 잠금",

@@ -4170,6 +4170,7 @@ const enUS: Record<string, string> = {
   "console.perfUnavailable": "Performance monitoring is unavailable on this machine",
   // [OmniCode] Batch 2.5 X2: login health badge (spec: docs/omnicode/console-extras.md §X2)
   "console.loginHealthyDays": "Signed in · {days}d left",
+  "console.loginHealthyNoExpiry": "Signed in",
   "console.loginExpiringDays": "Expiring in {days}d",
   "console.loginExpired": "Sign-in expired",
   "console.loginUnknown": "Not signed in",

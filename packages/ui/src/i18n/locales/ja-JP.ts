@@ -8834,6 +8834,7 @@ const jaJP: Record<string, string> = {
   "console.egg.zeroDetecting": "確認中…",
   "console.egg.zeroNoClaim": "現在受け取れる枠はありません（本日分は受取済み、または配布がない可能性があります）",
   "console.egg.zeroNeedsLogin": "未ログインのインスタンスが {count} 件あります——ログインすると受け取れます",
+  "console.loginHealthyNoExpiry": "ログイン状態は有効",
   "console.egg.redetect": "再確認",
   // [OmniCode] 新機能バッチ（2026-11-21 監査セッション）：ロック一覧 + メンテナンス + インスタンス絞り込み
   "console.locksOverview.title": "ワークスペース ロック",

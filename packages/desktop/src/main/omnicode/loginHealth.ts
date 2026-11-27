@@ -64,13 +64,33 @@ export function resolveOmnicodeLoginHealth(
   input: {
     expiresAtByProvider: Readonly<Record<string, number>>;
     activeProvider?: string;
+    /** [OmniCode] 2026-11-27 JWT exp 兜底（毫秒；expires_at 全缺时使用）。 */
+    jwtExp?: number;
+    /** [OmniCode] 凭据齐全（active_provider + JWT 解密成功）标记，no-expiry 分支门控。 */
+    hasLiveSession?: boolean;
   },
   now: number,
 ): OmnicodeLoginHealthInfo {
   const valid = Object.entries(input.expiresAtByProvider).filter(
     ([, expiresAt]) => Number.isFinite(expiresAt) && expiresAt > 0,
   );
-  if (valid.length === 0) return { status: "unknown" };
+  if (valid.length === 0) {
+    // [OmniCode] 真机实锤：BigModel/ZAI 登录链 token 响应无 expires_at（BigModel
+    // envelope 只有 token 字段），saveTokenSet"有值存无值清"清空 oauth:*:expires_at
+    // → 实例内登录的账号全部走到这里 → 看板 5 卡"凭据状态未知"而额度（同一 JWT）
+    // 照常成功——同屏自相矛盾。兜底链：JWT exp（token 真实死线）→ 凭据齐全时
+    // healthy/noExpiry（如实告知"有效但未知到期"）。
+    if (input.jwtExp !== undefined && Number.isFinite(input.jwtExp) && input.jwtExp > 0) {
+      return classifyLoginHealth(
+        { provider: input.activeProvider ?? "", expiresAt: input.jwtExp },
+        now,
+      );
+    }
+    if (input.hasLiveSession === true) {
+      return { status: "healthy", noExpiry: true };
+    }
+    return { status: "unknown" };
+  }
   let chosen: { provider: string; expiresAt: number } | undefined;
   if (input.activeProvider && input.activeProvider in input.expiresAtByProvider) {
     const activeExpiresAt = input.expiresAtByProvider[input.activeProvider];
@@ -84,6 +104,13 @@ export function resolveOmnicodeLoginHealth(
     }
   }
   if (!chosen) return { status: "unknown" };
+  return classifyLoginHealth(chosen, now);
+}
+
+function classifyLoginHealth(
+  chosen: { provider: string; expiresAt: number },
+  now: number,
+): OmnicodeLoginHealthInfo {
   const remainingMs = chosen.expiresAt - now;
   const daysRemaining = Math.ceil(remainingMs / DAY_MS);
   if (remainingMs <= 0) {
@@ -93,6 +120,25 @@ export function resolveOmnicodeLoginHealth(
     return { status: "expiring", daysRemaining, expiresAt: chosen.expiresAt };
   }
   return { status: "healthy", daysRemaining, expiresAt: chosen.expiresAt };
+}
+
+/**
+ * [OmniCode] JWT exp 兜底解析（纯函数）：标准 3 段 JWT → payload.exp（秒 → 毫秒）。
+ * 业务 token 可能非标准 JWT（官方注释同警示）——任何失败返回 undefined。
+ */
+export function parseOmnicodeJwtExp(token: string): number | undefined {
+  const parts = token.split(".");
+  if (parts.length !== 3 || parts.some((part) => part.length === 0)) return undefined;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1]!, "base64url").toString("utf8")) as {
+      exp?: unknown;
+    };
+    const exp = typeof payload.exp === "number" ? payload.exp : Number(payload.exp);
+    if (!Number.isFinite(exp) || exp <= 0) return undefined;
+    return exp * 1000;
+  } catch {
+    return undefined;
+  }
 }
 
 /** 解密单个快照值；任何失败返回 undefined（调用方按未知态静默）。 */
@@ -188,7 +234,20 @@ export async function readOmnicodeLoginHealthFromDataRoot(
     if (Number.isFinite(expiresAt) && expiresAt > 0) expiresAtByProvider[provider] = expiresAt;
   }
   const activeProvider = await decryptSnapshotValue(cipher, snapshot[ACTIVE_PROVIDER_KEY] as string | undefined);
-  const health = resolveOmnicodeLoginHealth({ expiresAtByProvider, activeProvider }, now);
+  // [OmniCode] 2026-11-27：JWT exp 兜底 + 凭据齐全判定。JWT 解密成功 = 有真实登录会话
+  //（后续 billing/全链请求同源此 token）；expires_at 全缺（官方登录链清键）时依次用
+  // JWT exp 分级 / healthy+noExpiry，不再把"官方不写到期"误报成"凭据状态未知"。
+  const jwtPlain = await decryptSnapshotValue(cipher, snapshot["zcodejwttoken"] as string | undefined);
+  const jwtToken = jwtPlain?.trim();
+  const health = resolveOmnicodeLoginHealth(
+    {
+      expiresAtByProvider,
+      ...(activeProvider ? { activeProvider } : {}),
+      ...(jwtToken ? { jwtExp: parseOmnicodeJwtExp(jwtToken) } : {}),
+      hasLiveSession: Boolean(activeProvider) && typeof jwtToken === "string" && jwtToken.length > 0,
+    },
+    now,
+  );
   if (health.status === "unknown") {
     // 有凭据值但分层读不出（解密失败/无有效 expires_at）→ 凭据状态未知，非未登录。
     return { ...health, unknownReason: "unreadable" };

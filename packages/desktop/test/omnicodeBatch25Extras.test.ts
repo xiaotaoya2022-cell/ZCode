@@ -103,6 +103,7 @@ import {
   OMNICODE_LOGIN_CREDENTIALS_MAX_BYTES,
   OMNICODE_LOGIN_EXPIRING_THRESHOLD_DAYS,
   OMNICODE_LOGIN_SECRET_MAX_BYTES,
+  parseOmnicodeJwtExp,
   readOmnicodeLoginHealthFromDataRoot,
   readOmnicodeLoginHealths,
   resolveOmnicodeLoginHealth,
@@ -581,6 +582,56 @@ describe("omnicode batch2.5 X2: resolveOmnicodeLoginHealth (pure)", () => {
     expect(
       resolveOmnicodeLoginHealth({ expiresAtByProvider: { zai: NOW + 30 * DAY_MS } }, NOW).daysRemaining,
     ).toBe(30);
+  });
+});
+
+// [OmniCode] 2026-11-27 兜底链（真机实锤：官方登录链清空 expires_at，看板 5 卡
+// "凭据状态未知"而额度照常——JWT exp / no-expiry 兜底让口径一致）。
+describe("omnicode batch2.5 X2: loginHealth 兜底（jwtExp / noExpiry）", () => {
+  const NOW = 1_700_000_000_000;
+
+  function makeJwt(expSeconds: number): string {
+    const b64 = (obj: unknown) => Buffer.from(JSON.stringify(obj)).toString("base64url");
+    return `${b64({ alg: "HS256", typ: "JWT" })}.${b64({ exp: expSeconds, sub: "u1" })}.sig`;
+  }
+
+  it("parseOmnicodeJwtExp：标准 JWT 解 exp（秒→ms）；非 JWT/无 exp/畸形 → undefined", () => {
+    expect(parseOmnicodeJwtExp(makeJwt(1_700_000_000))).toBe(1_700_000_000_000);
+    expect(parseOmnicodeJwtExp("not-a-jwt")).toBeUndefined();
+    expect(parseOmnicodeJwtExp("a.b.c")).toBeUndefined();
+    expect(parseOmnicodeJwtExp(makeJwt(0))).toBeUndefined();
+  });
+
+  it("expires_at 全空 + jwtExp → 按 JWT 死线分级", () => {
+    const result = resolveOmnicodeLoginHealth(
+      { expiresAtByProvider: {}, activeProvider: "bigmodel", jwtExp: NOW + 30 * DAY_MS },
+      NOW,
+    );
+    expect(result).toEqual({ status: "healthy", daysRemaining: 30, expiresAt: NOW + 30 * DAY_MS });
+  });
+
+  it("expires_at 全空 + jwtExp + jwtExp 已过期 → expired", () => {
+    const result = resolveOmnicodeLoginHealth(
+      { expiresAtByProvider: {}, activeProvider: "zai", jwtExp: NOW - DAY_MS },
+      NOW,
+    );
+    expect(result).toEqual({ status: "expired", daysRemaining: 0, expiresAt: NOW - DAY_MS });
+  });
+
+  it("expires_at 全空 + 无 jwtExp + 凭据齐全 → healthy/noExpiry（不再误报凭据未知）", () => {
+    expect(
+      resolveOmnicodeLoginHealth(
+        { expiresAtByProvider: {}, activeProvider: "bigmodel", hasLiveSession: true },
+        NOW,
+      ),
+    ).toEqual({ status: "healthy", noExpiry: true });
+  });
+
+  it("expires_at 全空 + 无任何兜底 → unknown（原行为保持：真·读不出）", () => {
+    expect(resolveOmnicodeLoginHealth({ expiresAtByProvider: {} }, NOW)).toEqual({ status: "unknown" });
+    expect(
+      resolveOmnicodeLoginHealth({ expiresAtByProvider: {}, activeProvider: "zai" }, NOW),
+    ).toEqual({ status: "unknown" });
   });
 });
 

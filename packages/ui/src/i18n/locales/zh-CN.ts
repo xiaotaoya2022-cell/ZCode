@@ -3907,6 +3907,7 @@ const zhCN: Record<string, string> = {
   "console.perfUnavailable": "当前环境性能监控不可用",
   // [OmniCode] 批次2.5 X2：登录态健康度徽标（spec: docs/omnicode/console-extras.md §X2）
   "console.loginHealthyDays": "已登录 · 剩 {days} 天",
+  "console.loginHealthyNoExpiry": "登录态有效",
   "console.loginExpiringDays": "即将到期 · 剩 {days} 天",
   "console.loginExpired": "登录已过期",
   "console.loginUnknown": "未登录",

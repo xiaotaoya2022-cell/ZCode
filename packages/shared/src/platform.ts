@@ -475,6 +475,12 @@ export interface OmnicodeLoginHealthInfo {
    * UI「凭据状态未知」。缺省（旧数据/列表级失败兜底）按 logged-out 兼容渲染。
    */
   unknownReason?: "logged-out" | "unreadable";
+  /**
+   * [OmniCode] 2026-11-27 真机修复：status=healthy 且本标记=true = 凭据齐全
+   *（active_provider + JWT 解密成功）但无任何到期信息（官方登录链不写 expires_at
+   * 且业务 token 非标准 JWT）——UI 显示「登录态有效」而非误导性的天数/未知。
+   */
+  noExpiry?: boolean;
 }
 
 /**
