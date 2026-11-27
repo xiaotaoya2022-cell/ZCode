@@ -24,6 +24,13 @@ import { getAppConfigDir } from "../paths.js";
 // 恒为 true（docs/omnicode/de-telemetry.md），保留表达式以便未来以 env 分级放行。
 const REPORT_ENDPOINT = OMNICODE_TELEMETRY_DISABLED ? "" : ZCODE_TELEMETRY_REPORT_ENDPOINT;
 
+// [OmniCode] 2026-11-28 真机修复：去遥测开启时全部上报入口在函数体开头短路。
+// 实证缺陷：此前只有 sendReport 内部静默 return，reportAppDailyActive 会继续把
+// lastDailyActiveDate 写入 telemetry-state.json——本地显示"今日已日活"而服务端
+// 从未收到（鸡蛋投放按设备活跃度定向，本地假标记掩盖了"哑巴设备"真相）。
+// 入口级短路：不写 in-flight、不写完成标记，本地状态如实反映"从未上报"。
+const OMNICODE_REPORTING_DISABLED = REPORT_ENDPOINT === "";
+
 function sessionCreateEventId(userId: string, sessionId: string): string {
   const bytes = createHash("sha256")
     .update(JSON.stringify(["zcode:session_create:v1", userId, sessionId]))
@@ -568,6 +575,7 @@ export function createTelemetryCore(dependencies: TelemetryCoreDependencies = {}
       talkId?: string;
       messageId?: string;
     }): Promise<void> {
+      if (OMNICODE_REPORTING_DISABLED) return Promise.resolve();
       return trackReport(
         (async () => {
           const userId = input.userId ?? (await loadUserId());
@@ -600,6 +608,7 @@ export function createTelemetryCore(dependencies: TelemetryCoreDependencies = {}
     },
 
     reportAppLaunch(context: TelemetryRendererContext): Promise<void> {
+      if (OMNICODE_REPORTING_DISABLED) return Promise.resolve();
       return trackReport(
         (async () => {
           const eventId = randomUUID();
@@ -624,6 +633,7 @@ export function createTelemetryCore(dependencies: TelemetryCoreDependencies = {}
     },
 
     reportAppDailyActive(context: TelemetryRendererContext): Promise<void> {
+      if (OMNICODE_REPORTING_DISABLED) return Promise.resolve();
       return trackReport(
         (async () => {
           const timestamp = now();
