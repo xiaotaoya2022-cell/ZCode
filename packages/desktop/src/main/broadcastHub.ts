@@ -9,6 +9,31 @@ import {
 import type { BroadcastMessage } from "@zcode/services";
 import { logger } from "./logger.js";
 
+// [OmniCode] 2026-11-27：宿主响应 schema 漂移诊断。旧管理器 × 新宿主运行时混布时
+// 必然出现 unknown 类型（真机日志实证：每次启动重复刷屏且不含收到的类型，无法一眼
+// 对账）。按「receivedType + 首条 zod 路径」限流——同形态漂移每个进程只告警一次。
+const invalidHostResponseWarned = new Set<string>();
+
+/** 宿主响应校验失败的限流告警（BroadcastHub 与 taskRealtimeBus 共用）。 */
+export function logInvalidHostResponseOnce(
+  message: unknown,
+  error: Parameters<typeof formatZodError>[0],
+): void {
+  const receivedType =
+    message !== null && typeof message === "object" && typeof (message as { type?: unknown }).type === "string"
+      ? (message as { type: string }).type
+      : "<non-object>";
+  const firstIssue = error.issues[0];
+  const key = `${receivedType}|${firstIssue ? String(firstIssue.path.join(".")) : "?"}`;
+  if (invalidHostResponseWarned.has(key)) return;
+  invalidHostResponseWarned.add(key);
+  logger.warn(
+    "[BroadcastHub] invalid host response message receivedType=",
+    receivedType,
+    formatZodError(error),
+  );
+}
+
 /**
  * BroadcastHub —— main 进程中的广播中转站
  *
@@ -69,7 +94,7 @@ export class BroadcastHub {
     child.on("message", (msg: unknown) => {
       const result = hostResponseMessageSchema.safeParse(msg);
       if (!result.success) {
-        logger.warn("[BroadcastHub] invalid host response message:", formatZodError(result.error));
+        logInvalidHostResponseOnce(msg, result.error);
         return;
       }
       if (result.data.type === HostResponseTypes.Broadcast) {

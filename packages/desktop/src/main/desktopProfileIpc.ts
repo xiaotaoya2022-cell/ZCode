@@ -112,7 +112,7 @@ import { readConsoleRootOsMigrationMarker } from "./omnicode/consoleCredentialOs
 import { applyOmnicodePerfPanelState } from "./omnicode/perfMonitor.js";
 import { getOmnicodeAccountDashboardSnapshot } from "./omnicode/accountDashboard.js";
 import { startOmnicodeAccountClaimRun } from "./omnicode/claimRunner.js";
-import { detectOmnicodeClaimableAccounts } from "./omnicode/accountDetection.js";
+import { detectOmnicodeClaimableAccountsShared } from "./omnicode/accountDetection.js";
 import { createOmnicodeClaimAutoPollDeps, startOmnicodeClaimAutoPoll } from "./omnicode/claimAutoPoll.js";
 import { assertValidProfileId } from "./omnicode/contract.js";
 
@@ -662,9 +662,10 @@ function registerDesktopOmnicodeAccountIpcHandlers(): void {
     },
   );
 
-  // [OmniCode] 批次3 UI 批次：赛博鸡蛋检测（逐账号 preview，main 侧汇聚 + 邮箱脱敏）
+  // [OmniCode] 批次3 UI 批次：赛博鸡蛋检测（touch 主源 + preview 回落，main 侧汇聚 +
+  // 邮箱脱敏）；Shared 入口 = 并发触发共享在途检测（不翻倍网络）+ 摘要日志。
   ipcMain.handle(PlatformChannels.OmnicodeAccountDetectGet, async () =>
-    detectOmnicodeClaimableAccounts(),
+    detectOmnicodeClaimableAccountsShared(),
   );
 
   // [OmniCode] omni.5 真机修复（F2-5）：console 根 os: 旧密文迁移状态（unrecoverable

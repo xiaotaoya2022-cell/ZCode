@@ -17,11 +17,14 @@ import { maskOmnicodeAccountEmail } from "@zcode/shared";
 import {
   aggregateOmnicodeClaimDetection,
   detectOmnicodeClaimableAccounts,
+  detectOmnicodeClaimableAccountsShared,
+  resetOmnicodeDetectInFlightForTest,
   resolveOmnicodeDetectionDisplayName,
 } from "../src/main/omnicode/accountDetection.js";
 import {
   OMNICODE_CLAIM_AUTO_POLL_INTERVAL_MS,
   resolveOmnicodeAutoClaimAction,
+  resolveOmnicodeAutoClaimTargetsFromDetection,
   runOmnicodeClaimAutoPollTick,
   type OmnicodeClaimAutoPollDeps,
 } from "../src/main/omnicode/claimAutoPoll.js";
@@ -329,6 +332,42 @@ describe("omnicode batch3 ui: detectOmnicodeClaimableAccounts", () => {
       grantedUnits: 120,
     });
   });
+
+  it("touch HTTP 401 → login_required 原因键（登录失效语义优于泛化 http）", async () => {
+    await makeProfile("pi", "过期号", { withMid: true });
+    const fetchImpl = (async () => new Response("{}", { status: 401 })) as unknown as typeof fetch;
+    const result = await detectOmnicodeClaimableAccounts({ fetchImpl });
+    expect(result.accounts[0]).toMatchObject({
+      state: "failed",
+      reasonKey: "omnicode.claim.failure.login_required",
+    });
+  });
+
+  it("Shared 入口单飞：并发触发共享同一次在途检测（fetch 请求数不翻倍）", async () => {
+    resetOmnicodeDetectInFlightForTest();
+    await makeProfile("pj", "单飞号", { withMid: true });
+    let touchRequests = 0;
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url.includes("/marketing/touch")) {
+        touchRequests += 1;
+        // 慢响应放大并发窗口
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return new Response(
+          JSON.stringify({ code: 0, data: { server_time: 1700000000, language: "zh-CN", deliveries: [] } }),
+          { status: 200 },
+        );
+      }
+      return new Response(JSON.stringify({ code: 0, data: { plans: [] } }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const [a, b] = await Promise.all([
+      detectOmnicodeClaimableAccountsShared({ fetchImpl }),
+      detectOmnicodeClaimableAccountsShared({ fetchImpl }),
+    ]);
+    expect(a).toBe(b); // 同一 promise 实例
+    expect(touchRequests).toBe(1); // 只探测一次
+    resetOmnicodeDetectInFlightForTest();
+  });
 });
 
 // ─── 自动领取轮询（决策纯函数 + 单 tick 编排）─────────────────────────────────
@@ -338,6 +377,57 @@ describe("omnicode batch3 ui: claim auto poll", () => {
     expect(resolveOmnicodeAutoClaimAction({ autoClaimEnabled: true, claimableCount: 0, runInFlight: false })).toBe("idle");
     expect(resolveOmnicodeAutoClaimAction({ autoClaimEnabled: true, claimableCount: 3, runInFlight: true })).toBe("idle");
     expect(resolveOmnicodeAutoClaimAction({ autoClaimEnabled: true, claimableCount: 3, runInFlight: false })).toBe("claim");
+  });
+
+  it("检测结果 → 领取目标换算：claimable→job；failed/资格类→skipped；no_claim→静默", () => {
+    const targets = resolveOmnicodeAutoClaimTargetsFromDetection({
+      detectedAt: 0,
+      summary: { total: 4, claimable: 1, noClaim: 1, skipped: 1, failed: 1, unknown: 0 },
+      accounts: [
+        { profileId: "pa", profileName: "A", displayName: "A", state: "claimable", planId: "egg-1" },
+        { profileId: "pb", profileName: "B", displayName: "B", state: "no_claim" },
+        {
+          profileId: "pc",
+          profileName: "C",
+          displayName: "C",
+          state: "skipped_no_device_mid",
+          reasonKey: "omnicode.claim.failure.no_device_mid",
+        },
+        {
+          profileId: "pd",
+          profileName: "D",
+          displayName: "D",
+          state: "failed",
+          reasonKey: "omnicode.claim.failure.network",
+        },
+      ],
+    });
+    expect(targets.jobs).toEqual([{ profileId: "pa", planId: "egg-1" }]);
+    expect(targets.skippedAccounts).toEqual([
+      { profileId: "pc", reasonKey: "omnicode.claim.failure.no_device_mid" },
+      { profileId: "pd", reasonKey: "omnicode.claim.failure.network" },
+    ]);
+  });
+
+  it("tick 领取动作把检测结果直传 runClaim（同拍单次探测，无二次目标解析）", async () => {
+    const detection = {
+      detectedAt: 0,
+      summary: { total: 1, claimable: 1, noClaim: 0, skipped: 0, failed: 0, unknown: 0 },
+      accounts: [
+        { profileId: "pa", profileName: "A", displayName: "A", state: "claimable", planId: "egg-9" },
+      ],
+    } as const;
+    let received: unknown;
+    const runClaim = vi.fn(async (d: unknown) => {
+      received = d;
+      return { ok: true };
+    });
+    const action = await runOmnicodeClaimAutoPollTick(
+      makeDeps({ detect: async () => detection as unknown as Parameters<OmnicodeClaimAutoPollDeps["detect"]>[0], runClaim }),
+    );
+    expect(action).toBe("claim");
+    expect(runClaim).toHaveBeenCalledTimes(1);
+    expect((received as { accounts: { planId?: string }[] }).accounts?.[0]?.planId).toBe("egg-9");
   });
 
   function makeDeps(overrides: Partial<OmnicodeClaimAutoPollDeps>): OmnicodeClaimAutoPollDeps {

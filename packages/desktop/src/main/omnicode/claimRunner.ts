@@ -122,6 +122,13 @@ export interface OmnicodeClaimRunOptions {
   fetchImpl?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
   random?: () => number;
+  /**
+   * [OmniCode] 2026-11-27 预解析目标注入：自动领取轮询已用同口径探测（touch 主源 +
+   * preview 回落）产出检测结果，直接换算为目标跳过二次网络探测——省一半请求，并消除
+   * detect→claim 窗口期投放轮换导致的"检测可领、领取时已换 plan"竞态。缺省仍走
+   * resolveOmnicodeClaimTargets（手动领取路径语义不变）。
+   */
+  targets?: OmnicodeClaimTargetResolution;
 }
 
 export type OmnicodeClaimRunStart =
@@ -138,7 +145,7 @@ export async function startOmnicodeAccountClaimRun(
 ): Promise<OmnicodeClaimRunStart> {
   if (activeRun) return { ok: false, reason: "in_progress" };
   const runId = randomUUID();
-  const targets = await resolveOmnicodeClaimTargets({ fetchImpl: options.fetchImpl });
+  const targets = options.targets ?? (await resolveOmnicodeClaimTargets({ fetchImpl: options.fetchImpl }));
   const total = targets.jobs.length + targets.skippedAccounts.length;
   if (total === 0) {
     return { ok: false, reason: "no_targets" };

@@ -104,7 +104,10 @@ export function buildOmnicodeBillingHeaders(
   const simulation = buildZCodeSourceHeadersFromContext({
     appVersion,
     arch: context.arch,
-    clientLanguage: context.clientLanguage,
+    // [OmniCode] 2026-11-27：缺省语言从 "unknown" 改为受支持 locale 归一值——官方全部
+    // billing 请求经 NodeApiClient 注入真实界面语言，"unknown" 是我们独有的指纹差异；
+    // 归一逻辑与 touch 同源（响应 envelope 语言回显校验也从这里受益）。
+    clientLanguage: context.clientLanguage ?? resolveOmnicodeTouchRequestLocale(),
     clientTimezone: context.clientTimezone,
     deviceMid: context.deviceMid,
     endpointOrigin: resolveRuntimeZCodeEndpointOrigin(),

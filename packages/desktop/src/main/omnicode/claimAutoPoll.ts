@@ -4,11 +4,18 @@
 //   生效；每 tick 重读 console-ui（开关翻转即时生效，不在内存长期缓存）。
 // - 执行走既有 claimRunner.startOmnicodeAccountClaimRun({mode:"auto"})——共用 claimPacer
 //   节奏器（300-1500ms 抖动/连发保护），UI 侧无任何绕过路径（风控红线）。
-// - 检测/领取频率：30min 一拍 + claimRunner 目标解析自身的 preview，无额外循环重试。
+// - 检测/领取频率：30min 一拍，无额外循环重试。2026-11-27 起 tick 的检测结果直接
+//   换算为领取目标（preresolved targets）传给 claimRunner——同一拍只探测一次网络
+//   （此前 detect 一次 + 领取目标解析再探测一次，双倍请求且存在投放轮换竞态）。
 import type { OmnicodeAccountClaimEventPayload, OmnicodeAccountDetectResult } from "@zcode/shared";
 import { readOmnicodeConsoleUiState } from "./consoleUiState.js";
-import { detectOmnicodeClaimableAccounts } from "./accountDetection.js";
-import { startOmnicodeAccountClaimRun, hasOmnicodeClaimRunInFlight } from "./claimRunner.js";
+import { detectOmnicodeClaimableAccountsShared } from "./accountDetection.js";
+import {
+  startOmnicodeAccountClaimRun,
+  hasOmnicodeClaimRunInFlight,
+  type OmnicodeClaimTargetResolution,
+} from "./claimRunner.js";
+import { logger } from "../logger.js";
 
 /** 自动领取轮询周期（30min；与看板快照 TTL 同量级——低频日查询级别）。 */
 export const OMNICODE_CLAIM_AUTO_POLL_INTERVAL_MS = 30 * 60 * 1000;
@@ -26,11 +33,41 @@ export function resolveOmnicodeAutoClaimAction(input: {
   return input.claimableCount > 0 ? "claim" : "idle";
 }
 
+/**
+ * 检测结果 → 领取目标换算（纯函数，单测锁定）：claimable → job（带 plan_id）；
+ * failed/unknown/资格类跳过 → skipped 事件（保持"逐张"叙事）；no_claim → 静默
+ * （无事可做，与 claimRunner 目标解析同口径）。
+ */
+export function resolveOmnicodeAutoClaimTargetsFromDetection(
+  detection: OmnicodeAccountDetectResult,
+): OmnicodeClaimTargetResolution {
+  const jobs: OmnicodeClaimTargetResolution["jobs"] = [];
+  const skippedAccounts: OmnicodeClaimTargetResolution["skippedAccounts"] = [];
+  for (const account of detection.accounts) {
+    if (account.state === "claimable" && typeof account.planId === "string" && account.planId) {
+      jobs.push({ profileId: account.profileId, planId: account.planId });
+      continue;
+    }
+    if (
+      account.state === "failed" ||
+      account.state === "unknown" ||
+      account.state === "skipped_no_device_mid" ||
+      account.state === "missing_jwt"
+    ) {
+      skippedAccounts.push({
+        profileId: account.profileId,
+        reasonKey: account.reasonKey ?? "omnicode.claim.failure.unknown",
+      });
+    }
+  }
+  return { jobs, skippedAccounts };
+}
+
 /** 单 tick 依赖注入（单测替换；生产路径用真实实现）。 */
 export interface OmnicodeClaimAutoPollDeps {
   readAutoClaimEnabled: () => Promise<boolean>;
   detect: () => Promise<OmnicodeAccountDetectResult>;
-  runClaim: () => Promise<{ ok: boolean; reason?: string }>;
+  runClaim: (detection: OmnicodeAccountDetectResult) => Promise<{ ok: boolean; reason?: string }>;
 }
 
 /** 生产依赖装配（真实 console-ui / 检测 / claimRunner）。 */
@@ -45,14 +82,20 @@ export function createOmnicodeClaimAutoPollDeps(
         return false; // 读档失败按关闭处理（宁可不领，不误领）
       }
     },
-    detect: () => detectOmnicodeClaimableAccounts(),
-    runClaim: () => startOmnicodeAccountClaimRun({ mode: "auto", broadcast }),
+    detect: () => detectOmnicodeClaimableAccountsShared(),
+    runClaim: (detection) =>
+      startOmnicodeAccountClaimRun({
+        mode: "auto",
+        broadcast,
+        targets: resolveOmnicodeAutoClaimTargetsFromDetection(detection),
+      }),
   };
 }
 
 /**
  * 执行一拍轮询（可测编排；永不抛穿——任何异常静默，下一拍自愈）：
- * 读开关 → 检测 → 决策 → 自动领取。返回本拍动作（诊断用）。
+ * 读开关 → 检测 → 决策 → 自动领取（检测结果直传目标，同拍只探测一次）。
+ * 返回本拍动作（诊断用）。领取动作打一行摘要日志（自动链路此前完全静默）。
  */
 export async function runOmnicodeClaimAutoPollTick(
   deps: OmnicodeClaimAutoPollDeps,
@@ -67,7 +110,11 @@ export async function runOmnicodeClaimAutoPollTick(
       runInFlight: hasOmnicodeClaimRunInFlight(),
     });
     if (action !== "claim") return action;
-    await deps.runClaim().catch(() => undefined); // in_progress/no_targets 均静默（非错误）
+    logger.info(
+      "[omnicode-claim-auto-poll]",
+      `action=claim claimable=${detection.summary.claimable} total=${detection.summary.total}`,
+    );
+    await deps.runClaim(detection).catch(() => undefined); // in_progress/no_targets 均静默（非错误）
     return action;
   } catch {
     return "idle";

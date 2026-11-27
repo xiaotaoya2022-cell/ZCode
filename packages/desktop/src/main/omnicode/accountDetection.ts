@@ -26,6 +26,7 @@ import {
   mapOmnicodeClaimTransportReasonKey,
   parseOmnicodePreviewEnvelope,
   parseOmnicodeTouchEnvelope,
+  resolveOmnicodeClaimFailureReasonKey,
   type OmnicodePreviewEnvelope,
 } from "./billingClient.js";
 import {
@@ -34,6 +35,7 @@ import {
   type OmnicodeAccountDataSnapshot,
 } from "./accountData.js";
 import { getOmnicodeProfileDir, getOmnicodeProfileRecord, listOmnicodeProfiles } from "./profileRuntime.js";
+import { logger } from "../logger.js";
 
 /**
  * 检测状态汇聚（纯函数，单测锁定）：逐账号状态按桶计数 + 可领账号预估额度求和
@@ -114,6 +116,21 @@ export type OmnicodeClaimProbeOutcome =
   | { state: "no_claim" }
   | { state: "failed"; reasonKey: string };
 
+/**
+ * 探测传输失败 → 稳定原因键：HTTP 401 显式映射 login_required（token 失效是可自愈/
+ * 可引导的语义，比泛化 "http" 对用户有用）；其余沿用传输原因键。
+ */
+function resolveOmnicodeProbeFailureReasonKey(result: {
+  ok: false;
+  reason: "network" | "http" | "invalid_response";
+  httpStatus?: number;
+}): string {
+  if (result.reason === "http" && result.httpStatus === 401) {
+    return resolveOmnicodeClaimFailureReasonKey(401);
+  }
+  return mapOmnicodeClaimTransportReasonKey(result.reason);
+}
+
 export async function probeOmnicodeClaimSource(options: {
   jwtToken: string;
   deviceMid: string;
@@ -133,7 +150,7 @@ export async function probeOmnicodeClaimSource(options: {
       { method: "GET", headers: buildOmnicodeBillingHeaders(headerContext, { method: "GET" }) },
     );
     if (!preview.ok) {
-      return { state: "failed", reasonKey: mapOmnicodeClaimTransportReasonKey(preview.reason) };
+      return { state: "failed", reasonKey: resolveOmnicodeProbeFailureReasonKey(preview) };
     }
     const first = parseOmnicodePreviewEnvelope(preview.envelope)[0];
     return first
@@ -152,7 +169,7 @@ export async function probeOmnicodeClaimSource(options: {
   );
   if (!touch.ok) {
     if (touch.reason === "invalid_response") return runPreviewFallback();
-    return { state: "failed", reasonKey: mapOmnicodeClaimTransportReasonKey(touch.reason) };
+    return { state: "failed", reasonKey: resolveOmnicodeProbeFailureReasonKey(touch) };
   }
   const snapshot = parseOmnicodeTouchEnvelope(touch.envelope);
   if (!snapshot) return runPreviewFallback();
@@ -249,5 +266,41 @@ export async function detectOmnicodeClaimableAccounts(
       });
     }
   }
-  return { detectedAt: now(), summary: aggregateOmnicodeClaimDetection(accounts), accounts };
+  const summary = aggregateOmnicodeClaimDetection(accounts);
+  return { detectedAt: now(), summary, accounts };
+}
+
+/**
+ * 全量检测入口（单飞共享 + 结构化日志）：管理器启动首帧 / 手动刷新 / 30min 自动轮询
+ * 三个触发源并发调用时共享同一次在途检测（结果一致、网络请求不翻倍）；完成后打一行
+ * 摘要日志（状态桶计数 + 每账号状态缩写，无 PII 无 token）——检测链路此前完全静默，
+ * "无可领取"类问题只能靠手工复现定位。
+ */
+let detectInFlight: Promise<OmnicodeAccountDetectResult> | null = null;
+
+/** 单测注入点：清空在途检测（生产路径不使用）。 */
+export function resetOmnicodeDetectInFlightForTest(): void {
+  detectInFlight = null;
+}
+
+export function detectOmnicodeClaimableAccountsShared(
+  options: { fetchImpl?: typeof fetch; now?: () => number } = {},
+): Promise<OmnicodeAccountDetectResult> {
+  if (detectInFlight) return detectInFlight;
+  const startedAt = Date.now();
+  detectInFlight = detectOmnicodeClaimableAccounts(options)
+    .then((result) => {
+      logger.info(
+        "[omnicode-claim-detect]",
+        `claimable=${result.summary.claimable} noClaim=${result.summary.noClaim}`,
+        `skipped=${result.summary.skipped} failed=${result.summary.failed} unknown=${result.summary.unknown}`,
+        `total=${result.summary.total} elapsedMs=${Date.now() - startedAt}`,
+        `states=[${result.accounts.map((account) => `${account.profileId}:${account.state}`).join(" ")}]`,
+      );
+      return result;
+    })
+    .finally(() => {
+      detectInFlight = null;
+    });
+  return detectInFlight;
 }

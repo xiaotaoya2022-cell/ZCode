@@ -14,12 +14,12 @@ import {
   type TaskStreamMirrorOp,
   type TaskStreamMirrorPublishOp,
   type TaskStreamWatermark,
-  formatZodError,
   HostMessageTypes,
   HostResponseTypes,
   hostResponseMessageSchema,
 } from "@zcode/shared";
 import { logger as defaultLogger } from "./logger.js";
+import { logInvalidHostResponseOnce } from "./broadcastHub.js";
 
 const STREAM_MIRROR_FLUSH_INTERVAL_MS = 1000;
 const STREAM_MIRROR_MAX_REPLAY_BATCHES = 60;
@@ -233,10 +233,8 @@ export class TaskRealtimeBus {
   private handleHostMessage(hostId: string, message: unknown): void {
     const parsed = hostResponseMessageSchema.safeParse(message);
     if (!parsed.success) {
-      this.logger.warn(
-        "[task-realtime] invalid host response message:",
-        formatZodError(parsed.error),
-      );
+      // [OmniCode] 共享限流告警（receivedType + 同形态一次），替换重复刷屏的裸 warn
+      logInvalidHostResponseOnce(message, parsed.error);
       return;
     }
 
