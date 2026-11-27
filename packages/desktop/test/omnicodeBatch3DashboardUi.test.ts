@@ -210,20 +210,47 @@ describe("omnicode batch3 ui: detectOmnicodeClaimableAccounts", () => {
       { id: "pc", name: "无中号", createdAt: "t" },
       { id: "pd", name: "无凭据", createdAt: "t" },
     ];
-    // 有状态 fetch：第一次 preview（可领号）返回蛋计划，之后（无蛋号）返回空 plans
-    let previewCalls = 0;
+    // 有状态 fetch：touch 主源（可领号返回 claim_zcode_plan delivery，无蛋号空 deliveries）
+    // + preview 回落（无蛋号再查也空）。claimable 条目来自 touch：只带 plan_id（无计划名）。
+    let touchSeen = false;
     const fetchImpl = (async (input: RequestInfo | URL) => {
       const url = input.toString();
-      if (url.includes("/billing/preview")) {
-        previewCalls += 1;
+      if (url.includes("/marketing/touch")) {
+        const isClaimableCall = !touchSeen;
+        touchSeen = true;
         return new Response(
           JSON.stringify(
-            previewCalls === 1
-              ? { code: 0, data: { plans: [{ plan_id: "egg-1", name: "赛博蛋", priority: 10, entitlements: [{ grant_units: "200" }] }] } }
-              : { code: 0, data: { plans: [] } },
+            isClaimableCall
+              ? {
+                  code: 0,
+                  data: {
+                    server_time: 1700000000,
+                    language: "zh-CN",
+                    deliveries: [
+                      {
+                        campaign_id: "camp-egg-1",
+                        priority: 10,
+                        resource_position: "banner",
+                        banner: {
+                          background: { type: "image", image: { default: { src: "https://example.com/a.png", sha256: "a".repeat(64) } } },
+                          buttons: [
+                            {
+                              text: { format: "plaintext", content: "立即领取" },
+                              action: { type: "claim_zcode_plan", args: { plan_id: "egg-1" } },
+                            },
+                          ],
+                        },
+                      },
+                    ],
+                  },
+                }
+              : { code: 0, data: { server_time: 1700000000, language: "zh-CN", deliveries: [] } },
           ),
           { status: 200 },
         );
+      }
+      if (url.includes("/billing/preview")) {
+        return new Response(JSON.stringify({ code: 0, data: { plans: [] } }), { status: 200 });
       }
       return new Response("{}", { status: 200 });
     }) as unknown as typeof fetch;
@@ -235,11 +262,10 @@ describe("omnicode batch3 ui: detectOmnicodeClaimableAccounts", () => {
     expect(claimable).toMatchObject({
       state: "claimable",
       planId: "egg-1",
-      planName: "赛博蛋",
-      grantedUnits: 200,
       displayName: "蛋友",
       maskedEmail: "egg***@example.com",
     });
+    expect(claimable?.planName).toBeUndefined();
     expect(result.accounts.find((account) => account.profileId === "pb")).toMatchObject({ state: "no_claim" });
     expect(result.accounts.find((account) => account.profileId === "pc")).toMatchObject({
       state: "skipped_no_device_mid",
@@ -263,6 +289,45 @@ describe("omnicode batch3 ui: detectOmnicodeClaimableAccounts", () => {
     expect(result.accounts).toHaveLength(1);
     expect(result.accounts[0]).toMatchObject({ state: "failed", reasonKey: "omnicode.claim.failure.network" });
     expect(result.summary).toMatchObject({ total: 1, failed: 1, claimable: 0 });
+  });
+
+  it("touch 无动作/畸形 → preview 回落命中（带计划名/额度）", async () => {
+    await makeProfile("pg", "回落号", { withMid: true });
+    await makeProfile("ph", "畸形号", { withMid: true });
+    let touchCalls = 0;
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url.includes("/marketing/touch")) {
+        touchCalls += 1;
+        // 第 1 账号：空 deliveries（未投放）；第 2 账号：畸形 envelope（缺 data）→ 均触发回落
+        return new Response(
+          JSON.stringify(
+            touchCalls === 1
+              ? { code: 0, data: { server_time: 1700000000, language: "zh-CN", deliveries: [] } }
+              : { code: 0 },
+          ),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/billing/preview")) {
+        return new Response(
+          JSON.stringify({
+            code: 0,
+            data: { plans: [{ plan_id: "plan-fb", name: "回落蛋", priority: 5, entitlements: [{ grant_units: "120" }] }] },
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+    const result = await detectOmnicodeClaimableAccounts({ fetchImpl, now: () => 1700000000000 });
+    expect(result.summary).toMatchObject({ total: 2, claimable: 2, noClaim: 0 });
+    expect(result.accounts[0]).toMatchObject({
+      state: "claimable",
+      planId: "plan-fb",
+      planName: "回落蛋",
+      grantedUnits: 120,
+    });
   });
 });
 

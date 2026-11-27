@@ -1,7 +1,9 @@
 // [OmniCode] 批次3 UI 批次：赛博鸡蛋检测（门票叠数据源，spec:
 // F:\OmniCode\docs\batch3\BATCH3-DESIGN-DISCUSSION.md §3）。
-// - 检测 = 对每个可用账号调 preview（走既有 billingClient，实例不必在运行——凭据在盘上）；
-//   逐 profile 串行（与 claimRunner 目标解析/看板快照同节奏，无并发批量指纹）。
+// - 检测 = 对每个可用账号调 marketing/touch（主数据源，官方 UI 同源信号）→ 无
+//   claim_zcode_plan 时回落 preview（奖励中心列表，部分账号形态仍走这里）。
+//   实例不必在运行——凭据在盘上；逐 profile 串行（与 claimRunner 目标解析/看板
+//   快照同节奏，无并发批量指纹）。
 // - 结果在 main 侧汇聚（aggregateOmnicodeClaimDetection 纯函数）后经
 //   OmnicodeAccountDetectGet 出 IPC；邮箱先脱敏再进载荷（PII 最小化）。
 // - 触发节奏（红线）：管理器启动一次（renderer 首帧拉取）+ 手动触发 +
@@ -17,9 +19,13 @@ import { maskOmnicodeAccountEmail } from "@zcode/shared";
 import {
   buildOmnicodeBillingHeaders,
   buildOmnicodePreviewUrl,
+  buildOmnicodeTouchHeaders,
+  buildOmnicodeTouchUrl,
   fetchOmnicodeBillingEnvelope,
+  findOmnicodeTouchClaimAction,
   mapOmnicodeClaimTransportReasonKey,
   parseOmnicodePreviewEnvelope,
+  parseOmnicodeTouchEnvelope,
   type OmnicodePreviewEnvelope,
 } from "./billingClient.js";
 import {
@@ -91,10 +97,75 @@ export function resolveOmnicodeDetectionDisplayName(input: {
 }
 
 /**
+ * 单账号可领探测（touch 主源 + preview 回落；检测与 claimRunner 目标解析共用）：
+ * - touch 请求成功：解析出 claim_zcode_plan → claimable；无动作 → 再查 preview
+ *   （奖励中心列表对部分账号形态仍直接给出可领计划），仍无 → no_claim；
+ * - touch 响应畸形（envelope 校验失败）→ 落到 preview；
+ * - touch 传输失败（网络/HTTP）→ failed（同一 token 下 preview 大概率同败，不多打）。
+ */
+export type OmnicodeClaimProbeOutcome =
+  | {
+      state: "claimable";
+      planId: string;
+      /** 仅 preview 回落路径携带（touch delivery 只有 plan_id，无计划名/额度）。 */
+      planName?: string;
+      grantedUnits?: number;
+    }
+  | { state: "no_claim" }
+  | { state: "failed"; reasonKey: string };
+
+export async function probeOmnicodeClaimSource(options: {
+  jwtToken: string;
+  deviceMid: string;
+  fetchImpl?: typeof fetch;
+}): Promise<OmnicodeClaimProbeOutcome> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const headerContext = {
+    jwtToken: options.jwtToken,
+    deviceMid: options.deviceMid,
+    platform: process.platform,
+    arch: process.arch,
+  };
+  const runPreviewFallback = async (): Promise<OmnicodeClaimProbeOutcome> => {
+    const preview = await fetchOmnicodeBillingEnvelope<OmnicodePreviewEnvelope>(
+      fetchImpl,
+      buildOmnicodePreviewUrl(),
+      { method: "GET", headers: buildOmnicodeBillingHeaders(headerContext, { method: "GET" }) },
+    );
+    if (!preview.ok) {
+      return { state: "failed", reasonKey: mapOmnicodeClaimTransportReasonKey(preview.reason) };
+    }
+    const first = parseOmnicodePreviewEnvelope(preview.envelope)[0];
+    return first
+      ? {
+          state: "claimable",
+          planId: first.planId,
+          ...(first.name ? { planName: first.name } : {}),
+          ...(first.grantUnits !== undefined ? { grantedUnits: first.grantUnits } : {}),
+        }
+      : { state: "no_claim" };
+  };
+  const touch = await fetchOmnicodeBillingEnvelope<unknown>(
+    fetchImpl,
+    buildOmnicodeTouchUrl(),
+    { method: "GET", headers: buildOmnicodeTouchHeaders(headerContext) },
+  );
+  if (!touch.ok) {
+    if (touch.reason === "invalid_response") return runPreviewFallback();
+    return { state: "failed", reasonKey: mapOmnicodeClaimTransportReasonKey(touch.reason) };
+  }
+  const snapshot = parseOmnicodeTouchEnvelope(touch.envelope);
+  if (!snapshot) return runPreviewFallback();
+  const action = findOmnicodeTouchClaimAction(snapshot);
+  if (action) return { state: "claimable", planId: action.planId };
+  return runPreviewFallback();
+}
+
+/**
  * 全量检测（Profile 列表 IPC 数据源，永不 reject）：逐 profile 串行——凭据快照（只读）
- * → policy 门 → preview。检测状态与 claimRunner 目标解析同口径：
- * 缺设备号 → skipped_no_device_mid（omnicode.claim.failure.no_device_mid）、缺 JWT →
- * missing_jwt（no_jwt）、preview 失败 → failed + 传输原因键、无可领 → no_claim。
+ * → policy 门 → 可领探测（touch 主源 + preview 回落）。检测状态与 claimRunner 目标
+ * 解析同口径：缺设备号 → skipped_no_device_mid（omnicode.claim.failure.no_device_mid）、
+ * 缺 JWT → missing_jwt（no_jwt）、探测失败 → failed + 传输原因键、无可领 → no_claim。
  */
 export async function detectOmnicodeClaimableAccounts(
   options: { fetchImpl?: typeof fetch; now?: () => number } = {},
@@ -145,40 +216,25 @@ export async function detectOmnicodeClaimableAccounts(
         });
         continue;
       }
-      const headers = buildOmnicodeBillingHeaders(
-        {
-          jwtToken: credentials.jwtToken,
-          deviceMid: accountData.deviceMid,
-          platform: process.platform,
-          arch: process.arch,
-        },
-        { method: "GET" },
-      );
-      const result = await fetchOmnicodeBillingEnvelope<OmnicodePreviewEnvelope>(
-        options.fetchImpl ?? fetch,
-        buildOmnicodePreviewUrl(),
-        { method: "GET", headers },
-      );
-      if (!result.ok) {
-        accounts.push({
-          ...base,
-          state: "failed",
-          reasonKey: mapOmnicodeClaimTransportReasonKey(result.reason),
-        });
+      const probe = await probeOmnicodeClaimSource({
+        jwtToken: credentials.jwtToken,
+        deviceMid: accountData.deviceMid,
+        ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+      });
+      if (probe.state === "failed") {
+        accounts.push({ ...base, state: "failed", reasonKey: probe.reasonKey });
         continue;
       }
-      // 每账号一张：可领计划按 priority 降序取首张（preview 解析已排序，口径同 claimRunner）
-      const first = parseOmnicodePreviewEnvelope(result.envelope)[0];
-      if (!first) {
+      if (probe.state === "no_claim") {
         accounts.push({ ...base, state: "no_claim" });
         continue;
       }
       accounts.push({
         ...base,
         state: "claimable",
-        planId: first.planId,
-        ...(first.name ? { planName: first.name } : {}),
-        ...(first.grantUnits !== undefined ? { grantedUnits: first.grantUnits } : {}),
+        planId: probe.planId,
+        ...(probe.planName ? { planName: probe.planName } : {}),
+        ...(probe.grantedUnits !== undefined ? { grantedUnits: probe.grantedUnits } : {}),
       });
     } catch {
       accounts.push({

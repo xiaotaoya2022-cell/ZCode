@@ -477,11 +477,33 @@ describe("omnicode review batch3 final: claim run result total (P2-①)", () => 
     await makeGoProfile("pb", { withMid: false });
     const fetchImpl = (async (input: RequestInfo | URL) => {
       const url = input.toString();
-      if (url.includes("/billing/preview")) {
+      if (url.includes("/marketing/touch")) {
         return new Response(
           JSON.stringify({
             code: 0,
-            data: { plans: [{ plan_id: "egg-1", name: "赛博蛋", priority: 10 }] },
+            data: {
+              server_time: 1700000000,
+              language: "zh-CN",
+              deliveries: [
+                {
+                  campaign_id: "camp-egg-1",
+                  priority: 10,
+                  resource_position: "banner",
+                  banner: {
+                    background: {
+                      type: "image",
+                      image: { default: { src: "https://example.com/a.png", sha256: "a".repeat(64) } },
+                    },
+                    buttons: [
+                      {
+                        text: { format: "plaintext", content: "立即领取" },
+                        action: { type: "claim_zcode_plan", args: { plan_id: "egg-1" } },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
           }),
           { status: 200 },
         );

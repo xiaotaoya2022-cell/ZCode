@@ -21,8 +21,12 @@ import { randomUUID } from "node:crypto";
 import {
   buildZCodeSourceHeadersFromContext,
   buildRuntimeZCodeApiUrl,
+  parseMarketingTouchResponse,
   resolveRuntimeZCodeEndpointOrigin,
+  SUPPORTED_LOCALES,
   ZCODE_VERSION,
+  type Locale,
+  type MarketingTouchSnapshot,
   type RuntimeZCodeEndpointEnv,
 } from "@zcode/shared";
 
@@ -141,6 +145,101 @@ export function buildOmnicodePreviewUrl(
 
 export function buildOmnicodeClaimUrl(env: RuntimeZCodeEndpointEnv = {}): string {
   return buildRuntimeZCodeApiUrl(env, "/api/v1/zcode-plan/billing/claim");
+}
+
+// ─── marketing/touch（鸡蛋检测主数据源）─────────────────────────────────────────
+// 2026-11-27 实证修正：billing/preview（奖励中心计划列表）对免费号当前返回
+// `{"code":0}` 且**无 data 字段**（官方客户端自身 token 实测同样为空），把"无可领"
+// 与"未发放"混为一谈。"鸡蛋已发放"的权威信号与官方 UI 同源 = marketing/touch 的
+// deliveries 里带 `claim_zcode_plan` action 的按钮（research 文档 §4 原设计口径）。
+// 请求形状对齐官方 marketingTouchService：seq 单调递增 + X-Device-Mid（UUID）+
+// X-Client-Language（必须是受支持 locale——响应 envelope 用 z.enum 校验回显语言，
+// "unknown" 会整体解析失败）+ X-ZCode-App-Version + Authorization。
+
+/** touch 请求的 seq（官方口径=本次进程启动后单调递增；跨请求不归零）。 */
+let touchRequestSeq = 0;
+
+/** 单测注入点：重置 seq 与语言缓存（生产路径不使用）。 */
+export function resetOmnicodeTouchRequestStateForTest(): void {
+  touchRequestSeq = 0;
+}
+
+export function buildOmnicodeTouchUrl(env: RuntimeZCodeEndpointEnv = {}): string {
+  const url = new URL(buildRuntimeZCodeApiUrl(env, "/api/v1/marketing/touch"));
+  url.searchParams.set("seq", String(touchRequestSeq++));
+  return url.toString();
+}
+
+/**
+ * touch 请求语言归一（纯函数，单测锁定）：按候选顺序逐个解析（显式值优先于进程
+ * Intl locale），每个候选先精确命中 SUPPORTED_LOCALES、再按语言主前缀匹配
+ *（zh-TW→zh-CN / en-GB→en-US），全部落空兜底 en-US——响应 envelope 会回显并
+ * z.enum 校验该值，不归一成受支持值整体解析失败。
+ */
+export function resolveOmnicodeTouchRequestLocale(...candidates: (string | undefined)[]): Locale {
+  const chain = [...candidates, Intl.DateTimeFormat().resolvedOptions().locale].filter(
+    (value): value is string => typeof value === "string" && value.trim().length > 0,
+  );
+  for (const candidate of chain) {
+    const exact = SUPPORTED_LOCALES.find((locale) => locale === candidate);
+    if (exact) return exact;
+    const prefix = candidate.split("-")[0]?.toLowerCase();
+    const prefixed = prefix
+      ? SUPPORTED_LOCALES.find((locale) => locale.toLowerCase().startsWith(`${prefix}-`))
+      : undefined;
+    if (prefixed) return prefixed;
+  }
+  return "en-US";
+}
+
+/**
+ * touch 请求头：在 billing 仿真头全集之上把 X-Client-Language 覆写为受支持
+ * locale（其余 balance/preview/claim 请求维持原样不动——它们无 enum 校验，
+ * 减少本次修复的行为面）。
+ */
+export function buildOmnicodeTouchHeaders(
+  context: OmnicodeBillingHeaderContext,
+  locale?: string,
+): Record<string, string> {
+  return {
+    ...buildOmnicodeBillingHeaders(context, { method: "GET" }),
+    "X-Client-Language": resolveOmnicodeTouchRequestLocale(locale ?? context.clientLanguage),
+  };
+}
+
+/** touch 快照中可领取的动作（纯函数，单测锁定）：priority 降序稳定遍历 banner/popup
+ * 的全部按钮，首个 `claim_zcode_plan` 即可领计划；无则 undefined（=未发放/已领完）。 */
+export interface OmnicodeTouchClaimAction {
+  planId: string;
+  campaignId: string;
+}
+
+export function findOmnicodeTouchClaimAction(
+  snapshot: MarketingTouchSnapshot,
+): OmnicodeTouchClaimAction | undefined {
+  const deliveries = [...snapshot.deliveries].sort((a, b) => b.priority - a.priority);
+  for (const delivery of deliveries) {
+    const buttons =
+      delivery.resource_position === "banner" ? delivery.banner.buttons : delivery.popup.buttons;
+    for (const button of buttons) {
+      if (button.action.type === "claim_zcode_plan") {
+        return { planId: button.action.args.plan_id, campaignId: delivery.campaign_id };
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * touch 快照解析（永不抛穿）：成功归快照；envelope 畸形（zod 校验失败/非对象）归
+ * undefined——调用方按 invalid_response 处理并回落 preview。
+ */
+export function parseOmnicodeTouchEnvelope(payload: unknown): MarketingTouchSnapshot | undefined {
+  try {
+    return parseMarketingTouchResponse(payload);
+  } catch {
+    return undefined;
+  }
 }
 
 // ─── 响应解析（纯函数）─────────────────────────────────────────────────────────

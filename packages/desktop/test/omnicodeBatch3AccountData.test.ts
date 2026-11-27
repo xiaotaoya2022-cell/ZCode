@@ -29,7 +29,10 @@ import {
   buildOmnicodeBillingHeaders,
   buildOmnicodeClaimUrl,
   buildOmnicodePreviewUrl,
+  buildOmnicodeTouchHeaders,
+  buildOmnicodeTouchUrl,
   fetchOmnicodeBillingEnvelope,
+  findOmnicodeTouchClaimAction,
   mapOmnicodeBalanceFailureReasonKey,
   mapOmnicodeClaimTransportReasonKey,
   OMNICODE_BALANCE_REASON_HTTP,
@@ -40,7 +43,10 @@ import {
   parseOmnicodeBalanceEnvelope,
   parseOmnicodeClaimEnvelope,
   parseOmnicodePreviewEnvelope,
+  parseOmnicodeTouchEnvelope,
+  resetOmnicodeTouchRequestStateForTest,
   resolveOmnicodeBillingRequestPolicy,
+  resolveOmnicodeTouchRequestLocale,
   resolveOmnicodeClaimFailureReasonKey,
 } from "../src/main/omnicode/billingClient.js";
 import {
@@ -309,6 +315,82 @@ describe("omnicode batch3: billing request policy + headers", () => {
     );
     expect(buildOmnicodePreviewUrl({}, "1.2.3", "win32-x64")).toContain("platform=win32-x64");
     expect(buildOmnicodeClaimUrl({})).toContain("/api/v1/zcode-plan/billing/claim");
+  });
+
+  it("touch：seq 单调递增 + 语言归一为受支持 locale 覆写 X-Client-Language", () => {
+    resetOmnicodeTouchRequestStateForTest();
+    expect(buildOmnicodeTouchUrl({})).toContain("/api/v1/marketing/touch?seq=0");
+    expect(buildOmnicodeTouchUrl({})).toContain("seq=1");
+    // 显式 locale 精确命中；主前缀回退（zh-TW→zh-CN / en-GB→en-US）；不支持值兜底 en-US
+    expect(resolveOmnicodeTouchRequestLocale("ja-JP")).toBe("ja-JP");
+    expect(resolveOmnicodeTouchRequestLocale("zh-TW")).toBe("zh-CN");
+    expect(resolveOmnicodeTouchRequestLocale("en-GB")).toBe("en-US");
+    expect(resolveOmnicodeTouchRequestLocale("fr-FR")).toBe("en-US");
+    const headers = buildOmnicodeTouchHeaders(
+      { jwtToken: "jwt", deviceMid: "dm", platform: "win32", arch: "x64" },
+      "zh-TW",
+    );
+    expect(headers["X-Client-Language"]).toBe("zh-CN");
+    expect(headers.Authorization).toBe("Bearer jwt");
+    expect(headers["X-Device-Mid"]).toBe("dm");
+  });
+
+  it("touch：投放动作发现（banner/popup/priority 序）与畸形 envelope 解析", () => {
+    const parsed = parseOmnicodeTouchEnvelope({
+      code: 0,
+      data: {
+        server_time: 1731000000,
+        language: "zh-CN",
+        deliveries: [
+          {
+            campaign_id: "camp-a",
+            priority: 1,
+            resource_position: "banner",
+            banner: {
+              background: {
+                type: "image",
+                image: { default: { src: "https://example.com/a.png", sha256: "a".repeat(64) } },
+              },
+              buttons: [
+                {
+                  text: { format: "plaintext", content: "领取" },
+                  action: { type: "claim_zcode_plan", args: { plan_id: "plan-a" } },
+                },
+              ],
+            },
+          },
+          {
+            campaign_id: "camp-b",
+            priority: 9,
+            resource_position: "popup",
+            popup: {
+              title: { format: "plaintext", content: "t" },
+              description: { format: "plaintext", content: "d" },
+              buttons: [
+                { text: { format: "plaintext", content: "x" }, action: { type: "close" } },
+                {
+                  text: { format: "plaintext", content: "领取" },
+                  action: { type: "claim_zcode_plan", args: { plan_id: "plan-b" } },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+    expect(parsed?.rejectedCount).toBe(0);
+    // priority 降序：popup(camp-b, 9) 先于 banner(camp-a, 1)
+    expect(findOmnicodeTouchClaimAction(parsed!)).toEqual({ planId: "plan-b", campaignId: "camp-b" });
+    // 无 claim 动作 → undefined
+    const empty = parseOmnicodeTouchEnvelope({
+      code: 0,
+      data: { server_time: 1731000000, language: "zh-CN", deliveries: [] },
+    });
+    expect(findOmnicodeTouchClaimAction(empty!)).toBeUndefined();
+    // 畸形 envelope（缺 data / code≠0 / 非对象）→ undefined（调用方回落 preview）
+    expect(parseOmnicodeTouchEnvelope({ code: 0 })).toBeUndefined();
+    expect(parseOmnicodeTouchEnvelope({ code: 3001, msg: "parameter error" })).toBeUndefined();
+    expect(parseOmnicodeTouchEnvelope(null)).toBeUndefined();
   });
 });
 
@@ -779,7 +861,35 @@ describe("omnicode batch3: claimRunner（领取执行编排）", () => {
     }) as unknown as typeof fetch;
   }
 
-  it("目标解析：缺设备号账号 skipped（no_device_mid），有设备号+preview 命中 → job", async () => {
+  // touch 主源夹具（探测先打 marketing/touch，命中 claim_zcode_plan 即可领）
+  const touchDeliveryBody = (planId: string) => ({
+    code: 0,
+    data: {
+      server_time: 1700000000,
+      language: "zh-CN",
+      deliveries: [
+        {
+          campaign_id: `camp-${planId}`,
+          priority: 10,
+          resource_position: "banner",
+          banner: {
+            background: {
+              type: "image",
+              image: { default: { src: "https://example.com/a.png", sha256: "a".repeat(64) } },
+            },
+            buttons: [
+              {
+                text: { format: "plaintext", content: "立即领取" },
+                action: { type: "claim_zcode_plan", args: { plan_id: planId } },
+              },
+            ],
+          },
+        },
+      ],
+    },
+  });
+
+  it("目标解析：缺设备号账号 skipped（no_device_mid），有设备号+touch 命中 → job", async () => {
     const rootA = await mkdtemp(join(tmpdir(), "omnicode-target-a-"));
     const rootB = await mkdtemp(join(tmpdir(), "omnicode-target-b-"));
     try {
@@ -815,11 +925,8 @@ describe("omnicode batch3: claimRunner（领取执行编排）", () => {
       profileState.records = { pa: { dataBaseDirOverride: rootA }, pb: { dataBaseDirOverride: rootB } };
       const fetchImpl = makeFakeFetch([
         {
-          urlPart: "/billing/preview",
-          body: {
-            code: 0,
-            data: { plans: [{ plan_id: "egg-1", name: "赛博蛋", priority: 10 }] },
-          },
+          urlPart: "/marketing/touch",
+          body: touchDeliveryBody("egg-1"),
         },
       ]);
       const targets = await resolveOmnicodeClaimTargets({ fetchImpl });
@@ -861,8 +968,8 @@ describe("omnicode batch3: claimRunner（领取执行编排）", () => {
       profileState.records = { pr: { dataBaseDirOverride: root } };
       const fetchImpl = makeFakeFetch([
         {
-          urlPart: "/billing/preview",
-          body: { code: 0, data: { plans: [{ plan_id: "egg-2", priority: 1 }] } },
+          urlPart: "/marketing/touch",
+          body: touchDeliveryBody("egg-2"),
         },
         {
           urlPart: "/billing/claim",
@@ -947,8 +1054,8 @@ describe("omnicode batch3: claimRunner（领取执行编排）", () => {
       profileState.records = { pb1: { dataBaseDirOverride: root }, pb2: { dataBaseDirOverride: root } };
       const fetchImpl = makeFakeFetch([
         {
-          urlPart: "/billing/preview",
-          body: { code: 0, data: { plans: [{ plan_id: "egg-3", priority: 1 }] } },
+          urlPart: "/marketing/touch",
+          body: touchDeliveryBody("egg-3"),
         },
       ]);
       // 阻塞 sleep 使第一个 run 挂起（第 1 张执行完后进入张间 sleep）

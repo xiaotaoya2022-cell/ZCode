@@ -1,7 +1,8 @@
-// [OmniCode] 批次3：领取执行编排（赛博鸡蛋数据层——preview → 逐张节奏器 → 历史/事件）。
+// [OmniCode] 批次3：领取执行编排（赛博鸡蛋数据层——目标解析 → 逐张节奏器 → 历史/事件）。
 // spec: F:\OmniCode\docs\batch3\BATCH3-DESIGN-DISCUSSION.md §3：
-// - 检测 = 用各 profile 自己解密的 token 调 preview（实例不必在运行——凭据在盘上）。
-// - 每账号一张（可领计划按 priority 取首张），逐张节奏见 claimPacer（300-1500ms 抖动）。
+// - 目标解析 = 用各 profile 自己解密的 token 调可领探测（touch 主源 + preview 回落，
+//   与检测同口径；实例不必在运行——凭据在盘上）。
+// - 每账号一张（touch 首个 claim 动作 / preview priority 首张），逐张节奏见 claimPacer（300-1500ms 抖动）。
 // - 各实例各自 token 各自请求、强制复用各数据根已存设备号（风控红线）。
 // - mode: manual/auto 仅是执行标注，共用同一节奏器；本模块不做轮询定时器（UI 批次做）。
 //
@@ -14,15 +15,12 @@ import type {
   OmnicodeClaimHistoryEntry,
 } from "@zcode/shared";
 import {
-  parseOmnicodePreviewEnvelope,
-  fetchOmnicodeBillingEnvelope,
   buildOmnicodeBillingHeaders,
   buildOmnicodeClaimUrl,
-  buildOmnicodePreviewUrl,
+  fetchOmnicodeBillingEnvelope,
   mapOmnicodeClaimTransportReasonKey,
   parseOmnicodeClaimEnvelope,
   resolveOmnicodeBillingRequestPolicy,
-  type OmnicodePreviewEnvelope,
   type OmnicodeClaimEnvelope,
 } from "./billingClient.js";
 import {
@@ -30,6 +28,7 @@ import {
   readOmnicodeBillingCredentials,
   type OmnicodeAccountDataSnapshot,
 } from "./accountData.js";
+import { probeOmnicodeClaimSource } from "./accountDetection.js";
 import { appendOmnicodeClaimHistory, readOmnicodeConsoleUiState, writeOmnicodeConsoleUiState } from "./consoleUiState.js";
 import { runOmnicodeClaimQueue, type OmnicodeClaimJob } from "./claimPacer.js";
 import {
@@ -59,9 +58,9 @@ export interface OmnicodeClaimTargetResolution {
 }
 
 /**
- * 解析领取目标（IO 编排；永不抛穿）：逐 profile 读凭据快照 → policy 门 → preview →
- * 可领计划按 priority 取首张。preview 请求失败归该账号 skipped（omnicode.claim
- * 原因键），不阻断其余账号。
+ * 解析领取目标（IO 编排；永不抛穿）：逐 profile 读凭据快照 → policy 门 → 可领探测
+ *（probeOmnicodeClaimSource：touch 主源 + preview 回落，与检测同口径）。
+ * 探测失败归该账号 skipped（omnicode.claim 原因键），不阻断其余账号。
  */
 export async function resolveOmnicodeClaimTargets(options: {
   fetchImpl?: typeof fetch;
@@ -93,35 +92,20 @@ export async function resolveOmnicodeClaimTargets(options: {
         skippedAccounts.push({ profileId: profile.id, reasonKey: "omnicode.claim.failure.no_jwt" });
         continue;
       }
-      const headers = buildOmnicodeBillingHeaders(
-        {
-          jwtToken: credentials.jwtToken,
-          deviceMid: accountData.deviceMid,
-          platform: process.platform,
-          arch: process.arch,
-        },
-        { method: "GET" },
-      );
-      const result = await fetchOmnicodeBillingEnvelope<OmnicodePreviewEnvelope>(
-        options.fetchImpl ?? fetch,
-        buildOmnicodePreviewUrl(),
-        { method: "GET", headers },
-      );
-      if (!result.ok) {
-        skippedAccounts.push({
-          profileId: profile.id,
-          reasonKey: mapOmnicodeClaimTransportReasonKey(result.reason),
-        });
+      const probe = await probeOmnicodeClaimSource({
+        jwtToken: credentials.jwtToken,
+        deviceMid: accountData.deviceMid,
+        ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+      });
+      if (probe.state === "failed") {
+        skippedAccounts.push({ profileId: profile.id, reasonKey: probe.reasonKey });
         continue;
       }
-      const claimable = parseOmnicodePreviewEnvelope(result.envelope);
-      // 每账号一张：可领计划按 priority 降序取首张（preview 解析已排序）
-      const first = claimable[0];
-      if (!first) {
+      if (probe.state === "no_claim") {
         // 无可领计划：不算失败也不进历史（无事可做）
         continue;
       }
-      jobs.push({ profileId: profile.id, planId: first.planId });
+      jobs.push({ profileId: profile.id, planId: probe.planId });
     } catch {
       skippedAccounts.push({ profileId: profile.id, reasonKey: "omnicode.claim.failure.unknown" });
     }
