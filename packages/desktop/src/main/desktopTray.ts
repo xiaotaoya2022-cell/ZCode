@@ -46,6 +46,13 @@ export function createDesktopTray(options: {
    * 「打开」文案 = 「打开 OmniCode」。
    */
   omnicodeRunningCount?: () => number;
+  /**
+   * [OmniCode] 2026-11-28 用户反馈④：实例进程 tooltip 覆盖（最高优先）。实例托盘
+   * （close-to-tray 依赖图标存在）此前 tooltip=官方 "ZCode"，与任务栏/管理器托盘
+   * 无法区分——实例传 `ZCode [<实例名>]`（与任务栏标题同源可辨）。仅实例进程注入
+   * （管理器走 omnicodeRunningCount 分支；官方 flavor 不传原样）。
+   */
+  tooltipOverride?: () => string | undefined;
 }) {
   const platform = options.platform ?? process.platform;
   // Linux 驻留能力由 createCloseToTrayCapabilityMonitor 探测决定（spec：
@@ -86,12 +93,19 @@ export function createDesktopTray(options: {
     //（官方 flavor 与 omnicode 实例进程）保持官方 "ZCode" 原样。
     const isOmnicodeManagerTray =
       ZCODE_PRODUCT_FLAVOR === "omnicode" && typeof options.omnicodeRunningCount === "function";
+    // [OmniCode] 2026-11-28：实例覆盖最高优先（ZCode [实例名]），其次管理器品牌
+    // tooltip，最后官方原样。
+    const instanceTooltip = options.tooltipOverride?.()?.trim();
     desktopTray?.setToolTip(
-      isOmnicodeManagerTray
-        ? formatDesktopMenuMessage(options.getLocale(), desktopMenuMessageIds.trayTooltipOmniCodeRunning, {
-            count: options.omnicodeRunningCount!(),
-          })
-        : getLabel(desktopMenuMessageIds.trayTooltip),
+      instanceTooltip
+        ? instanceTooltip
+        : isOmnicodeManagerTray
+          ? formatDesktopMenuMessage(
+              options.getLocale(),
+              desktopMenuMessageIds.trayTooltipOmniCodeRunning,
+              { count: options.omnicodeRunningCount!() },
+            )
+          : getLabel(desktopMenuMessageIds.trayTooltip),
     );
     // [OmniCode] 批次2.5 X3：实例快捷菜单区（运行实例/启动全部/停止全部）插在「打开」
     // 之后；提供者返回空数组时完全无痕（官方 flavor 不注入）。

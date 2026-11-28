@@ -16,6 +16,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import process from "node:process";
 import { app, dialog, screen } from "electron";
 import {
@@ -23,6 +24,7 @@ import {
   clearProfileLaunched,
   createOmnicodeProfile,
   getOmnicodeProfileDir,
+  getOmnicodeConsoleDataBaseDir,
   getOmnicodeProfileRecord,
   listOmnicodeProfiles,
   recordProfileLaunched,
@@ -157,6 +159,24 @@ export async function reconcileOmnicodeRunningInstances(): Promise<void> {
  * 批次2 B2-1（T4）：options.openWorkspacePath 供"新建并打开"把工作区目录经 argv
  * 下发（实例就绪后走自身正常打开流程，尊重工作区锁）；常规启动不带该旗标。
  */
+/**
+ * [OmniCode] 2026-11-28 用户反馈③：spawn 前读 console-ui 设备心跳开关（缺省开）。
+ * 读失败 fail-open（隐私回退开关显式关一次即持久落盘）；同步小文件读（console-ui.json
+ * 数 KB），spawn 链本身已是同步段。
+ */
+function readDeviceHeartbeatEnabledForSpawn(): boolean {
+  try {
+    const raw = readFileSync(
+      join(getOmnicodeConsoleDataBaseDir(), "console-ui.json"),
+      "utf8",
+    );
+    const state = JSON.parse(raw) as { deviceHeartbeatEnabled?: unknown };
+    return state.deviceHeartbeatEnabled !== false;
+  } catch {
+    return true;
+  }
+}
+
 export function launchOmnicodeProfile(
   profileId: string,
   options?: { openWorkspacePath?: string },
@@ -259,7 +279,19 @@ async function doLaunch(
     // 没有文件握手的读写窗口，攻击面小于一次性文件方案（spec D6）。
     env: {
       ...process.env,
+      // [OmniCode] 2026-11-28 真机修复（用户反馈"工作区占用恒 0"根因）：管理器进程
+      // 设置的 OMNICODE_CONSOLE_MODE=1 经 ...process.env 泄漏进实例 → Host utilityProcess
+      // 继承 → services/node.ts omnicodeConsoleMode=true → 工作区锁协调器与打开锁守卫
+      // 全部跳过装配（真机实证：实例开着工作区在跑会话，shared/workspace-locks 目录
+      // 0 个锁文件）。显式清零恢复实例语义（"" !== "1"，该键只在 isOmnicodeManagerMain
+      // 分支设 ??= "1"，清零不会被回填）。
+      OMNICODE_CONSOLE_MODE: "",
       OMNICODE_PROFILE_ID: profileId,
+      // [OmniCode] 2026-11-28 用户反馈③：设备心跳开关（console-ui 缺省开；显式关才注入
+      // 0）。telemetryCore 心跳入口读此 env 短路——投放资格随开关关停，重启实例生效。
+      ...(readDeviceHeartbeatEnabledForSpawn() === false
+        ? { OMNICODE_HEARTBEAT_ENABLED: "0" }
+        : {}),
       // [OmniCode] B2 评审修复（C5）：实例显示名随身份同源注入（spawn 时管理器已知名）——
       // 实例 bootstrap 自派生时读同一 profile.json，双保险同值；锁获取时写进锁文件。
       OMNICODE_PROFILE_NAME: record?.name?.trim() ?? "",

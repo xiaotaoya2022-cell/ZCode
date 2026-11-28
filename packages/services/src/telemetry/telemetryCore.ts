@@ -619,6 +619,9 @@ export function createTelemetryCore(dependencies: TelemetryCoreDependencies = {}
 
     reportAppLaunch(context: TelemetryRendererContext): Promise<void> {
       // [OmniCode] 设备级心跳（已放行）：走心跳专用端点，与行为埋点禁用互不影响。
+      // 用户反馈③：OMNICODE_HEARTBEAT_ENABLED=0（设置页心跳开关显式关，spawn 注入）
+      // → 静默短路（本地标记照旧不写——入口级短路语义一致）。
+      if (process.env.OMNICODE_HEARTBEAT_ENABLED === "0") return Promise.resolve();
       return trackReport(
         (async () => {
           const eventId = randomUUID();
@@ -645,7 +648,8 @@ export function createTelemetryCore(dependencies: TelemetryCoreDependencies = {}
 
     reportAppDailyActive(context: TelemetryRendererContext): Promise<void> {
       // [OmniCode] 设备级心跳（已放行）：走心跳专用端点；lastDailyActiveDate 仅在
-      // 真实发送成功后写入（telemetry-state 本地标记恢复真实语义）。
+      // 真实发送成功后写入（telemetry-state 本地标记恢复真实语义）。开关关 → 短路。
+      if (process.env.OMNICODE_HEARTBEAT_ENABLED === "0") return Promise.resolve();
       return trackReport(
         (async () => {
           const timestamp = now();

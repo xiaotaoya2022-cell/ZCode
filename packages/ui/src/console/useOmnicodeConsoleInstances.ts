@@ -35,18 +35,27 @@ function requireOmnicodeBridgeMethod<TResult>(
   return method as (...args: unknown[]) => Promise<TResult>;
 }
 
+// [OmniCode] 2026-11-28 用户反馈⑤：模块级快照（上次成功列表；null = 从未成功读取）。
+// 回管理器先渲染快照再后台刷新——不再白屏"正在读取实例列表"。缓存跨挂载存活，实例
+// 增删由 refresh 覆盖（缓存只是首帧投影，不是事实源）。
+let lastProfilesSnapshot: OmnicodeProfileSummaryInfo[] | null = null;
+
 export function useOmnicodeConsoleInstances() {
   const { intl } = useZCodeIntl();
   const platform = usePlatform();
   const requestConfirmation = useConfirmDialogStore((state) => state.requestConfirmation);
-  const [profiles, setProfiles] = useState<OmnicodeProfileSummaryInfo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [profiles, setProfiles] = useState<OmnicodeProfileSummaryInfo[]>(
+    () => lastProfilesSnapshot ?? [],
+  );
+  const [loading, setLoading] = useState(() => lastProfilesSnapshot === null);
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
       const result = await platform.listOmnicodeProfiles?.();
-      setProfiles(result?.profiles ?? []);
+      const next = result?.profiles ?? [];
+      lastProfilesSnapshot = next;
+      setProfiles(next);
     } catch (error) {
       logger.warn("[omnicode] 读取 Profile 列表失败", {
         error: error instanceof Error ? error.message : String(error),

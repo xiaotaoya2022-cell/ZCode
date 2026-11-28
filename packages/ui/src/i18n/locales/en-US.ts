@@ -4379,6 +4379,10 @@ const enUS: Record<string, string> = {
   "settings.omnicodeAutomation.autoClaimToggle": "Auto-claim daily free quota",
   "settings.omnicodeAutomation.autoClaimDescription":
     "Claims the daily free quota automatically at a risk-control-friendly pace; each account uses its own credentials and device ID.",
+  "settings.omnicodeAutomation.eggAutoPollToggle": "Auto quota detection",
+  "settings.omnicodeAutomation.eggAutoPollDescription": "Detect claimable quota every 10 minutes while the manager is visible (no manual refresh needed). When off, only startup and manual detection remain.",
+  "settings.omnicodeAutomation.heartbeatToggle": "Device heartbeat reporting",
+  "settings.omnicodeAutomation.heartbeatDescription": "One device-level heartbeat per day/launch (the eligibility signal for free-quota campaigns; no usage behavior data). Free-quota campaigns may stop appearing when off; restart instances to apply.",
   "settings.omnicodeAutomation.detectNow": "Detect once now",
   "settings.omnicodeAutomation.detecting": "Detecting…",
   "settings.omnicodeAutomation.detectNowDescription":

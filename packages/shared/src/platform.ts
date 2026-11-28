@@ -691,6 +691,17 @@ export interface OmnicodeConsoleUiState {
    * 旧档缺省 = 回退 seq 序。
    */
   customOrder?: string[];
+  /**
+   * [OmniCode] 2026-11-28 用户反馈①配套：鸡蛋检测自动轮询开关（管理器可见时每
+   * 10 分钟一拍；缺省 true=开）。仅管理器 UI 检测节奏，不含 main 侧 30min 自动领取。
+   */
+  eggAutoPollEnabled?: boolean;
+  /**
+   * [OmniCode] 2026-11-28 用户反馈③：设备心跳开关（app_launch/app_daily_active 两条
+   * 设备级事件的隐私回退权；缺省 true=开=鸡蛋投放资格）。spawn 时注入实例 env
+   * OMNICODE_HEARTBEAT_ENABLED，重启实例后生效。
+   */
+  deviceHeartbeatEnabled?: boolean;
 }
 
 /** UI 状态部分更新（字段缺省=不变；非法值在 main 侧归一后落盘）。 */
@@ -723,6 +734,8 @@ export interface OmnicodeConsoleUiStatePatch {
    * 空数组 = 清空回 seq 兜底序）。逐项归一同 sortMode。
    */
   customOrder?: string[];
+  eggAutoPollEnabled?: boolean;
+  deviceHeartbeatEnabled?: boolean;
 }
 
 /**
@@ -1079,7 +1092,7 @@ export interface OmnicodeAccountDetectResult {
 /** 检测入参（预留；当前无参数，保持与快照通道同构的入参形状）。 */
 export interface OmnicodeAccountDetectRequest {
   /** 预留扩展位。 */
-  reason?: "startup" | "manual";
+  reason?: "startup" | "manual" | "auto-poll";
 }
 
 export function createOpenInEditorRemoteTarget(

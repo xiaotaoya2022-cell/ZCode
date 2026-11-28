@@ -2828,6 +2828,17 @@ app.whenReady().then(async () => {
           omnicodeRunningCount: getOmnicodeTrayRunningCount,
         }
       : {}),
+    // [OmniCode] 2026-11-28 用户反馈④：实例进程 tooltip 带实例名（ZCode [2025] 形态，
+    // 与任务栏标题同源）——托盘多图标可辨。管理器走上方 omnicodeRunningCount 分支，
+    // 官方 flavor 不传原样。OMNICODE_PROFILE_NAME 由 profileBootstrap/spawn 注入。
+    ...(!isOmnicodeManagerMain && ZCODE_PRODUCT_FLAVOR === "omnicode"
+      ? {
+          tooltipOverride: () => {
+            const instanceName = process.env.OMNICODE_PROFILE_NAME?.trim() ?? "";
+            return instanceName ? `ZCode [${instanceName}]` : undefined;
+          },
+        }
+      : {}),
   };
   if (isOmnicodeManagerMain) {
     // [OmniCode] 批次2.5 X3：托盘实例区装配（名称缓存 + 运行态订阅去抖重建；托盘创建

@@ -8651,6 +8651,10 @@ const koKR: Record<string, string> = {
   "console.maintenance.sessionDbBackupDone": "세션 DB 백업 완료: {path}",
   "console.maintenance.sessionDbBackupFailed": "세션 DB 백업에 실패했습니다.",
   "console.maintenance.actionFailed": "작업에 실패했습니다. 다시 시도하세요.",
+  "settings.omnicodeAutomation.eggAutoPollToggle": "쿼터 자동 감지",
+  "settings.omnicodeAutomation.eggAutoPollDescription": "관리자가 보이는 동안 10분마다 자동 감지합니다(수동 새로고침 불필요). 끄면 시작 시 감지와 수동 감지만 유지됩니다.",
+  "settings.omnicodeAutomation.heartbeatToggle": "장치 하트비트 보고",
+  "settings.omnicodeAutomation.heartbeatDescription": "하루/시작당 하나의 장치 수준 하트비트(무료 쿼터 캠페인 자격 신호, 사용 행동 데이터 없음). 끄면 캠페인이 나타나지 않을 수 있음; 인스턴스 재시작 후 적용.",
   "console.dragSortTitle": "드래그하여 인스턴스 순서 변경",
   "console.instanceFilterPlaceholder": "인스턴스 필터(이름/번호)",
   // [OmniCode] D12 인수 흐름: 관찰자 배너 버튼 + 결과 토스트 + 보유자 확인 대화상자（五語慣例）

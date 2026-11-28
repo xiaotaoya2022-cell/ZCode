@@ -108,7 +108,7 @@ export function EggClaimOverlay() {
   }, []);
 
   const runDetect = useCallback(
-    async (reason: "startup" | "manual") => {
+    async (reason: "startup" | "manual" | "auto-poll") => {
       setDetecting(true);
       try {
         const result = await platform.getOmnicodeAccountDetect?.({ reason });
@@ -154,6 +154,41 @@ export function EggClaimOverlay() {
         .catch(() => undefined);
     })();
   }, [platform, refreshAutoBadgeFromHistory, runDetect]);
+
+  // ─── [OmniCode] 2026-11-28 用户反馈①：额度检测自动轮询（管理器可见时每 10 分钟一拍；
+  // 不可见暂停、立即可见即补拍）。此前只有挂载一次+手动检测——投放到达后浮层不动，
+  // 用户必须手动「重新检测」。Shared 检测入口单飞防重入（并发触发共享在途）；10 分钟
+  // 与 main 侧 30min 自动领取轮询错峰，仍是低频查询级（红线：不循环重试）。
+  useEffect(() => {
+    // 用户反馈①配套：设置页「额度自动检测」开关（console-ui 缺省开）。关闭 → 不启动
+    // 定时器（保留挂载/手动检测）。开关切换需重挂载浮层（下次回管理器生效）——低频
+    // 设置不值得拉一条实时订阅链。
+    let cancelled = false;
+    let cleanup: (() => void) | undefined;
+    void platform
+      .getOmnicodeConsoleUiState?.()
+      .then((state) => {
+        if (cancelled || state.eggAutoPollEnabled === false) return;
+        const POLL_INTERVAL_MS = 10 * 60 * 1000;
+        const timer = setInterval(() => {
+          if (document.visibilityState !== "visible") return;
+          void runDetect("auto-poll");
+        }, POLL_INTERVAL_MS);
+        const onVisible = (): void => {
+          if (document.visibilityState === "visible") void runDetect("auto-poll");
+        };
+        document.addEventListener("visibilitychange", onVisible);
+        cleanup = () => {
+          clearInterval(timer);
+          document.removeEventListener("visibilitychange", onVisible);
+        };
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      cleanup?.();
+    };
+  }, [platform, runDetect]);
 
   // ─── 领取事件订阅（manualRunId 区分本浮层发起的 run 与 main 自动领取 run） ───
   useEffect(() => {

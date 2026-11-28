@@ -8858,6 +8858,10 @@ const jaJP: Record<string, string> = {
   "console.maintenance.sessionDbBackupDone": "セッション DB をバックアップしました：{path}",
   "console.maintenance.sessionDbBackupFailed": "セッション DB のバックアップに失敗しました。",
   "console.maintenance.actionFailed": "操作に失敗しました。再試行してください。",
+  "settings.omnicodeAutomation.eggAutoPollToggle": "残量自動検出",
+  "settings.omnicodeAutomation.eggAutoPollDescription": "マネージャー表示中は 10 分ごとに自動検出します（手動更新不要）。オフにすると起動時と手動検出のみ。",
+  "settings.omnicodeAutomation.heartbeatToggle": "デバイスハートビート報告",
+  "settings.omnicodeAutomation.heartbeatDescription": "1 日/起動ごとに 1 件のデバイスレベルハートビート（無料クーポン配信の資格シグナル、使用行動データは含まない）。オフで配信が表示されなくなる可能性；インスタンス再起動で反映。",
   "console.dragSortTitle": "ドラッグでインスタンスを並べ替え",
   "console.instanceFilterPlaceholder": "インスタンス絞り込み（名前/番号）",
   // [OmniCode] D12 接管流：观察者横幅按钮 + 回执トースト + 保持側確認ダイアログ（五語慣例）

@@ -4112,6 +4112,10 @@ const zhCN: Record<string, string> = {
   "settings.omnicodeAutomation.autoClaimToggle": "自动领取每日免费额度",
   "settings.omnicodeAutomation.autoClaimDescription":
     "检测到每日免费额度时以低风控节奏自动领取；各账号使用自己的凭据与设备号。",
+  "settings.omnicodeAutomation.eggAutoPollToggle": "额度自动检测",
+  "settings.omnicodeAutomation.eggAutoPollDescription": "管理器可见时每 10 分钟自动检测一次可领额度（无需手动刷新）。关闭后仅保留启动检测与手动检测。",
+  "settings.omnicodeAutomation.heartbeatToggle": "设备心跳上报",
+  "settings.omnicodeAutomation.heartbeatDescription": "每日/启动各一条设备级心跳（官方投放免费额度的资格信号，无任何使用行为数据）。关闭后免费额度投放可能不再出现；重启实例后生效。",
   "settings.omnicodeAutomation.detectNow": "手动检测一次",
   "settings.omnicodeAutomation.detecting": "检测中…",
   "settings.omnicodeAutomation.detectNowDescription":

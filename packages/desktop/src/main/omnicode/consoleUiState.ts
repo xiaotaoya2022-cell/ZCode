@@ -80,6 +80,14 @@ export function mergeOmnicodeConsoleUiState(
   if (typeof patch.autoClaimEnabled === "boolean") {
     next.autoClaimEnabled = patch.autoClaimEnabled;
   }
+  // [OmniCode] 2026-11-28 用户反馈①/③：检测自动轮询与设备心跳开关（缺省开；只有
+  // 显式布尔才写入，旧档被动缺省=开语义不变）。
+  if (typeof patch.eggAutoPollEnabled === "boolean") {
+    next.eggAutoPollEnabled = patch.eggAutoPollEnabled;
+  }
+  if (typeof patch.deviceHeartbeatEnabled === "boolean") {
+    next.deviceHeartbeatEnabled = patch.deviceHeartbeatEnabled;
+  }
   if (patch.claimHistory !== undefined) {
     const normalized = normalizeOmnicodeClaimHistory(patch.claimHistory);
     // 显式携带 claimHistory 才更新（undefined = 不变）；空数组 = 清空历史

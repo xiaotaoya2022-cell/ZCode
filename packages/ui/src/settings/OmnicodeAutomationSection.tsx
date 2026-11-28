@@ -68,6 +68,53 @@ export function OmnicodeAutomationSection() {
       .catch(() => setUnavailable(true));
   }, [platform]);
 
+  // [OmniCode] 2026-11-28：两新开关的 toggle（与 autoClaim 同形态；写链同 UiStateSet）。
+  const handleToggleEggAutoPoll = useCallback(
+    (checked: boolean) => {
+      setToggling(true);
+      void (async () => {
+        try {
+          const next = await platform.setOmnicodeConsoleUiState?.({ eggAutoPollEnabled: checked });
+          if (next) setUiState(next);
+        } catch (error) {
+          logger.warn("[omnicode] 检测自动轮询开关写入失败", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          toast(intl.formatMessage({ id: "settings.omnicodeProfiles.actionFailed" }), {
+            variant: "warning",
+          });
+        } finally {
+          setToggling(false);
+        }
+      })();
+    },
+    [platform, intl],
+  );
+
+  const handleToggleDeviceHeartbeat = useCallback(
+    (checked: boolean) => {
+      setToggling(true);
+      void (async () => {
+        try {
+          const next = await platform.setOmnicodeConsoleUiState?.({
+            deviceHeartbeatEnabled: checked,
+          });
+          if (next) setUiState(next);
+        } catch (error) {
+          logger.warn("[omnicode] 设备心跳开关写入失败", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          toast(intl.formatMessage({ id: "settings.omnicodeProfiles.actionFailed" }), {
+            variant: "warning",
+          });
+        } finally {
+          setToggling(false);
+        }
+      })();
+    },
+    [platform, intl],
+  );
+
   const handleToggleAutoClaim = useCallback(
     (checked: boolean) => {
       setToggling(true);
@@ -152,6 +199,9 @@ export function OmnicodeAutomationSection() {
   }
 
   const autoClaimEnabled = uiState?.autoClaimEnabled === true;
+  // [OmniCode] 2026-11-28 用户反馈①/③：检测自动轮询（缺省开）与设备心跳（缺省开）。
+  const eggAutoPollEnabled = uiState?.eggAutoPollEnabled !== false;
+  const deviceHeartbeatEnabled = uiState?.deviceHeartbeatEnabled !== false;
   const history = uiState?.claimHistory ?? [];
 
   return (
@@ -183,6 +233,36 @@ export function OmnicodeAutomationSection() {
                 ? intl.formatMessage({ id: "settings.omnicodeAutomation.detecting" })
                 : intl.formatMessage({ id: "settings.omnicodeAutomation.detectNow" })}
             </Button>
+          }
+        />
+        {/* [OmniCode] 2026-11-28 用户反馈①：检测自动轮询（缺省开；管理器可见时 10min 一拍）。 */}
+        <SettingsRow
+          label={intl.formatMessage({ id: "settings.omnicodeAutomation.eggAutoPollToggle" })}
+          description={intl.formatMessage({
+            id: "settings.omnicodeAutomation.eggAutoPollDescription",
+          })}
+          control={
+            <Switch
+              aria-label={intl.formatMessage({ id: "settings.omnicodeAutomation.eggAutoPollToggle" })}
+              checked={eggAutoPollEnabled}
+              disabled={toggling || uiState === null}
+              onCheckedChange={handleToggleEggAutoPoll}
+            />
+          }
+        />
+        {/* [OmniCode] 2026-11-28 用户反馈③：设备心跳开关（隐私回退权；重启实例生效）。 */}
+        <SettingsRow
+          label={intl.formatMessage({ id: "settings.omnicodeAutomation.heartbeatToggle" })}
+          description={intl.formatMessage({
+            id: "settings.omnicodeAutomation.heartbeatDescription",
+          })}
+          control={
+            <Switch
+              aria-label={intl.formatMessage({ id: "settings.omnicodeAutomation.heartbeatToggle" })}
+              checked={deviceHeartbeatEnabled}
+              disabled={toggling || uiState === null}
+              onCheckedChange={handleToggleDeviceHeartbeat}
+            />
           }
         />
       </SettingsGroupCard>

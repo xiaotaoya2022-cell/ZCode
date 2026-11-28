@@ -8822,6 +8822,10 @@ const ruRU: Record<string, string> = {
   "console.maintenance.sessionDbBackupDone": "Копия базы сессий создана: {path}",
   "console.maintenance.sessionDbBackupFailed": "Не удалось создать копию базы сессий.",
   "console.maintenance.actionFailed": "Действие не удалось. Повторите.",
+  "settings.omnicodeAutomation.eggAutoPollToggle": "Автопроверка квоты",
+  "settings.omnicodeAutomation.eggAutoPollDescription": "Автопроверка каждые 10 минут при видимом менеджере (без ручного обновления). При отключении остаются только проверка при запуске и вручную.",
+  "settings.omnicodeAutomation.heartbeatToggle": "Отчёт пульса устройства",
+  "settings.omnicodeAutomation.heartbeatDescription": "Одно событие уровня устройства в день/запуск (сигнал права на бесплатные квоты, без данных о действиях). При отключении кампании могут исчезнуть; вступает после перезапуска экземпляров.",
   "console.dragSortTitle": "Перетащите, чтобы изменить порядок",
   "console.instanceFilterPlaceholder": "Фильтр экземпляров (имя/№)",
   // [OmniCode] D12 поток перехвата: кнопка баннера наблюдателя + тосты результатов + диалог подтверждения владельца（五語慣例）
